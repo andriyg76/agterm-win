@@ -5,6 +5,7 @@ import agtermCore
 
 // One window: a sidebar and one xterm.js terminal, its program under ConPTY. Usage:
 //   agterm-win.exe [--wsl <distribution>]   agterm-server's sessions there; the default distribution is Ubuntu
+//                  [--install-server]       first install or upgrade agterm-server there to the release AGTERM_VERSION names
 //   agterm-win.exe --local [<name>]         local zmx session <name> (default agterm), kept when the window closes
 //   agterm-win.exe -- <command line>        one local program instead, no sidebar
 
@@ -48,6 +49,7 @@ private let exitMessage = UINT(WM_APP + 2)
 final class App {
     let remote: RemoteWindow?
     let localCommand: String?
+    let installServer: Bool
     var window: HWND?
     private var console: PseudoConsole?
     private var generation = 0
@@ -58,9 +60,10 @@ final class App {
     nonisolated(unsafe) private var pending = Data()
     nonisolated(unsafe) private var exitCode: (generation: Int, code: DWORD)?
 
-    init(remote: RemoteWindow?, localCommand: String?) {
+    init(remote: RemoteWindow?, localCommand: String?, installServer: Bool = false) {
         self.remote = remote
         self.localCommand = localCommand
+        self.installServer = installServer
         remote?.changed = { [weak self] in self?.catalogChanged() }
     }
 
@@ -112,6 +115,8 @@ final class App {
             pageReady = true
             if let localCommand {
                 start(localCommand)
+            } else if installServer, let remote {
+                install(remote)
             } else {
                 catalogChanged()
                 remote?.start()
@@ -144,7 +149,32 @@ final class App {
         console = nil
     }
 
-    private func catalogChanged() {
+    /// install installs agterm-server in the window's distribution off the UI thread, its progress shown in the
+    /// terminal, and opens the catalog afterwards whatever the outcome: a server that is still missing or older shows
+    /// as the window's notice, as it does without the flag.
+    private func install(_ remote: RemoteWindow) {
+        let host = remote.host
+        let report: @Sendable (String) -> Void = { text in
+            log("server install: \(text)")
+            DispatchQueue.main.async { MainActor.assumeIsolated { app.write(text.replacingOccurrences(of: "\n", with: "\r\n") + "\r\n") } }
+        }
+        DispatchQueue.global().async {
+            do {
+                let release = try serverRelease()
+                let code = try host.installServer(version: release.version, checksums: release.checksums, progress: report)
+                switch code {
+                case 0: report("installed agterm-server \(release.version) in WSL \(host.distribution)")
+                case 3: report("installed agterm-server \(release.version) in WSL \(host.distribution); the agent hooks are incomplete")
+                default: report("\u{1b}[31magterm-server's install.sh exited \(code)\u{1b}[0m")
+                }
+            } catch {
+                report("\u{1b}[31mserver install failed: \(error)\u{1b}[0m")
+            }
+            DispatchQueue.main.async { MainActor.assumeIsolated { app.catalogChanged(); remote.start() } }
+        }
+    }
+
+    func catalogChanged() {
         guard pageReady, let remote else { return }
         if selected == nil || remote.session(selected!) == nil,
            let first = remote.store.workspaces.lazy.flatMap(\.sessions).first(where: { !$0.ended }) {
@@ -194,25 +224,39 @@ final class App {
         }
     }
 
-    private func write(_ text: String) {
+    func write(_ text: String) {
         post(["t": "out", "d": Data(text.utf8).base64EncodedString()])
     }
 }
 
-/// localZmx is the zmx.exe beside agterm-win.exe, else the one scripts/fetch-zmx.ps1 built into vendor/zmx.
-private func localZmx() -> String {
-    let beside = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("zmx.exe")
-    if FileManager.default.fileExists(atPath: beside.path) { return beside.path }
-    return URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("vendor/zmx/zmx.exe").path
-}
-
-/// xtermAssets is the xterm folder beside agterm-win.exe, else vendor/xterm of the source tree.
-private func xtermAssets() -> URL {
-    let beside = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("xterm")
+/// bundled is `name` beside agterm-win.exe, as stage.ps1 lays a package out, else `source` in the agterm-windows tree.
+private func bundled(_ name: String, source: String) -> URL {
+    let beside = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent(name)
     if FileManager.default.fileExists(atPath: beside.path) { return beside }
     return URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("vendor/xterm")
+        .appendingPathComponent(source)
+}
+
+/// localZmx is the zmx.exe stage.ps1 put in zmx\<rev>, the folder zmx\current names, else the source tree's.
+private func localZmx() -> String {
+    let packaged = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("zmx")
+    if let current = try? String(contentsOf: packaged.appendingPathComponent("current"), encoding: .utf8),
+       let rev = current.split(whereSeparator: \.isNewline).first {
+        return packaged.appendingPathComponent(String(rev)).appendingPathComponent("zmx.exe").path
+    }
+    return bundled("zmx.exe", source: "vendor/zmx/zmx.exe").path
+}
+
+private func xtermAssets() -> URL { bundled("xterm", source: "vendor/xterm") }
+
+/// serverRelease is the agterm release this build is locked to and the sha256 scripts/fetch-server.ps1 recorded for
+/// its server tarballs.
+private func serverRelease() throws -> (version: String, checksums: String) {
+    let version = try String(contentsOf: bundled("AGTERM_VERSION", source: "AGTERM_VERSION"), encoding: .utf8)
+    let checksums = try String(contentsOf: bundled(ServerInstall.checksumFile, source: "vendor/server/\(ServerInstall.checksumFile)"),
+                               encoding: .utf8)
+    // a checkout with core.autocrlf gives AGTERM_VERSION a CRLF, which is one newline Character
+    return (version.split(whereSeparator: \.isNewline).first.map(String.init) ?? "", checksums)
 }
 
 // Swift's main actor is the main dispatch queue, which nothing drains while a Win32 message loop blocks; these are
@@ -261,7 +305,8 @@ MainActor.assumeIsolated {
     } else {
         let flag = arguments.firstIndex(of: "--wsl")
         let distribution = flag.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? "Ubuntu"
-        app = App(remote: RemoteWindow(host: WSLHost(distribution: distribution), stateDirectory: stateDirectory), localCommand: nil)
+        app = App(remote: RemoteWindow(host: WSLHost(distribution: distribution), stateDirectory: stateDirectory), localCommand: nil,
+                  installServer: arguments.contains("--install-server"))
     }
 
     wv_init_process()

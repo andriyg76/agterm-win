@@ -1,6 +1,7 @@
 #include "WebView2Shim.h"
 
 #include <windows.h>
+#include <bcrypt.h>
 #include <wrl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -120,4 +121,31 @@ extern "C" void wv_focus(void) {
 
 extern "C" void wv_post_string(const uint16_t *message) {
     if (webview) webview->PostWebMessageAsString(wide(message));
+}
+
+extern "C" int32_t sha256_file(const uint16_t *path, uint8_t *digest) {
+    HANDLE file = CreateFileW(wide(path), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return static_cast<int32_t>(GetLastError());
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    NTSTATUS status = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
+    if (BCRYPT_SUCCESS(status)) status = BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0);
+    static unsigned char buffer[1 << 16];
+    DWORD read = 0;
+    int32_t failure = 0;
+    while (BCRYPT_SUCCESS(status)) {
+        if (!ReadFile(file, buffer, sizeof buffer, &read, nullptr)) {
+            failure = static_cast<int32_t>(GetLastError());
+            break;
+        }
+        if (read == 0) {
+            status = BCryptFinishHash(hash, digest, 32, 0);
+            break;
+        }
+        status = BCryptHashData(hash, buffer, read, 0);
+    }
+    if (hash) BCryptDestroyHash(hash);
+    if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+    CloseHandle(file);
+    return failure != 0 ? failure : BCRYPT_SUCCESS(status) ? 0 : static_cast<int32_t>(status);
 }
