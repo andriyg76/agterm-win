@@ -10,6 +10,8 @@ struct NativeSettingsTests {
         settings.fontPoints = 14
         settings.frame = .init(left: 10, top: 20, right: 1210, bottom: 820)
         settings.maximized = true
+        settings.localSessions = [.init(title: "build", commandLine: "cmd.exe"), .init(title: "WSL Ubuntu", commandLine: "wsl.exe -d Ubuntu --cd ~")]
+        settings.selectedLocal = 1
         try settings.save(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         #expect(NativeSettings.load(from: url) == settings)
@@ -35,5 +37,14 @@ struct NativeSettingsTests {
         defer { try? FileManager.default.removeItem(at: url) }
         let settings = NativeSettings.load(from: url)
         #expect(settings.fontPoints == 13 && settings.frame == nil && !settings.maximized)
+    }
+
+    @Test func localSessionsDropBlankCommandsAndAStaleSelection() throws {
+        try Data(#"{"localSessions": [{"title": "a", "commandLine": ""}, {"title": "b", "commandLine": "cmd.exe"}], "selectedLocal": 1}"#.utf8)
+            .write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let settings = NativeSettings.load(from: url)
+        #expect(settings.localSessions == [.init(title: "b", commandLine: "cmd.exe")])
+        #expect(settings.selectedLocal == nil)
     }
 }

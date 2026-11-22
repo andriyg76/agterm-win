@@ -16,6 +16,7 @@ final class NativeShell {
     private struct LocalSession {
         let id = Foundation.UUID()
         var title: String
+        let commandLine: String
         let terminal: NativeTerminal
         var exited = false
         var attention = false
@@ -94,6 +95,7 @@ final class NativeShell {
         remoteTerminal = makeTerminal()
         restorePlacement()
         layout()
+        restoreLocals()
         discoverProfiles(then: requested)
         remote.changed = { [weak self] in self?.catalogChanged() }
         catalogChanged()
@@ -157,6 +159,9 @@ final class NativeShell {
             settings.frame = .init(left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom)
             settings.maximized = placement.showCmd == UINT(SW_SHOWMAXIMIZED)
         }
+        let running = locals.filter { !$0.exited }
+        settings.localSessions = running.map { .init(title: $0.title, commandLine: $0.commandLine) }
+        settings.selectedLocal = running.firstIndex { $0.id == selected }
         saveSettings()
     }
 
@@ -229,16 +234,29 @@ final class NativeShell {
 
     private func newSession(_ profile: LaunchProfile) {
         let siblings = locals.filter { $0.title.hasPrefix(profile.name) }.count
-        let session = LocalSession(title: siblings == 0 ? profile.name : "\(profile.name) \(siblings + 1)", terminal: makeTerminal())
+        startLocal(title: siblings == 0 ? profile.name : "\(profile.name) \(siblings + 1)", commandLine: profile.commandLine)
+    }
+
+    /// restoreLocals starts again the local sessions open at the last quit, fresh programs under their names.
+    private func restoreLocals() {
+        let saved = settings.localSessions
+        guard !saved.isEmpty else { return }
+        for session in saved { startLocal(title: session.title, commandLine: session.commandLine, selecting: false) }
+        log("native shell: restored \(saved.count) local session(s)")
+        if let index = settings.selectedLocal { select(locals[index].id) }
+    }
+
+    private func startLocal(title: String, commandLine: String, selecting: Bool = true) {
+        let session = LocalSession(title: title, commandLine: commandLine, terminal: makeTerminal())
         let id = session.id
         session.terminal.onExit = { [unowned self] in localExited(id) }
         session.terminal.onAttention = { [unowned self] in localAttention(id) }
         locals.append(session)
         layout()
-        log("native shell: new \(profile.name) session [\(id)]")
-        session.terminal.start(profile.commandLine, directory: ProcessInfo.processInfo.environment["USERPROFILE"])
+        log("native shell: new \(title) session [\(id)]")
+        session.terminal.start(commandLine, directory: ProcessInfo.processInfo.environment["USERPROFILE"])
         rebuild()
-        select(id)
+        if selecting { select(id) }
     }
 
     private func localExited(_ id: Foundation.UUID) {
