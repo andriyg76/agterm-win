@@ -513,6 +513,18 @@ extern "C" void nt_paint(nt_terminal *terminal) {
         }
         terminal->drawRow(cells, columns, origin, origin + row * terminal->cellHeight, nullptr, line);
     }
+    if (scroll > 0) {
+        // a thumb on the right edge while the view is back in the scrollback; at the live screen it is gone
+        D2D1_SIZE_F size = target->GetSize();
+        float total = static_cast<float>(info.historyCount + rows), top = static_cast<float>(info.historyCount - scroll);
+        float height = std::max(size.height * rows / total, 24.0f);
+        float y = std::min(size.height * top / total, size.height - height), width = 6, inset = 2;
+        D2D1_COLOR_F thumb = color(terminal->foreground);
+        thumb.a = 0.35f;
+        terminal->brush->SetColor(thumb);
+        target->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(size.width - width - inset, y + inset, size.width - inset, y + height - inset),
+                                                       width / 2, width / 2), terminal->brush.Get());
+    }
     if (scroll == 0 && info.cursorVisible && info.cursorRow < rows && columns > 0) {
         uint32_t column = std::min(info.cursorColumn, columns - 1);
         const Cell *cell = &terminal->grid[static_cast<size_t>(info.cursorRow) * columns + column];
