@@ -61,3 +61,21 @@ extern "C" int32_t nt_track_menu(void *menu, void *owner, int32_t x, int32_t y) 
     // TPM_RETURNCMD puts the command in the BOOL result, which Swift's WinSDK import narrows to Bool
     return TrackPopupMenu(static_cast<HMENU>(menu), TPM_RETURNCMD | TPM_RIGHTBUTTON, x, y, 0, static_cast<HWND>(owner), nullptr);
 }
+
+extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count) {
+    auto draw = reinterpret_cast<NMTVCUSTOMDRAW *>(notification);
+    if (draw->nmcd.hdr.code != NM_CUSTOMDRAW) return -1;
+    if (draw->nmcd.dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
+    if (draw->nmcd.dwDrawStage != CDDS_ITEMPREPAINT) return CDRF_DODEFAULT;
+    int64_t tag = static_cast<int64_t>(draw->nmcd.lItemlParam);
+    bool dim = tag > 0 && tag <= count && dimmed[tag - 1];
+    draw->clrText = dim ? RGB(0x80, 0x80, 0x80) : RGB(0xCC, 0xCC, 0xCC);
+    draw->clrTextBk = RGB(0x25, 0x25, 0x26);
+    // the unthemed tree paints its selection in the light system colors unless the state is taken away
+    if (draw->nmcd.uItemState & CDIS_SELECTED) {
+        draw->clrTextBk = RGB(0x26, 0x4F, 0x78);
+        if (!dim) draw->clrText = RGB(0xFF, 0xFF, 0xFF);
+        draw->nmcd.uItemState &= ~(CDIS_SELECTED | CDIS_FOCUS);
+    }
+    return CDRF_DODEFAULT;
+}

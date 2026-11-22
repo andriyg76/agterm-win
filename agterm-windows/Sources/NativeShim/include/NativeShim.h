@@ -60,6 +60,9 @@ void *nt_tree_add(void *tree, void *parent, const uint16_t *text, int64_t tag, i
 void nt_tree_select(void *tree, void *item);
 // nt_tree_selection_changed reads a WM_NOTIFY lParam: 1 with the item's tag when the user moved the selection.
 int32_t nt_tree_selection_changed(intptr_t notification, int64_t *tag);
+// nt_tree_custom_draw answers a tree's NM_CUSTOMDRAW (-1 for any other WM_NOTIFY): dark selection, and items whose
+// tag's `dimmed` byte is set drawn grey.
+intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count);
 // nt_track_menu shows a popup menu at a screen point and returns the picked command id, 0 when dismissed.
 int32_t nt_track_menu(void *menu, void *owner, int32_t x, int32_t y);
 

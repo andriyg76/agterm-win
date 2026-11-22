@@ -22,6 +22,7 @@ final class NativeShell {
     private var running: Foundation.UUID?
     // the tree's tags index these; 0 is a workspace row
     private var tagged: [Foundation.UUID] = []
+    private var dimmed: [UInt8] = []
     private var items: [Foundation.UUID: UnsafeMutableRawPointer] = [:]
     private let darkBrush = CreateSolidBrush(0x262525)
     private var dpi: UInt32 = 96
@@ -113,11 +114,13 @@ final class NativeShell {
         guard let tree else { return }
         nt_tree_clear(tree)
         tagged = []
+        dimmed = []
         items = [:]
         func add(_ item: SessionSidebar.Item, under parent: UnsafeMutableRawPointer?) {
             var tag: Int64 = 0
             if !item.isWorkspace {
                 tagged.append(item.id)
+                dimmed.append(item.ended ? 1 : 0)
                 tag = Int64(tagged.count)
             }
             guard let node = nt_tree_add(tree, parent, Array(item.title.utf16) + [0], tag, 1) else { return }
@@ -125,6 +128,11 @@ final class NativeShell {
             item.children.forEach { add($0, under: node) }
         }
         workspaces.forEach { add($0, under: nil) }
+    }
+
+    fileprivate func customDraw(_ notification: LPARAM) -> LRESULT? {
+        let result = dimmed.withUnsafeBufferPointer { nt_tree_custom_draw(Int(notification), $0.baseAddress, Int64($0.count)) }
+        return result < 0 ? nil : LRESULT(result)
     }
 
     fileprivate func userSelected(_ tag: Int64) {
@@ -205,6 +213,7 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             shell.focus()
             return 0
         case UINT(WM_NOTIFY):
+            if let result = shell.customDraw(lParam) { return result }
             var tag: Int64 = 0
             if nt_tree_selection_changed(Int(lParam), &tag) != 0 { shell.userSelected(tag) }
             return 0
