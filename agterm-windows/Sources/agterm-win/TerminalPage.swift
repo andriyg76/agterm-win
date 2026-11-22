@@ -1,13 +1,33 @@
 /// The page the window shows: a sidebar of the server's workspaces and sessions beside one xterm.js terminal.
 /// Every message is a JSON object with a `t` kind. To the page: `out` (base64 bytes in `d`), `reset`, `tree`
-/// (`workspaces`, `selected`, `notice`). From the page: `ready`/`resize` (`cols`, `rows`), `in` (typed text in
-/// `d`), `title`, `select` (session `id`).
+/// (`workspaces`, `selected`, `notice`), `dump`. From the page: `ready`/`resize` (`cols`, `rows`), `in` (typed text in
+/// `d`), `title`, `select` (session `id`),
+/// `screen` (the buffer's text, answering `dump`).
+import Foundation
+
 enum TerminalPage {
-    // pinned CDN builds for now; a release bundles them and maps a virtual host instead
-    static let html = """
+    /// html inlines xterm.js from `assets` (scripts/fetch-xterm.ps1 fills it) and falls back to the pinned CDN builds.
+    static func html(assets: URL) -> String {
+        template.replacingOccurrences(of: "{{XTERM}}", with: head(assets: assets))
+    }
+
+    private static func head(assets: URL) -> String {
+        func read(_ name: String) -> String? { try? String(contentsOf: assets.appendingPathComponent(name), encoding: .utf8) }
+        guard let css = read("xterm.css"), let xterm = read("xterm.js"), let fit = read("addon-fit.js") else {
+            log("xterm.js not bundled in \(assets.path), loading it from the CDN")
+            return """
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+            <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+            """
+        }
+        return "<style>\(css)</style><script>\(xterm)</script><script>\(fit)</script>"
+    }
+
+    private static let template = """
     <!doctype html>
     <html><head><meta charset="utf-8">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+    {{XTERM}}
     <style>
       :root { --bg: #1e1e1e; --side: #252526; --text: #cccccc; --dim: #858585; --sel: #37373d; --accent: #0e639c; }
       html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
@@ -24,8 +44,6 @@ enum TerminalPage {
       .session.ended { color: var(--dim); font-style: italic; }
       #terminal { position: absolute; left: 226px; right: 6px; top: 6px; bottom: 6px; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
     </head><body>
     <div id="sidebar"><div id="notice">connecting…</div><div id="tree"></div></div>
     <div id="terminal"></div><script>
@@ -74,6 +92,10 @@ enum TerminalPage {
           term.reset();
         } else if (m.t === "tree") {
           renderTree(m);
+        } else if (m.t === "dump") {
+          const b = term.buffer.active, lines = [];
+          for (let i = 0; i < b.length; i++) lines.push(b.getLine(i).translateToString(true));
+          send({ t: "screen", text: lines.join("\\n").replace(/\\s+$/, "") + "\\n" });
         }
       });
       send({ t: "ready", cols: term.cols, rows: term.rows });
