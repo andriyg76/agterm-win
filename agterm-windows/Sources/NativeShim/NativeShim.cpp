@@ -340,7 +340,15 @@ struct nt_terminal {
     }
 };
 
-extern "C" void nt_init_process(void) { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); }
+extern "C" void nt_init_process(void) {
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    // uxtheme's unnamed SetPreferredAppMode (ordinal 135) is the only switch that makes popup menus dark; it is the
+    // one Explorer and Notepad use, and a build without it just keeps light menus
+    if (HMODULE theme = LoadLibraryExW(L"uxtheme.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)) {
+        using SetMode = int(WINAPI *)(int);
+        if (auto setMode = reinterpret_cast<SetMode>(GetProcAddress(theme, MAKEINTRESOURCEA(135)))) setMode(2 /* ForceDark */);
+    }
+}
 
 extern "C" nt_terminal *nt_create(void *window, const uint16_t *core_path, const uint16_t *font, float points, uint16_t *error,
                                   int32_t error_capacity) {
@@ -632,6 +640,29 @@ extern "C" int32_t nt_screen_text(nt_terminal *terminal, uint16_t *out, int32_t 
         text += rowText(cells, 0, static_cast<int32_t>(state.columns) - 1) + L"\n";
     }
     return give(text, out, capacity);
+}
+
+extern "C" void nt_select_all(nt_terminal *terminal) {
+    Info state = terminal->info();
+    terminal->selectionMode = 0;
+    terminal->anchor = {0, 0};
+    terminal->head = {static_cast<int64_t>(state.historyCount) + state.rows - 1, static_cast<int32_t>(state.columns) - 1};
+    terminal->selecting = false;
+    terminal->hasSelection = true;
+    InvalidateRect(terminal->window, nullptr, FALSE);
+}
+
+extern "C" void nt_clear_scrollback(nt_terminal *terminal) {
+    static const uint8_t eraseSaved[] = {0x1B, '[', '3', 'J'};
+    terminal->core.feed(terminal->emulator, eraseSaved, sizeof(eraseSaved));
+    terminal->scroll = 0;
+    terminal->hasSelection = terminal->selecting = false;
+    InvalidateRect(terminal->window, nullptr, FALSE);
+}
+
+extern "C" void nt_set_font_size(nt_terminal *terminal, float points) {
+    terminal->points = points;
+    terminal->measure();
 }
 
 extern "C" void nt_reset(nt_terminal *terminal) {

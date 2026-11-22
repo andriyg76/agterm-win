@@ -5,6 +5,7 @@ import WinSDK
 import agtermCore
 
 private nonisolated(unsafe) var shell: NativeShell!
+private let menuButtonID = 100
 
 /// NativeShell is a remote window drawn without WebView2: the session sidebar as a Win32 tree beside one
 /// NativeTerminal showing the selected session.
@@ -14,6 +15,8 @@ final class NativeShell {
     private var window: HWND?
     private var tree: UnsafeMutableRawPointer?
     private var notice: HWND?
+    private var menuButton: HWND?
+    private var menuFont: HFONT?
     private var terminal: NativeTerminal!
     private var selected: Foundation.UUID?
     private var running: Foundation.UUID?
@@ -57,6 +60,10 @@ final class NativeShell {
         nt_dark_title_bar(UnsafeMutableRawPointer(window))
         dpi = GetDpiForWindow(window)
         tree = nt_tree_create(UnsafeMutableRawPointer(window), dpi)
+        menuButton = CreateWindowExW(0, Array("BUTTON".utf16) + [0], Array("Menu".utf16) + [0],
+                                     DWORD(WS_CHILD) | DWORD(WS_VISIBLE) | DWORD(BS_OWNERDRAW), 0, 0, 10, 10, window,
+                                     HMENU(bitPattern: menuButtonID), instance, nil)
+        updateMenuFont()
         notice = CreateWindowExW(0, Array("STATIC".utf16) + [0], nil, DWORD(WS_CHILD) | DWORD(SS_LEFT), 0, 0, 10, 10, window, nil,
                                  instance, nil)
         terminal = NativeTerminal(parent: window, core: core)
@@ -68,6 +75,13 @@ final class NativeShell {
     }
 
     private var sidebarWidth: Int32 { Int32(MulDiv(240, Int32(dpi), 96)) }
+    private func scaled(_ value: Int32) -> Int32 { MulDiv(value, Int32(dpi), 96) }
+
+    private func updateMenuFont() {
+        if let menuFont { DeleteObject(menuFont) }
+        menuFont = CreateFontW(-scaled(18), 0, 0, 0, FW_NORMAL, 0, 0, 0, DWORD(DEFAULT_CHARSET), DWORD(OUT_DEFAULT_PRECIS),
+                               DWORD(CLIP_DEFAULT_PRECIS), DWORD(CLEARTYPE_QUALITY), DWORD(DEFAULT_PITCH), Array("Segoe UI Symbol".utf16) + [0])
+    }
 
     private func layout() {
         guard let window else { return }
@@ -75,11 +89,14 @@ final class NativeShell {
         GetClientRect(window, &client)
         let width = sidebarWidth, height = client.bottom
         let noticeText = remote.mirror.state.windowNotice(host: "WSL \(remote.host.distribution)")
-        let noticeHeight = noticeText == nil ? 0 : Int32(MulDiv(56, Int32(dpi), 96))
+        let buttonSize = scaled(36)
+        let noticeHeight = noticeText == nil ? 0 : scaled(56)
+        MoveWindow(menuButton, 0, 0, buttonSize, buttonSize, true)
         ShowWindow(notice, noticeText == nil ? SW_HIDE : SW_SHOW)
         SetWindowTextW(notice, Array((noticeText ?? "").utf16) + [0])
-        MoveWindow(notice, 8, 6, width - 16, max(noticeHeight - 6, 0), true)
-        MoveWindow(tree?.assumingMemoryBound(to: HWND__.self), 0, noticeHeight, width, height - noticeHeight, true)
+        MoveWindow(notice, 8, buttonSize, width - 16, max(noticeHeight - 6, 0), true)
+        let treeTop = buttonSize + noticeHeight
+        MoveWindow(tree?.assumingMemoryBound(to: HWND__.self), 0, treeTop, width, height - treeTop, true)
         terminal.move(x: width, y: 0, width: max(client.right - width, 1), height: height)
     }
 
@@ -136,6 +153,7 @@ final class NativeShell {
     fileprivate func dpiChanged(_ dpi: UInt32, suggested: RECT) {
         self.dpi = dpi
         if let tree { nt_tree_set_dpi(tree, dpi) }
+        updateMenuFont()
         terminal.setDPI(dpi)
         SetWindowPos(window, nil, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top,
                      UINT(SWP_NOZORDER | SWP_NOACTIVATE))
@@ -149,6 +167,28 @@ final class NativeShell {
     }
 
     fileprivate func focus() { SetFocus(terminal.window) }
+
+    /// windowMenu is the ☰ menu: the terminal's commands and the window's own.
+    fileprivate func windowMenu() {
+        var button = RECT()
+        GetWindowRect(menuButton, &button)
+        let entries = NativeMenu.window(hasSelection: terminal.hasSelection, canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
+        if let command = showMenu(entries, owner: window, at: POINT(x: button.left, y: button.bottom)) { terminal.perform(command) }
+        SetFocus(terminal.window)
+    }
+
+    fileprivate func drawMenuButton(_ item: DRAWITEMSTRUCT) {
+        var rect = item.rcItem
+        let pressed = item.itemState & UINT(ODS_SELECTED) != 0
+        let brush = pressed ? CreateSolidBrush(0x3E3D3D) : nil
+        FillRect(item.hDC, &rect, brush ?? darkBrush)
+        if let brush { DeleteObject(brush) }
+        let previous = SelectObject(item.hDC, menuFont)
+        SetBkMode(item.hDC, TRANSPARENT)
+        SetTextColor(item.hDC, 0xCCCCCC)
+        DrawTextW(item.hDC, Array("\u{2630}".utf16) + [0], -1, &rect, UINT(DT_CENTER | DT_VCENTER | DT_SINGLELINE))
+        SelectObject(item.hDC, previous)
+    }
 
     fileprivate func destroy() {
         terminal.destroy()
@@ -168,6 +208,15 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             var tag: Int64 = 0
             if nt_tree_selection_changed(Int(lParam), &tag) != 0 { shell.userSelected(tag) }
             return 0
+        case UINT(WM_COMMAND):
+            if Int(wParam & 0xFFFF) == menuButtonID { shell.windowMenu() }
+            return 0
+        case UINT(WM_DRAWITEM):
+            if let item = UnsafePointer<DRAWITEMSTRUCT>(bitPattern: UInt(lParam)), Int(item.pointee.CtlID) == menuButtonID {
+                shell.drawMenuButton(item.pointee)
+                return 1
+            }
+            return DefWindowProcW(window, message, wParam, lParam)
         case UINT(WM_CTLCOLORSTATIC):
             return shell.staticColors(HDC(bitPattern: UInt(wParam)))
         case UINT(WM_DPICHANGED):

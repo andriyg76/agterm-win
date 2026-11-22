@@ -56,3 +56,8 @@ extern "C" int32_t nt_tree_selection_changed(intptr_t notification, int64_t *tag
     *tag = static_cast<int64_t>(change->itemNew.lParam);
     return 1;
 }
+
+extern "C" int32_t nt_track_menu(void *menu, void *owner, int32_t x, int32_t y) {
+    // TPM_RETURNCMD puts the command in the BOOL result, which Swift's WinSDK import narrows to Bool
+    return TrackPopupMenu(static_cast<HMENU>(menu), TPM_RETURNCMD | TPM_RIGHTBUTTON, x, y, 0, static_cast<HWND>(owner), nullptr);
+}

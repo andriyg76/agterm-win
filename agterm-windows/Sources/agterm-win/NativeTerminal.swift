@@ -19,8 +19,7 @@ final class NativeTerminal {
     private var console: PseudoConsole?
     private var grid = (columns: Int32(0), rows: Int32(0))
     private var highSurrogate: UInt16?
-    // a shortcut's key also reaches TranslateMessage, whose WM_CHAR (^C, ^V) must not type
-    private var swallowCharacter = false
+    private var points = NativeMenu.defaultPoints
     private var clicks = (count: 0, time: Int32(0), x: Int32(0), y: Int32(0))
     private var reportingButton: Int32?
     private var lastMotionCell = (column: Int32(0), row: Int32(0))
@@ -63,7 +62,7 @@ final class NativeTerminal {
         self.window = window
         if parent == nil { nt_dark_title_bar(UnsafeMutableRawPointer(window)) }
         var error = [UInt16](repeating: 0, count: 512)
-        terminal = nt_create(UnsafeMutableRawPointer(window), Array(core.path.utf16) + [0], Array("Cascadia Mono".utf16) + [0], 11,
+        terminal = nt_create(UnsafeMutableRawPointer(window), Array(core.path.utf16) + [0], Array("Cascadia Mono".utf16) + [0], points,
                              &error, Int32(error.count))
         guard terminal != nil else {
             let reason = String(decodingCString: error, as: UTF16.self)
@@ -195,6 +194,8 @@ final class NativeTerminal {
         return modifiers
     }
 
+    var hasSelection: Bool { terminal.map { nt_has_selection($0) != 0 } ?? false }
+
     private var applicationCursor: Bool { terminal.map { nt_application_cursor($0) != 0 } ?? false }
 
     private var mouseModes: Int32 { terminal.map { nt_mouse_modes($0) } ?? 0 }
@@ -232,8 +233,6 @@ final class NativeTerminal {
             let count = near && UInt32(bitPattern: time &- clicks.time) <= GetDoubleClickTime() ? clicks.count % 3 + 1 : 1
             clicks = (count, time, x, y)
             nt_select_start(terminal, x, y, Int32(count - 1))
-        } else if button == 2 {
-            if nt_has_selection(terminal) != 0 { copySelection() } else { paste() }
         }
     }
 
@@ -244,6 +243,32 @@ final class NativeTerminal {
             report(held, x: x, y: y, release: true)
         } else if button == 0, let terminal {
             nt_select_end(terminal)
+        } else if button == 2 {
+            var point = POINT(x: x, y: y)
+            ClientToScreen(window, &point)
+            contextMenu(at: point)
+        }
+    }
+
+    /// contextMenu is the terminal's menu; a program that takes the mouse gets right clicks, and Shift+right opens it.
+    fileprivate func contextMenu(at point: POINT) {
+        let entries = NativeMenu.terminal(hasSelection: terminal.map { nt_has_selection($0) != 0 } ?? false,
+                                          canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
+        if let command = showMenu(entries, owner: window, at: point) { perform(command) }
+    }
+
+    func perform(_ command: NativeMenu.Command) {
+        guard let terminal else { return }
+        switch command {
+        case .copy: copySelection()
+        case .paste: paste()
+        case .selectAll: nt_select_all(terminal)
+        case .clearScrollback: nt_clear_scrollback(terminal)
+        case .fontBigger, .fontSmaller, .fontReset:
+            points = NativeMenu.points(after: command, from: points)
+            nt_set_font_size(terminal, points)
+            resize()
+        case .quit: DestroyWindow(GetAncestor(window, UINT(GA_ROOT)))
         }
     }
 
@@ -284,18 +309,43 @@ final class NativeTerminal {
         SetClipboardData(UINT(CF_UNICODETEXT), memory)
     }
 
+    /// shortcut is the menu command a key chord runs; Ctrl+C copies only while there is a selection.
+    private func shortcut(_ key: Int32, _ modifiers: TerminalInput.Modifiers) -> NativeMenu.Command? {
+        let letter = { (character: Character) in key == Int32(character.asciiValue!) }
+        if modifiers == [.shift, .control] {
+            if letter("C") { return .copy }
+            if letter("V") { return .paste }
+            if letter("A") { return .selectAll }
+            if letter("K") { return .clearScrollback }
+        }
+        guard modifiers == .control else { return nil }
+        if letter("C"), terminal.map({ nt_has_selection($0) != 0 }) == true { return .copy }
+        if key == VK_OEM_PLUS { return .fontBigger }
+        if key == VK_OEM_MINUS { return .fontSmaller }
+        if letter("0") { return .fontReset }
+        return nil
+    }
+
     /// key sends what a non-character key types; false leaves the key to Windows (Alt+F4, Alt+Space).
     fileprivate func key(_ key: Int32) -> Bool {
         let modifiers = modifiers
-        if modifiers == [.shift, .control], key == Int32(UInt8(ascii: "V")) {
-            swallowCharacter = true
-            paste()
+        if let command = shortcut(key, modifiers) {
+            // TranslateMessage already queued the chord's WM_CHAR (^C, ^V, ^_), which must not type
+            var queued = MSG()
+            while PeekMessageW(&queued, window, UINT(WM_CHAR), UINT(WM_CHAR), UINT(PM_REMOVE)) {}
+            perform(command)
             return true
         }
-        if modifiers.contains(.control), key == Int32(UInt8(ascii: "C")),
-           modifiers.contains(.shift) || terminal.map({ nt_has_selection($0) != 0 }) == true {
-            swallowCharacter = true
-            copySelection()
+        if key == VK_APPS {
+            // at the mouse when it is over the terminal, else at its corner
+            var point = POINT(), origin = POINT(), client = RECT()
+            GetCursorPos(&point)
+            GetClientRect(window, &client)
+            ClientToScreen(window, &origin)
+            if !(origin.x..<origin.x + client.right).contains(point.x) || !(origin.y..<origin.y + client.bottom).contains(point.y) {
+                point = origin
+            }
+            contextMenu(at: point)
             return true
         }
         if modifiers == .shift, key == VK_PRIOR || key == VK_NEXT, let terminal {
@@ -324,10 +374,6 @@ final class NativeTerminal {
     }
 
     fileprivate func character(_ unit: UInt16, alt: Bool) {
-        if swallowCharacter {
-            swallowCharacter = false
-            return
-        }
         if (0xD800..<0xDC00).contains(unit) {
             highSurrogate = unit
             return
@@ -360,6 +406,22 @@ final class NativeTerminal {
         nt_destroy(terminal)
         terminal = nil
     }
+}
+
+/// showMenu opens a dark popup of `entries` at a screen point and returns the command picked, nil when dismissed.
+@MainActor
+func showMenu(_ entries: [NativeMenu.Entry], owner: HWND?, at point: POINT) -> NativeMenu.Command? {
+    guard let menu = CreatePopupMenu() else { return nil }
+    defer { DestroyMenu(menu) }
+    for entry in entries {
+        guard let command = entry.command else {
+            AppendMenuW(menu, UINT(MF_SEPARATOR), 0, nil)
+            continue
+        }
+        AppendMenuW(menu, UINT(MF_STRING) | (entry.enabled ? 0 : UINT(MF_GRAYED)), UINT_PTR(command.rawValue),
+                    Array("\(command.title)\t\(command.shortcut)".utf16) + [0])
+    }
+    return NativeMenu.Command(rawValue: Int(nt_track_menu(UnsafeMutableRawPointer(menu), UnsafeMutableRawPointer(owner), point.x, point.y)))
 }
 
 private let nativeWindowProcedure: WNDPROC = { window, message, wParam, lParam in

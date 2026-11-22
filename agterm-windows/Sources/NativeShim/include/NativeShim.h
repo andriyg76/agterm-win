@@ -46,6 +46,11 @@ int32_t nt_screen_text(nt_terminal *terminal, uint16_t *out, int32_t capacity);
 // nt_reset starts a fresh emulator at the current grid, dropping screen, scrollback, modes and selection.
 void nt_reset(nt_terminal *terminal);
 void nt_dark_title_bar(void *window);
+void nt_select_all(nt_terminal *terminal);
+// nt_clear_scrollback drops the scrollback the way ED 3 does, leaving the screen and the program alone.
+void nt_clear_scrollback(nt_terminal *terminal);
+// nt_set_font_size remeasures the cell; the caller resizes to get the grid that now fits.
+void nt_set_font_size(nt_terminal *terminal, float points);
 
 // The sidebar: a dark Win32 tree whose items carry a caller's tag.
 void *nt_tree_create(void *parent, uint32_t dpi);
@@ -55,6 +60,8 @@ void *nt_tree_add(void *tree, void *parent, const uint16_t *text, int64_t tag, i
 void nt_tree_select(void *tree, void *item);
 // nt_tree_selection_changed reads a WM_NOTIFY lParam: 1 with the item's tag when the user moved the selection.
 int32_t nt_tree_selection_changed(intptr_t notification, int64_t *tag);
+// nt_track_menu shows a popup menu at a screen point and returns the picked command id, 0 when dismissed.
+int32_t nt_track_menu(void *menu, void *owner, int32_t x, int32_t y);
 
 #ifdef __cplusplus
 }
