@@ -60,4 +60,20 @@ struct TerminalInputTests {
         #expect(TerminalInput.autoscrollLines(y: 400, height: 400, step: 20) == -1)
         #expect(TerminalInput.autoscrollLines(y: 5000, height: 400, step: 20) == -10)
     }
+
+    @Test func wslIsTheCommandLinesProgram() {
+        #expect(TerminalInput.runsInWSL("wsl.exe -d Ubuntu --cd ~"))
+        #expect(TerminalInput.runsInWSL(#"C:\WINDOWS\System32\wsl.exe -d Ubuntu -e /bin/sh"#))
+        #expect(TerminalInput.runsInWSL(#""C:\Program Files\WSL\wsl.exe" -d Debian"#))
+        #expect(!TerminalInput.runsInWSL("powershell.exe -NoLogo"))
+        #expect(!TerminalInput.runsInWSL("cmd.exe /c wsl.exe"))
+    }
+
+    @Test func droppedPathsAreQuotedForTheirShell() {
+        #expect(TerminalInput.droppedPaths([#"C:\Users\me\a.txt"#, #"D:\My Files\b c.png"#], wsl: false)
+            == #"C:\Users\me\a.txt "D:\My Files\b c.png" "#)
+        #expect(TerminalInput.droppedPaths([#"C:\Users\me\a.txt"#], wsl: true) == "/mnt/c/Users/me/a.txt ")
+        #expect(TerminalInput.droppedPaths([#"D:\it's here\x"#], wsl: true) == #"'/mnt/d/it'\''s here/x' "#)
+        #expect(TerminalInput.droppedPaths([#"\\server\share\f"#], wsl: true) == "//server/share/f ")
+    }
 }

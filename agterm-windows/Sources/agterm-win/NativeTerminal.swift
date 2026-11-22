@@ -36,6 +36,8 @@ final class NativeTerminal {
     /// onAttention runs when the program rings the bell or posts a notification.
     var onAttention: (() -> Void)?
     fileprivate let autoscrollTimer: UINT_PTR = 1
+    // dropped files are typed as Linux paths into a program wsl.exe started
+    private var runsInWSL = false
     /// onWindowCommand takes the commands a terminal inside a window passes up (New and Close Session, Quit); without
     /// it those shortcuts are not taken and Quit closes the terminal's own window.
     var onWindowCommand: ((NativeMenu.Command) -> Void)?
@@ -66,13 +68,15 @@ final class NativeTerminal {
             RegisterClassExW(&windowClass)
         }
         let style = parent == nil ? DWORD(WS_OVERLAPPEDWINDOW) : DWORD(WS_CHILD) | DWORD(WS_VISIBLE) | DWORD(WS_CLIPSIBLINGS)
-        guard let window = CreateWindowExW(0, className, Array("agterm".utf16) + [0], style,
+        guard let window = CreateWindowExW(DWORD(WS_EX_ACCEPTFILES), className, Array("agterm".utf16) + [0], style,
                                            CW_USEDEFAULT, CW_USEDEFAULT, 1100, 700, parent, nil, instance, nil) else {
             log("native: CreateWindowExW failed: \(GetLastError())")
             exit(1)
         }
         self.window = window
         terminals[window] = self
+        // an elevated agterm still takes files dropped from a non-elevated Explorer (0x0049 is WM_COPYGLOBALDATA)
+        for message in [UINT(WM_DROPFILES), UINT(WM_COPYDATA), 0x0049] { ChangeWindowMessageFilterEx(window, message, DWORD(MSGFLT_ALLOW), nil) }
         if parent == nil { nt_dark_title_bar(UnsafeMutableRawPointer(window)) }
         var error = [UInt16](repeating: 0, count: 512)
         terminal = nt_create(UnsafeMutableRawPointer(window), Array(core.path.utf16) + [0], Array("Cascadia Mono".utf16) + [0], points,
@@ -88,6 +92,7 @@ final class NativeTerminal {
     /// start replaces whatever ran in the terminal with `commandLine` on a fresh screen.
     func start(_ commandLine: String, directory: String? = nil) {
         reset()
+        runsInWSL = TerminalInput.runsInWSL(commandLine)
         let generation = generation, window = window
         do {
             console = try PseudoConsole(commandLine: commandLine, directory: directory, columns: Int16(clamping: grid.columns), rows: Int16(clamping: grid.rows),
@@ -485,6 +490,20 @@ final class NativeTerminal {
         send(TerminalInput.paste(text, bracketed: nt_bracketed_paste(terminal) != 0))
     }
 
+    /// drop types the paths of files dropped from Explorer, as a paste so a shell does not run them.
+    fileprivate func drop(_ drop: HDROP) {
+        defer { DragFinish(drop) }
+        let paths = (0..<DragQueryFileW(drop, 0xFFFF_FFFF, nil, 0)).map { index in
+            var buffer = [WCHAR](repeating: 0, count: Int(DragQueryFileW(drop, index, nil, 0)) + 1)
+            DragQueryFileW(drop, index, &buffer, UINT(buffer.count))
+            return String(decodingCString: buffer, as: UTF16.self)
+        }
+        guard let terminal, console != nil, !paths.isEmpty else { return }
+        send(TerminalInput.paste(TerminalInput.droppedPaths(paths, wsl: runsInWSL), bracketed: nt_bracketed_paste(terminal) != 0))
+        SetForegroundWindow(GetAncestor(window, UINT(GA_ROOT)))
+        SetFocus(window)
+    }
+
     private func send(_ text: String) {
         if let terminal {
             nt_scroll_to_bottom(terminal)
@@ -576,6 +595,9 @@ private let nativeWindowProcedure: WNDPROC = { window, message, wParam, lParam i
             return 0
         case UINT(WM_MOUSEMOVE):
             native.mouseMove(x: x, y: y, leftHeld: wParam & WPARAM(MK_LBUTTON) != 0)
+            return 0
+        case UINT(WM_DROPFILES):
+            if let drop = HDROP(bitPattern: UInt(wParam)) { native.drop(drop) }
             return 0
         case UINT(WM_SETCURSOR):
             if lParam & 0xFFFF == LPARAM(HTCLIENT), let hand = native.pointerCursor() {

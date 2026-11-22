@@ -85,4 +85,25 @@ public enum TerminalInput {
         if y >= height { return -min(1 + (y - height) / step, 10) }
         return 0
     }
+
+    /// runsInWSL is whether a command line starts wsl.exe, whose programs read Linux paths.
+    public static func runsInWSL(_ commandLine: String) -> Bool {
+        let program = commandLine.hasPrefix("\"") ? commandLine.dropFirst().prefix { $0 != "\"" } : commandLine.prefix { $0 != " " }
+        let name = program.split(whereSeparator: { $0 == "\\" || $0 == "/" }).last.map(String.init) ?? ""
+        return name.caseInsensitiveCompare("wsl.exe") == .orderedSame || name.caseInsensitiveCompare("wsl") == .orderedSame
+    }
+
+    /// droppedPaths is what dropping files types: each path quoted when it needs it and followed by a space; under WSL a
+    /// drive path becomes its /mnt mount, single-quoted for the Linux shell.
+    public static func droppedPaths(_ paths: [String], wsl: Bool) -> String {
+        paths.map { path in
+            guard wsl else { return path.contains(where: { " &()[]{}^=;!'+,`~%$@#".contains($0) }) ? "\"\(path)\"" : path }
+            var linux = path.replacingOccurrences(of: "\\", with: "/")
+            if linux.count >= 2, linux.dropFirst().first == ":", let drive = linux.first, drive.isLetter {
+                linux = "/mnt/\(drive.lowercased())" + linux.dropFirst(2)
+            }
+            let plain = linux.allSatisfy { $0.isLetter || $0.isNumber || "/._-+,:@%".contains($0) }
+            return plain ? linux : "'" + linux.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }.map { $0 + " " }.joined()
+    }
 }
