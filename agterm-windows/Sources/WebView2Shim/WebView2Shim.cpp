@@ -65,12 +65,12 @@ extern "C" void wv_init_process(void) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 }
 
-extern "C" int32_t wv_create(void *hwndRaw, const uint16_t *userDataFolder, const uint16_t *html,
+extern "C" int32_t wv_create(void *hwndRaw, const uint16_t *browserFolder, const uint16_t *userDataFolder, const uint16_t *html,
                              wv_ready_cb ready, wv_message_cb message, void *ctx) {
     HWND hwnd = static_cast<HWND>(hwndRaw);
     std::wstring page(wide(html));
     return CreateCoreWebView2EnvironmentWithOptions(
-        nullptr, wide(userDataFolder), nullptr,
+        browserFolder ? wide(browserFolder) : nullptr, wide(userDataFolder), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [=](HRESULT result, ICoreWebView2Environment *env) -> HRESULT {
                 if (FAILED(result) || !env) {
