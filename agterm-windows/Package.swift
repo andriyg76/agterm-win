@@ -18,6 +18,7 @@ let package = Package(
                 .unsafeFlags(["-L", webView2 + "/x64"]),
                 .linkedLibrary("WebView2Loader.dll"),
                 .linkedLibrary("ole32"),
+                .linkedLibrary("bcrypt"),
                 .linkedLibrary("user32"),
             ]
         ),
