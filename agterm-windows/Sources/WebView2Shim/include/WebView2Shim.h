@@ -18,6 +18,8 @@ int32_t wv_create(void *hwnd, const uint16_t *browserFolder, const uint16_t *use
 void wv_resize(int32_t width, int32_t height);
 void wv_focus(void);
 void wv_post_string(const uint16_t *message);
+// sha256_file writes the file's SHA-256 into the 32 bytes at `digest`: 0, else the Win32 error or NTSTATUS that stopped it.
+int32_t sha256_file(const uint16_t *path, uint8_t *digest);
 
 #ifdef __cplusplus
 }
