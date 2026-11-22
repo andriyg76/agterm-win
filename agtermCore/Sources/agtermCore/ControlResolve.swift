@@ -72,7 +72,10 @@ public enum ControlResolve {
     /// `~/Library/Application Support/agterm` on macOS; on Linux, where agterm-server lives, `$XDG_STATE_HOME/agterm`
     /// (an absolute value only) or `~/.local/state/agterm`, so a bare ssh command finds it. `/tmp/agterm` with no HOME.
     public static func defaultStateDirectory(environment: [String: String]) -> String {
-        #if os(Linux)
+        #if os(Windows)
+        // agterm-win's own state directory, so a CLI started in one of its sessions finds the window's socket
+        return environment["LOCALAPPDATA"].map { ($0 as NSString).appendingPathComponent("agterm-win") } ?? "agterm-win"
+        #elseif os(Linux)
         if let state = environment["XDG_STATE_HOME"], state.hasPrefix("/") {
             return (state as NSString).appendingPathComponent("agterm")
         }

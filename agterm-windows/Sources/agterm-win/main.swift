@@ -314,7 +314,8 @@ MainActor.assumeIsolated {
             let distribution = flag.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? "Ubuntu"
             let profiles = arguments.indices.filter { arguments[$0] == "--profile" && $0 + 1 < arguments.count }.map { arguments[$0 + 1] }
             NativeShell.open(remote: RemoteWindow(host: WSLHost(distribution: distribution), stateDirectory: stateDirectory), core: core,
-                             settings: stateDirectory.appendingPathComponent("native.json"), profiles: profiles)
+                             settings: stateDirectory.appendingPathComponent("native.json"), profiles: profiles,
+                             version: (try? serverRelease().version) ?? "dev")
         }
         return
     }

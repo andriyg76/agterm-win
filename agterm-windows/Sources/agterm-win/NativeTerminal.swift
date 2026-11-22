@@ -90,12 +90,12 @@ final class NativeTerminal {
     }
 
     /// start replaces whatever ran in the terminal with `commandLine` on a fresh screen.
-    func start(_ commandLine: String, directory: String? = nil) {
+    func start(_ commandLine: String, directory: String? = nil, environment: [String: String]? = nil) {
         reset()
         runsInWSL = TerminalInput.runsInWSL(commandLine)
         let generation = generation, window = window
         do {
-            console = try PseudoConsole(commandLine: commandLine, directory: directory, columns: Int16(clamping: grid.columns), rows: Int16(clamping: grid.rows),
+            console = try PseudoConsole(commandLine: commandLine, directory: directory, environment: environment, columns: Int16(clamping: grid.columns), rows: Int16(clamping: grid.rows),
                                         onOutput: { [unowned self] in enqueue($0, generation: generation, window: window) },
                                         onExit: { PostMessageW(window, nativeExitMessage, WPARAM($0), LPARAM(generation)) })
             log("native: started \(commandLine) at \(grid.columns)x\(grid.rows)")
@@ -503,6 +503,25 @@ final class NativeTerminal {
         send(TerminalInput.paste(TerminalInput.droppedPaths(paths, wsl: runsInWSL), bracketed: nt_bracketed_paste(terminal) != 0))
         SetForegroundWindow(GetAncestor(window, UINT(GA_ROOT)))
         SetFocus(window)
+    }
+
+    /// type sends `text` as typed keys, each line ending as Return; false while no program runs.
+    func type(_ text: String) -> Bool {
+        guard console != nil else { return false }
+        send(TerminalInput.paste(text, bracketed: false))
+        return true
+    }
+
+    /// screen is every line of the scrollback and screen, oldest first, and how many of the last ones are the screen.
+    var screen: (lines: [String], rows: Int)? {
+        guard let terminal else { return nil }
+        let lines = (0..<nt_line_count(terminal)).map { line in
+            let count = nt_line_runes(terminal, line, nil, 0)
+            var runes = [UInt32](repeating: 0, count: Int(count))
+            nt_line_runes(terminal, line, &runes, count)
+            return String(String.UnicodeScalarView(runes.compactMap(Unicode.Scalar.init)))
+        }
+        return (lines, Int(grid.rows))
     }
 
     private func send(_ text: String) {

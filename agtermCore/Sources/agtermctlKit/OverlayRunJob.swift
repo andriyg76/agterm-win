@@ -2,6 +2,7 @@ import ArgumentParser
 import Foundation
 import agtermCore
 
+#if !os(Windows)
 /// OverlayJobRunner supervises one remote overlay job on the origin: it claims the job over the app's
 /// socket, runs the program under the pty it inherited from the viewer's ssh, reports how it ended, and
 /// stops it when cancelled. Everything that decides the outcome is here; the command only wires signals.
@@ -343,3 +344,17 @@ extension Session.Overlay {
         }
     }
 }
+#else
+extension Session.Overlay {
+    /// RunJob is host plumbing another Mac drives over ssh; Windows hosts no overlay jobs.
+    struct RunJob: ParsableCommand {
+        static let configuration = CommandConfiguration(commandName: "run-job", abstract: "Run a remote overlay job (not on Windows).",
+                                                        shouldDisplay: false)
+
+        @Argument var job: String
+        @Option(name: .long) var token: String?
+
+        func run() throws { throw ValidationError("remote overlay jobs are not run on Windows") }
+    }
+}
+#endif

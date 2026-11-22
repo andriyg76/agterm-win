@@ -48,18 +48,21 @@ final class NativeShell {
     private var items: [Foundation.UUID: UnsafeMutableRawPointer] = [:]
     private let darkBrush = CreateSolidBrush(0x262525)
     private var dpi: UInt32 = 96
+    private var control: ControlSocket?
+    private let version: String
 
     /// open shows the window; `profiles` name launch profiles to start local sessions from once they are known.
-    static func open(remote: RemoteWindow, core: URL, settings: URL, profiles: [String]) {
+    static func open(remote: RemoteWindow, core: URL, settings: URL, profiles: [String], version: String) {
         nt_init_process()
-        shell = NativeShell(remote: remote, core: core, settingsURL: settings)
+        shell = NativeShell(remote: remote, core: core, settingsURL: settings, version: version)
         shell.create(starting: profiles)
     }
 
-    private init(remote: RemoteWindow, core: URL, settingsURL: URL) {
+    private init(remote: RemoteWindow, core: URL, settingsURL: URL, version: String) {
         self.remote = remote
         self.core = core
         self.settingsURL = settingsURL
+        self.version = version
         settings = NativeSettings.load(from: settingsURL)
     }
 
@@ -95,6 +98,7 @@ final class NativeShell {
                                  instance, nil)
         findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
         remoteTerminal = makeTerminal()
+        control = ControlSocket.start(path: socketPath, host: self, version: version)
         restorePlacement()
         layout()
         restoreLocals()
@@ -252,7 +256,30 @@ final class NativeShell {
         if let index = settings.selectedLocal { select(locals[index].id) }
     }
 
-    private func startLocal(title: String, commandLine: String, selecting: Bool = true) {
+    private var stateDirectory: URL { settingsURL.deletingLastPathComponent() }
+
+    private var socketPath: String { stateDirectory.appendingPathComponent("agterm.sock").path }
+
+    /// sessionEnvironment is what a local session's programs inherit: the state directory, so agtermctl finds this
+    /// window's socket, the session's id, and agtermctl's folder on PATH.
+    private func sessionEnvironment(_ id: Foundation.UUID) -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment["AGTERM_STATE_DIR"] = stateDirectory.path
+        environment["AGTERM_SESSION_ID"] = id.uuidString
+        if let folder = Bundle.main.executableURL?.deletingLastPathComponent().path {
+            let key = environment.keys.first { $0.uppercased() == "PATH" } ?? "Path"
+            environment[key] = folder + ";" + (environment[key] ?? "")
+        }
+        return environment
+    }
+
+    private func launch(_ session: LocalSession) {
+        session.terminal.start(session.commandLine, directory: ProcessInfo.processInfo.environment["USERPROFILE"],
+                               environment: sessionEnvironment(session.id))
+    }
+
+    @discardableResult
+    private func startLocal(title: String, commandLine: String, selecting: Bool = true) -> Foundation.UUID {
         let session = LocalSession(title: title, commandLine: commandLine, terminal: makeTerminal())
         let id = session.id
         session.terminal.onExit = { [unowned self] in localExited(id) }
@@ -260,9 +287,10 @@ final class NativeShell {
         locals.append(session)
         layout()
         log("native shell: new \(title) session [\(id)]")
-        session.terminal.start(commandLine, directory: ProcessInfo.processInfo.environment["USERPROFILE"])
+        launch(session)
         rebuild()
         if selecting { select(id) }
+        return id
     }
 
     private func localExited(_ id: Foundation.UUID) {
@@ -377,7 +405,7 @@ final class NativeShell {
         guard canRestart(selected), let id = selected else { return }
         if let index = locals.firstIndex(where: { $0.id == id }) {
             locals[index].exited = false
-            locals[index].terminal.start(locals[index].commandLine, directory: ProcessInfo.processInfo.environment["USERPROFILE"])
+            launch(locals[index])
             rebuild()
             focus()
             return
@@ -397,9 +425,17 @@ final class NativeShell {
             closeServerSession(selected)
             return
         }
-        guard let index = locals.firstIndex(where: { $0.id == selected }) else { return }
+        if let selected { closeLocal(selected) }
+    }
+
+    private func closeLocal(_ id: Foundation.UUID) {
+        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         let closing = locals.remove(at: index)
         DestroyWindow(closing.terminal.window)
+        guard selected == id else {
+            rebuild()
+            return
+        }
         selected = nil
         rebuild()
         if let next = locals.indices.contains(index) ? locals[index].id : locals.last?.id {
@@ -529,7 +565,10 @@ final class NativeShell {
         if let tree, let item = items[id] { nt_tree_select(tree, item) }
         let shown = visibleTerminal
         for terminal in terminalsShown { terminal.setVisible(terminal === shown) }
-        guard !locals.contains(where: { $0.id == id }), let session = remote.session(id) else { return }
+        guard !locals.contains(where: { $0.id == id }), let session = remote.session(id) else {
+            remote.store.selectedSessionID = nil
+            return
+        }
         let launch = SessionSidebar.launch(for: session, hostLabel: serverLabel)
         guard id != running || launch != runningLaunch else { return }
         running = id
@@ -677,4 +716,87 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             return DefWindowProcW(window, message, wParam, lParam)
         }
     }
+}
+
+// MARK: control
+
+extension NativeShell: NativeControlHost {
+    var localSessions: [NativeControl.Local] {
+        locals.map { NativeControl.Local(id: $0.id, name: $0.title, commandLine: $0.commandLine, exited: $0.exited, attention: $0.attention) }
+    }
+
+    var selectedSession: Foundation.UUID? { selected }
+
+    var serverWorkspaces: [ControlWorkspaceNode] {
+        remote.connected ? remote.store.controlTree(paneForeground: { _ in nil }).workspaces : []
+    }
+
+    func isServerSession(_ id: Foundation.UUID) -> Bool { remote.session(id) != nil }
+
+    func newLocalSession(name: String?, command: String?, select: Bool) -> Foundation.UUID? {
+        if let command { return startLocal(title: name ?? "Session \(locals.count + 1)", commandLine: command, selecting: select) }
+        guard profiles.indices.contains(defaultProfile) else { return nil }
+        let profile = profiles[defaultProfile]
+        let siblings = locals.filter { $0.title.hasPrefix(profile.name) }.count
+        return startLocal(title: name ?? (siblings == 0 ? profile.name : "\(profile.name) \(siblings + 1)"), commandLine: profile.commandLine,
+                          selecting: select)
+    }
+
+    func newServerSession() async -> ControlResponse {
+        guard remote.connected, let workspace = remote.store.currentWorkspaceID else {
+            return ControlResponse(ok: false, error: "no connection to \(serverLabel)")
+        }
+        sessionsBeforeCreate = Set(remote.store.workspaces.flatMap(\.sessions).map(\.id))
+        let response = await remote.perform(.newSession(workspace: workspace))
+        if !response.ok { sessionsBeforeCreate = nil }
+        return response
+    }
+
+    func closeSession(_ id: Foundation.UUID) async -> ControlResponse {
+        if locals.contains(where: { $0.id == id }) {
+            closeLocal(id)
+            return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+        }
+        return await remote.perform(.closeSession(id, undoable: true))
+    }
+
+    func renameSession(_ id: Foundation.UUID, to name: String) async -> ControlResponse {
+        if let index = locals.firstIndex(where: { $0.id == id }) {
+            locals[index].title = name
+            rebuild()
+            return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+        }
+        return await remote.perform(.renameSession(id, name: name))
+    }
+
+    /// restartSession runs a local session's program again, ended or not, as `session.restart` replaces a live pane's.
+    func restartSession(_ id: Foundation.UUID) async -> ControlResponse {
+        if let index = locals.firstIndex(where: { $0.id == id }) {
+            locals[index].exited = false
+            launch(locals[index])
+            rebuild()
+            return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+        }
+        return await remote.perform(.restart(id, pane: .left, command: nil))
+    }
+
+    func selectSession(_ id: Foundation.UUID) { select(id) }
+
+    /// terminal is the terminal showing `id`: its own for a local session, the shared one while it shows a server one.
+    private func terminal(of id: Foundation.UUID) -> NativeTerminal? {
+        locals.first { $0.id == id }?.terminal ?? (running == id ? remoteTerminal : nil)
+    }
+
+    func type(_ text: String, into id: Foundation.UUID) -> Bool { terminal(of: id)?.type(text) ?? false }
+
+    func screen(of id: Foundation.UUID) -> (lines: [String], rows: Int)? { terminal(of: id)?.screen }
+
+    func notify(_ id: Foundation.UUID, title: String, body: String) {
+        log("native shell: notify \(title): \(body)")
+        localAttention(id)
+    }
+
+    var fontPoints: Float { settings.fontPoints }
+
+    func setFontPoints(_ points: Float) { setFontSize(points) }
 }

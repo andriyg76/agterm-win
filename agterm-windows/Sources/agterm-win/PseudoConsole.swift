@@ -14,7 +14,7 @@ final class PseudoConsole {
     let processID: DWORD
 
     /// `directory` is where the program starts, the caller's current directory when nil.
-    init(commandLine: String, directory: String? = nil, columns: Int16, rows: Int16,
+    init(commandLine: String, directory: String? = nil, environment: [String: String]? = nil, columns: Int16, rows: Int16,
          onOutput: @escaping (Data) -> Void, onExit: @escaping (DWORD) -> Void) throws {
         var inputRead: HANDLE?, inputWrite: HANDLE?, outputRead: HANDLE?, outputWrite: HANDLE?
         guard CreatePipe(&inputRead, &inputWrite, nil, 0), CreatePipe(&outputRead, &outputWrite, nil, 0) else {
@@ -45,9 +45,17 @@ final class PseudoConsole {
         var info = PROCESS_INFORMATION()
         var line = Array(commandLine.utf16) + [0]
         let folder = directory.map { Array($0.utf16) + [0] }
+        // a Unicode block of NAME=value strings, each NUL-ended, the block ending in one more NUL
+        var block: [UInt16] = environment.map { variables in
+            variables.sorted { $0.key.uppercased() < $1.key.uppercased() }.flatMap { Array("\($0.key)=\($0.value)".utf16) + [0] } + [0]
+        } ?? []
+        let flags = DWORD(EXTENDED_STARTUPINFO_PRESENT) | (block.isEmpty ? 0 : DWORD(CREATE_UNICODE_ENVIRONMENT))
         let started = withUnsafeMutablePointer(to: &startup) { pointer in
             pointer.withMemoryRebound(to: STARTUPINFOW.self, capacity: 1) { startupInfo in
-                CreateProcessW(nil, &line, nil, nil, false, DWORD(EXTENDED_STARTUPINFO_PRESENT), nil, folder, startupInfo, &info)
+                block.withUnsafeMutableBufferPointer { variables in
+                    CreateProcessW(nil, &line, nil, nil, false, flags, variables.isEmpty ? nil : UnsafeMutableRawPointer(variables.baseAddress),
+                                   folder, startupInfo, &info)
+                }
             }
         }
         guard started else {
