@@ -43,7 +43,7 @@ extern "C" void *nt_tree_add(void *tree, void *parent, const uint16_t *text, int
     insert.item.lParam = static_cast<LPARAM>(tag);
     insert.item.state = expanded ? TVIS_EXPANDED : 0;
     insert.item.stateMask = TVIS_EXPANDED;
-    return TreeView_InsertItem(static_cast<HWND>(tree), &insert);
+    return reinterpret_cast<HTREEITEM>(SendMessageW(static_cast<HWND>(tree), TVM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&insert)));
 }
 
 extern "C" void nt_tree_select(void *tree, void *item) { TreeView_SelectItem(static_cast<HWND>(tree), static_cast<HTREEITEM>(item)); }

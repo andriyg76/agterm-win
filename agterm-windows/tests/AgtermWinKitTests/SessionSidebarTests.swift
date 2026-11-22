@@ -28,7 +28,16 @@ struct SessionSidebarTests {
         #expect(SessionSidebar.selection(current: gone.id, in: workspaces) == gone.id)
         #expect(SessionSidebar.selection(current: UUID(), in: workspaces) == live.id)
         #expect(SessionSidebar.selection(current: nil, in: workspaces) == live.id)
-        #expect(SessionSidebar.selection(current: nil, in: [Workspace(name: "a", sessions: [gone])]) == nil)
+        #expect(SessionSidebar.selection(current: UUID(), in: [Workspace(name: "a", sessions: [gone])]) == gone.id)
+        #expect(SessionSidebar.selection(current: nil, in: [Workspace(name: "a")]) == nil)
+    }
+
+    @Test func rootWorkspaceSessionsSitAtTheTopLevel() {
+        let loose = session("loose"), held = session("held")
+        let items = SessionSidebar.items([Workspace(name: "", sessions: [loose], isRoot: true), Workspace(name: "dev", sessions: [held])])
+        #expect(items.map(\.title) == ["loose", "dev"])
+        #expect(items.map(\.isWorkspace) == [false, true])
+        #expect(items[1].children.map(\.title) == ["held"])
     }
 
     @Test func launchRunsTheAttachCommand() {

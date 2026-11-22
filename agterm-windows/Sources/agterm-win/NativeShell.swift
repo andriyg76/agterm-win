@@ -86,6 +86,7 @@ final class NativeShell {
     private func catalogChanged() {
         let workspaces = remote.store.workspaces
         let next = SessionSidebar.selection(current: selected, in: workspaces)
+        log("native shell: \(workspaces.lazy.flatMap(\.sessions).count) session(s), selecting \(next?.uuidString ?? "none")")
         rebuild(SessionSidebar.items(workspaces))
         layout()
         if let next { select(next) } else { selected = nil }
