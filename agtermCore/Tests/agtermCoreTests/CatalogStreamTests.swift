@@ -1,3 +1,4 @@
+#if !os(Windows) // TODO(windows): socketpair fixture and read/write/close on sockets need Winsock test helpers
 import Foundation
 import Testing
 @testable import agtermCore
@@ -144,3 +145,4 @@ final class CatalogStreamTests {
         #expect(await readFrame() == .ping)
     }
 }
+#endif

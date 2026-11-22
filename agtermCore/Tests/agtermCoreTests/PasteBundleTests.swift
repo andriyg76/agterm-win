@@ -2,6 +2,11 @@ import Foundation
 import Testing
 @testable import agtermCore
 
+#if os(Windows)
+// no mode-000 folders on Windows: reporting root disables the test that needs one
+private func geteuid() -> UInt32 { 0 }
+#endif
+
 struct PasteBundleTests {
     @Test func aWrittenBundleReadsBackTheSameHeadersAndBytes() throws {
         let dir = try PasteFixture()
@@ -19,9 +24,15 @@ struct PasteBundleTests {
             guard header.kind == .file else { continue }
             let out = dir.root.appendingPathComponent("out-\(headers.count)")
             FileManager.default.createFile(atPath: out.path, contents: nil)
+            #if os(Windows)
+            let fd = open(out.path, O_WRONLY | _O_BINARY)
+            try reader.copyBody(to: fd)
+            close(fd)
+            #else
             let handle = try FileHandle(forWritingTo: out)
             try reader.copyBody(to: handle.fileDescriptor)
             try handle.close()
+            #endif
             bodies[header.path] = try String(contentsOf: out, encoding: .utf8)
         }
 

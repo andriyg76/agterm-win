@@ -21,6 +21,7 @@ final class ControlAcceptLoopTests {
     }
 
     // regression: stop() closed the listener under a busy loop, whose next accept then hit a reused number
+    #if !os(Windows)
     @Test func stopLeavesTheListenerToTheLoopUntilFinish() throws {
         let loop = try #require(ControlAcceptLoop(listenFD: UnixSocket.listening(path: path)))
         let client = try #require(UnixSocket.connected(path: path))
@@ -76,6 +77,7 @@ final class ControlAcceptLoopTests {
         return (try? String(contentsOfFile: log, encoding: .utf8)) ?? "lsof output unreadable"
     }
 
+    #endif
     @Test func stopBeforeNextEndsTheLoopAtOnce() throws {
         let loop = try #require(ControlAcceptLoop(listenFD: UnixSocket.listening(path: path)))
         loop.stop()
@@ -84,6 +86,7 @@ final class ControlAcceptLoopTests {
         loop.finish()
     }
 
+    #if !os(Windows)
     @Test func anAcceptedConnectionIsBlocking() throws {
         let loop = try #require(ControlAcceptLoop(listenFD: UnixSocket.listening(path: path)))
         defer { loop.finish() }
@@ -95,4 +98,5 @@ final class ControlAcceptLoopTests {
 
         #expect(fcntl(conn, F_GETFL) & O_NONBLOCK == 0)
     }
+    #endif
 }

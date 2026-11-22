@@ -18,6 +18,7 @@ struct UnixSocketTests {
         #expect(info.st_mode & 0o777 == 0o600)
     }
 
+    #if !os(Windows)
     @Test func bothEndsCloseOnExec() throws {
         let path = path()
         defer { unlink(path) }
@@ -30,6 +31,7 @@ struct UnixSocketTests {
         #expect(fcntl(client, F_GETFD) & FD_CLOEXEC != 0)
     }
 
+    #endif
     @Test func aStaleFileAtThePathIsReplaced() throws {
         let path = path()
         defer { unlink(path) }

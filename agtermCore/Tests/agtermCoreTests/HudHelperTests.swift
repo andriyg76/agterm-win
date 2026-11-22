@@ -1,3 +1,4 @@
+#if !os(Windows) // drives hud.sh through a POSIX shell
 import Foundation
 import Testing
 @testable import agtermCore
@@ -543,3 +544,4 @@ struct HudHelperTests {
         #expect(out.fileHandleForReading.readDataToEndOfFile().isEmpty)
     }
 }
+#endif

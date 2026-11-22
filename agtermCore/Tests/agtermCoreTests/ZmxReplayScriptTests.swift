@@ -1,3 +1,4 @@
+#if !os(Windows) // runs the zmx replay script through a POSIX shell
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -712,3 +713,4 @@ struct ZmxReplayScriptTests {
         }
     }
 }
+#endif

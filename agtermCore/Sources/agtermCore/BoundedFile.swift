@@ -69,6 +69,10 @@ public enum BoundedFile {
     public static func readTail(path: String, maxBytes: Int, unchangedFrom: FileStamp? = nil) -> Result<TailRead?, Failure> {
         withDescriptor(path: path, maxBytes: nil) { fd, info in
             let size = Int(info.st_size)
+            #if os(Windows)
+            let stamp = FileStamp(device: UInt64(truncatingIfNeeded: info.st_dev), inode: UInt64(info.st_ino), size: size,
+                                  modifiedSeconds: Int(info.st_mtime), modifiedNanoseconds: 0)
+            #else
             #if canImport(Darwin)
             let modified = info.st_mtimespec
             #else
@@ -76,6 +80,7 @@ public enum BoundedFile {
             #endif
             let stamp = FileStamp(device: UInt64(truncatingIfNeeded: info.st_dev), inode: UInt64(info.st_ino), size: size,
                                   modifiedSeconds: Int(modified.tv_sec), modifiedNanoseconds: Int(modified.tv_nsec))
+            #endif
             if stamp == unchangedFrom { return .success(nil) }
             let offset = max(0, size - maxBytes - 1)
             guard let data = readFully(fd, offset: offset, count: size - offset) else { return .failure(.unreadable) }
@@ -104,7 +109,7 @@ public enum BoundedFile {
         guard fd >= 0 else { return .failure(.unreadable) }
         defer { close(fd) }
         var info = stat()
-        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, !isPlaceholder(info) else {
+        guard fstat(fd, &info) == 0, Int32(info.st_mode) & S_IFMT == S_IFREG, !isPlaceholder(info) else {
             return .failure(.unreadable)
         }
         if let maxBytes, info.st_size > maxBytes { return .failure(.tooLarge) }

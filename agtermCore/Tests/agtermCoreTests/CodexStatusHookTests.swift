@@ -237,6 +237,7 @@ struct CodexStatusHookTests {
         #expect(result.statusCalls.isEmpty)
     }
 
+    #if !os(Windows)
     @Test func watcherFileKeyUsesTheStablePaneToken() throws {
         let fm = FileManager.default
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -268,6 +269,7 @@ struct CodexStatusHookTests {
         #expect(fm.fileExists(atPath: staleRole.path))
     }
 
+    #endif
     @Test func watcherReportsVisibleApprovalPrompt() throws {
         let result = try run("", screen: "Would you like to run this command?\nPress Enter to confirm or Esc to cancel\n", worker: true)
         #expect(result.statusCalls == ["blocked"])
