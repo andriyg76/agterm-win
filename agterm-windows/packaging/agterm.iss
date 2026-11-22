@@ -1,5 +1,5 @@
 ; agterm-win's per-user installer, compiled by scripts/release.ps1 from a stage.ps1 folder:
-;   ISCC /DAppVersion=0.44.0.1 /DStage=... /DOutput=... /DZmxRev=... /DWebView2Setup=... [/DSign /Sagterm=...] agterm.iss
+;   ISCC /DAppVersion=0.44.0.1 /DStage=... /DOutput=... /DZmxRev=... [/DSign /Sagterm=...] agterm.iss
 ; Silent install for winget and the Store: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 #ifndef AppVersion
@@ -25,6 +25,9 @@ OutputBaseFilename=agterm-win-{#AppVersion}-x64-setup
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+VersionInfoProductName=agterm
+VersionInfoVersion={#AppVersion}
+VersionInfoProductVersion={#AppVersion}
 UninstallDisplayIcon={app}\agterm-win.exe
 ; windows close for the upgrade; the zmx daemons behind their sessions are not in the filter and keep running
 CloseApplications=yes
@@ -40,12 +43,12 @@ Source: "{#Stage}\*"; DestDir: "{app}"; Excludes: "\zmx"; Flags: recursesubdirs 
 ; a running daemon holds its zmx.exe open, so a revision's folder is written once and never replaced
 Source: "{#Stage}\zmx\{#ZmxRev}\*"; DestDir: "{app}\zmx\{#ZmxRev}"; Flags: onlyifdoesntexist
 Source: "{#Stage}\zmx\current"; DestDir: "{app}\zmx"; Flags: ignoreversion
-Source: "{#WebView2Setup}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
 
 [Icons]
 Name: "{autoprograms}\agterm"; Filename: "{app}\agterm-win.exe"
 
 [Run]
+; downloaded by PrepareToInstall rather than bundled, so the installer carries no Microsoft binary
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; Check: NeedsWebView2; \
   StatusMsg: "Installing the WebView2 runtime..."
 Filename: "{app}\agterm-win.exe"; Description: "Launch agterm"; Flags: nowait postinstall skipifsilent
@@ -68,6 +71,17 @@ function NeedsWebView2: Boolean;
 begin
   Result := not (WebView2Installed(HKLM, 'SOFTWARE\WOW6432Node\' + WebView2Client)
     or WebView2Installed(HKCU, 'Software\' + WebView2Client));
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if NeedsWebView2 then
+  try
+    DownloadTemporaryFile('https://go.microsoft.com/fwlink/p/?LinkId=2124703', 'MicrosoftEdgeWebview2Setup.exe', '', nil);
+  except
+    Result := 'agterm needs the Microsoft Edge WebView2 runtime, and downloading its installer failed: ' + GetExceptionMessage;
+  end;
 end;
 
 // earlier zmx revisions go once no daemon runs them; a folder a daemon still holds stays for the next upgrade
