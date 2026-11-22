@@ -75,4 +75,14 @@ public enum TerminalInput {
         let key = sequence(for: up ? .up : .down, applicationCursor: applicationCursor) ?? ""
         return String(repeating: key, count: max(notches, 1) * 3)
     }
+
+    /// autoscrollLines is how far a selection drag held `y` pixels down a view `height` pixels tall scrolls a tick:
+    /// positive back into the scrollback above the top, negative toward the live screen below the bottom, faster
+    /// the further out, a line per `step` pixels up to 10.
+    public static func autoscrollLines(y: Int, height: Int, step: Int) -> Int {
+        let step = max(step, 1)
+        if y < 0 { return min(1 + -y / step, 10) }
+        if y >= height { return -min(1 + (y - height) / step, 10) }
+        return 0
+    }
 }

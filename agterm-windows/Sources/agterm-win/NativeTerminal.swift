@@ -35,6 +35,7 @@ final class NativeTerminal {
     var onExit: (() -> Void)?
     /// onAttention runs when the program rings the bell or posts a notification.
     var onAttention: (() -> Void)?
+    fileprivate let autoscrollTimer: UINT_PTR = 1
     /// onWindowCommand takes the commands a terminal inside a window passes up (New and Close Session, Quit); without
     /// it those shortcuts are not taken and Quit closes the terminal's own window.
     var onWindowCommand: ((NativeMenu.Command) -> Void)?
@@ -284,6 +285,7 @@ final class NativeTerminal {
 
     fileprivate func mouseUp(_ button: Int32, x: Int32, y: Int32) {
         ReleaseCapture()
+        KillTimer(window, autoscrollTimer)
         if let held = reportingButton {
             reportingButton = nil
             report(held, x: x, y: y, release: true)
@@ -329,7 +331,44 @@ final class NativeTerminal {
             report(reportingButton ?? 3, x: x, y: y, release: false, motion: true)
         } else if leftHeld, reportingButton == nil {
             nt_select_extend(terminal, x, y)
+            var client = RECT()
+            GetClientRect(window, &client)
+            if y < 0 || y >= client.bottom { SetTimer(window, autoscrollTimer, 50, nil) }
         }
+    }
+
+    /// autoscroll scrolls a selection dragged above or below the view, a tick at a time while the button is held there.
+    fileprivate func autoscroll() {
+        var point = POINT()
+        var client = RECT()
+        GetCursorPos(&point)
+        ScreenToClient(window, &point)
+        GetClientRect(window, &client)
+        let lines = TerminalInput.autoscrollLines(y: Int(point.y), height: Int(client.bottom), step: Int(GetDpiForWindow(window)) / 5)
+        guard let terminal, lines != 0, GetKeyState(VK_LBUTTON) < 0 else {
+            KillTimer(window, autoscrollTimer)
+            return
+        }
+        nt_scroll(terminal, Int32(lines))
+        nt_select_extend(terminal, point.x, point.y)
+    }
+
+    /// pointerCursor shows the hand over a web address while Ctrl is held, since Ctrl+click opens it; nil leaves the
+    /// class's I-beam.
+    fileprivate func pointerCursor() -> HCURSOR? {
+        guard GetKeyState(VK_CONTROL) < 0 else { return nil }
+        var point = POINT()
+        GetCursorPos(&point)
+        ScreenToClient(window, &point)
+        return link(x: point.x, y: point.y) == nil ? nil : LoadCursorW(nil, UnsafePointer<WCHAR>(bitPattern: 32649)) // IDC_HAND
+    }
+
+    /// refreshCursor reapplies the cursor when Ctrl goes down or up over a still mouse.
+    fileprivate func refreshCursor() {
+        var point = POINT()
+        GetCursorPos(&point)
+        guard WindowFromPoint(point) == window else { return }
+        SendMessageW(window, UINT(WM_SETCURSOR), WPARAM(UInt(bitPattern: Int(bitPattern: window))), LPARAM(HTCLIENT) | LPARAM(WM_MOUSEMOVE) << 16)
     }
 
     private func report(_ button: Int32, x: Int32, y: Int32, release: Bool, motion: Bool = false) {
@@ -538,7 +577,20 @@ private let nativeWindowProcedure: WNDPROC = { window, message, wParam, lParam i
         case UINT(WM_MOUSEMOVE):
             native.mouseMove(x: x, y: y, leftHeld: wParam & WPARAM(MK_LBUTTON) != 0)
             return 0
+        case UINT(WM_SETCURSOR):
+            if lParam & 0xFFFF == LPARAM(HTCLIENT), let hand = native.pointerCursor() {
+                SetCursor(hand)
+                return 1
+            }
+            return DefWindowProcW(window, message, wParam, lParam)
+        case UINT(WM_TIMER) where wParam == native.autoscrollTimer:
+            native.autoscroll()
+            return 0
+        case UINT(WM_KEYUP) where wParam == WPARAM(VK_CONTROL):
+            native.refreshCursor()
+            return DefWindowProcW(window, message, wParam, lParam)
         case UINT(WM_KEYDOWN), UINT(WM_SYSKEYDOWN):
+            if wParam == WPARAM(VK_CONTROL) { native.refreshCursor() }
             return native.key(Int32(truncatingIfNeeded: wParam)) ? 0 : DefWindowProcW(window, message, wParam, lParam)
         case UINT(WM_CHAR):
             native.character(UInt16(truncatingIfNeeded: wParam), alt: false)

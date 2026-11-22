@@ -52,4 +52,12 @@ struct TerminalInputTests {
         #expect(TerminalInput.wheel(up: true, notches: 2, applicationCursor: false) == String(repeating: "\u{1b}[A", count: 6))
         #expect(TerminalInput.wheel(up: false, notches: 0, applicationCursor: true) == String(repeating: "\u{1b}OB", count: 3))
     }
+
+    @Test func selectionDragsScrollFasterFurtherOut() {
+        #expect(TerminalInput.autoscrollLines(y: 10, height: 400, step: 20) == 0)
+        #expect(TerminalInput.autoscrollLines(y: -1, height: 400, step: 20) == 1)
+        #expect(TerminalInput.autoscrollLines(y: -45, height: 400, step: 20) == 3)
+        #expect(TerminalInput.autoscrollLines(y: 400, height: 400, step: 20) == -1)
+        #expect(TerminalInput.autoscrollLines(y: 5000, height: 400, step: 20) == -10)
+    }
 }
