@@ -59,4 +59,10 @@ struct SessionSidebarTests {
         #expect(SessionSidebar.neighbor(of: UUID(), in: [a, b], forward: false) == b)
         #expect(SessionSidebar.neighbor(of: nil, in: [], forward: true) == nil)
     }
+
+    @Test func localTitlesMarkAttentionAndExit() {
+        #expect(SessionSidebar.localTitle("PowerShell", exited: false, attention: false) == "PowerShell")
+        #expect(SessionSidebar.localTitle("PowerShell", exited: false, attention: true) == "● PowerShell")
+        #expect(SessionSidebar.localTitle("cmd", exited: true, attention: true) == "● cmd (exited)")
+    }
 }

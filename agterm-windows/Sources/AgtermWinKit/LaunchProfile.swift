@@ -24,6 +24,11 @@ public enum LaunchProfiles {
         return profiles
     }
 
+    /// named finds a profile by name, ignoring case, as `--profile` names one.
+    public static func named(_ name: String, in profiles: [LaunchProfile]) -> LaunchProfile? {
+        profiles.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
     /// distributions reads `wsl.exe --list --quiet`, which writes UTF-16LE, one name a CRLF line.
     public static func distributions(fromWSLList data: Data) -> [String] {
         let units = stride(from: 0, to: data.count - data.count % 2, by: 2).map { UInt16(data[data.startIndex + $0]) | UInt16(data[data.startIndex + $0 + 1]) << 8 }

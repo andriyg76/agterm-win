@@ -141,6 +141,7 @@ struct nt_terminal {
     int32_t scroll = 0;
     bool focused = true;
     bool applicationCursor = false;
+    bool attention = false;  // a bell or notification since nt_take_attention
     uint32_t selectionColor = 0x264F78;
     bool selecting = false, hasSelection = false;
     int32_t selectionMode = 0;  // 0 cells, 1 words, 2 lines
@@ -457,6 +458,7 @@ extern "C" void nt_feed(nt_terminal *terminal, const uint8_t *bytes, uint32_t le
             if (kind == 1) {
                 skipString();
                 skipString();
+                terminal->attention = true;
             } else if (kind == 5) {
                 // the core leaves DECCKM (?1) to the host, which owns key encoding
                 std::string what = string(), detail = string();
@@ -469,7 +471,9 @@ extern "C" void nt_feed(nt_terminal *terminal, const uint8_t *bytes, uint32_t le
                 uint32_t replyLength = u32();
                 if (at + replyLength <= size && reply) reply(context, actions + at, replyLength);
                 at += replyLength;
-            } else if (kind != 6) {
+            } else if (kind == 6) {
+                terminal->attention = true;
+            } else {
                 break;
             }
         }
@@ -518,7 +522,13 @@ extern "C" void nt_paint(nt_terminal *terminal) {
         }
         float left = origin + column * terminal->cellWidth, top = origin + info.cursorRow * terminal->cellHeight;
         float right = left + std::max<uint32_t>(cell->width, 1) * terminal->cellWidth, bottom = top + terminal->cellHeight;
-        if (terminal->focused) {
+        // DECSCUSR: 0-2 block, 3-4 underline, 5-6 bar; blinking variants draw steady
+        float stroke = std::round(2 * terminal->scale()) / terminal->scale();
+        if (info.cursorShape >= 3 && info.cursorShape <= 4) {
+            terminal->fill(left, bottom - stroke, right, bottom, terminal->foreground);
+        } else if (info.cursorShape >= 5 && info.cursorShape <= 6) {
+            terminal->fill(left, top, left + stroke, bottom, terminal->foreground);
+        } else if (terminal->focused) {
             terminal->fill(left, top, right, bottom, terminal->foreground);
             terminal->drawRow(cell, 1, left, top, &terminal->background);
         } else {
@@ -725,6 +735,8 @@ extern "C" void nt_reset(nt_terminal *terminal) {
 }
 
 extern "C" void nt_show_title(nt_terminal *terminal) { terminal->showTitle(); }
+
+extern "C" int32_t nt_take_attention(nt_terminal *terminal) { return std::exchange(terminal->attention, false); }
 
 extern "C" void nt_dark_title_bar(void *window) {
     BOOL dark = TRUE;

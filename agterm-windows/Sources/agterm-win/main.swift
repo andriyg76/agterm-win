@@ -8,7 +8,9 @@ import agtermCore
 //                  [--install-server]       first install or upgrade agterm-server there to the release AGTERM_VERSION names
 //   agterm-win.exe --local [<name>]         local zmx session <name> (default agterm), kept when the window closes
 //   agterm-win.exe -- <command line>        one local program instead, no sidebar
-//   agterm-win.exe --native [--wsl <distribution>]  spike: the sidebar and terminal drawn natively, no WebView2
+//   agterm-win.exe --native [--wsl <distribution>] [--profile <name>]...
+//                                                    spike: the sidebar and terminals drawn natively, no WebView2;
+//                                                    each --profile starts a local session ("Command Prompt", "WSL Ubuntu")
 //   agterm-win.exe --native -- <command>             spike: one program drawn natively by agwinterm's core
 
 // AGTERM_WIN_STATE_DIR isolates a test or second instance; AGTERM_WIN_TEST_SCREEN makes the window write the
@@ -310,8 +312,9 @@ MainActor.assumeIsolated {
         } else {
             let flag = arguments.firstIndex(of: "--wsl")
             let distribution = flag.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? "Ubuntu"
+            let profiles = arguments.indices.filter { arguments[$0] == "--profile" && $0 + 1 < arguments.count }.map { arguments[$0 + 1] }
             NativeShell.open(remote: RemoteWindow(host: WSLHost(distribution: distribution), stateDirectory: stateDirectory), core: core,
-                             settings: stateDirectory.appendingPathComponent("native.json"))
+                             settings: stateDirectory.appendingPathComponent("native.json"), profiles: profiles)
         }
         return
     }

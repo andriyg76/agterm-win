@@ -33,6 +33,8 @@ final class NativeTerminal {
     private let testScreen = ProcessInfo.processInfo.environment["AGTERM_WIN_TEST_SCREEN"]
     /// onExit runs when the started program exits.
     var onExit: (() -> Void)?
+    /// onAttention runs when the program rings the bell or posts a notification.
+    var onAttention: (() -> Void)?
     /// onWindowCommand takes the commands a terminal inside a window passes up (New and Close Session, Quit); without
     /// it those shortcuts are not taken and Quit closes the terminal's own window.
     var onWindowCommand: ((NativeMenu.Command) -> Void)?
@@ -143,6 +145,7 @@ final class NativeTerminal {
                 MainActor.assumeIsolated { Unmanaged<NativeTerminal>.fromOpaque(context).takeUnretainedValue().console?.write(reply) }
             }, Unmanaged.passUnretained(self).toOpaque())
         }
+        if nt_take_attention(terminal) != 0 { onAttention?() }
     }
 
     fileprivate func exited(_ code: DWORD, generation: Int) {

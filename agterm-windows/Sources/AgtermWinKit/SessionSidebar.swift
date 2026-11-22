@@ -46,6 +46,12 @@ public enum SessionSidebar {
              ended: session.ended, children: children)
     }
 
+    /// localTitle is a local session's sidebar label: ● while it wants attention (a bell or notification since it was
+    /// last shown), and marked once its program exits.
+    public nonisolated static func localTitle(_ name: String, exited: Bool, attention: Bool) -> String {
+        (attention ? "● " : "") + name + (exited ? " (exited)" : "")
+    }
+
     /// selection keeps `current` while the catalog still has it, else falls to the first live session, else the first
     /// one at all, so the terminal says why there is nothing to show rather than staying blank.
     public static func selection(current: UUID?, in workspaces: [Workspace]) -> UUID? {

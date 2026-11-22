@@ -18,6 +18,7 @@ final class NativeShell {
         let title: String
         let terminal: NativeTerminal
         var exited = false
+        var attention = false
     }
 
     private let remote: RemoteWindow
@@ -43,10 +44,11 @@ final class NativeShell {
     private let darkBrush = CreateSolidBrush(0x262525)
     private var dpi: UInt32 = 96
 
-    static func open(remote: RemoteWindow, core: URL, settings: URL) {
+    /// open shows the window; `profiles` name launch profiles to start local sessions from once they are known.
+    static func open(remote: RemoteWindow, core: URL, settings: URL, profiles: [String]) {
         nt_init_process()
         shell = NativeShell(remote: remote, core: core, settingsURL: settings)
-        shell.create()
+        shell.create(starting: profiles)
     }
 
     private init(remote: RemoteWindow, core: URL, settingsURL: URL) {
@@ -56,7 +58,7 @@ final class NativeShell {
         settings = NativeSettings.load(from: settingsURL)
     }
 
-    private func create() {
+    private func create(starting requested: [String]) {
         let instance = GetModuleHandleW(nil)
         let className = Array("agterm-shell".utf16) + [0]
         className.withUnsafeBufferPointer { name in
@@ -90,7 +92,7 @@ final class NativeShell {
         remoteTerminal = makeTerminal()
         restorePlacement()
         layout()
-        discoverProfiles()
+        discoverProfiles(then: requested)
         remote.changed = { [weak self] in self?.catalogChanged() }
         catalogChanged()
         remote.start()
@@ -202,7 +204,7 @@ final class NativeShell {
 
     /// discoverProfiles adds the WSL distributions once `wsl.exe` lists them, off the UI thread: the first call can
     /// wait for the WSL service.
-    private func discoverProfiles() {
+    private func discoverProfiles(then requested: [String]) {
         let powerShell7 = Self.powerShell7()
         DispatchQueue.global().async {
             let listing = (try? HiddenProcess(commandLine: "wsl.exe --list --quiet", captureErrors: false))?.readToEnd() ?? Data()
@@ -211,6 +213,13 @@ final class NativeShell {
                 MainActor.assumeIsolated {
                     shell.profiles = LaunchProfiles.available(wslDistributions: distributions, powerShell7: powerShell7)
                     log("native shell: \(shell.profiles.count) launch profile(s): \(shell.profiles.map(\.name).joined(separator: ", "))")
+                    for name in requested {
+                        if let profile = LaunchProfiles.named(name, in: shell.profiles) {
+                            shell.newSession(profile)
+                        } else {
+                            log("native shell: no launch profile named \(name)")
+                        }
+                    }
                 }
             }
         }
@@ -221,6 +230,7 @@ final class NativeShell {
         let session = LocalSession(title: siblings == 0 ? profile.name : "\(profile.name) \(siblings + 1)", terminal: makeTerminal())
         let id = session.id
         session.terminal.onExit = { [unowned self] in localExited(id) }
+        session.terminal.onAttention = { [unowned self] in localAttention(id) }
         locals.append(session)
         layout()
         log("native shell: new \(profile.name) session [\(id)]")
@@ -232,6 +242,21 @@ final class NativeShell {
     private func localExited(_ id: Foundation.UUID) {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         locals[index].exited = true
+        rebuild()
+    }
+
+    /// localAttention marks a session that rang or notified while it was not in view, and flashes the taskbar button
+    /// while the window is in the background.
+    private func localAttention(_ id: Foundation.UUID) {
+        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
+        let inView = selected == id && GetForegroundWindow() == window
+        if !inView {
+            var flash = FLASHWINFO(cbSize: UINT(MemoryLayout<FLASHWINFO>.size), hwnd: window, dwFlags: DWORD(FLASHW_TRAY | FLASHW_TIMERNOFG),
+                                   uCount: 0, dwTimeout: 0)
+            FlashWindowEx(&flash)
+        }
+        guard selected != id, !locals[index].attention else { return }
+        locals[index].attention = true
         rebuild()
     }
 
@@ -315,8 +340,8 @@ final class NativeShell {
         var sidebar = SessionSidebar.items(remote.store.workspaces)
         if !locals.isEmpty {
             let children = locals.map {
-                SessionSidebar.Item(id: $0.id, title: $0.exited ? "\($0.title) (exited)" : $0.title, isWorkspace: false, ended: $0.exited,
-                                    children: [])
+                SessionSidebar.Item(id: $0.id, title: SessionSidebar.localTitle($0.title, exited: $0.exited, attention: $0.attention),
+                                    isWorkspace: false, ended: $0.exited, children: [])
             }
             sidebar.insert(SessionSidebar.Item(id: localWorkspaceID, title: "Local", isWorkspace: true, ended: false, children: children),
                            at: 0)
@@ -353,6 +378,10 @@ final class NativeShell {
 
     private func select(_ id: Foundation.UUID) {
         selected = id
+        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].attention {
+            locals[index].attention = false
+            rebuild()
+        }
         if let tree, let item = items[id] { nt_tree_select(tree, item) }
         let shown = visibleTerminal
         for terminal in terminalsShown { terminal.setVisible(terminal === shown) }

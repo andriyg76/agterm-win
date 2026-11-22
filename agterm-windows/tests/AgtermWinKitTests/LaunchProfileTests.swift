@@ -25,4 +25,10 @@ struct LaunchProfileTests {
         #expect(LaunchProfiles.distributions(fromWSLList: data) == ["Ubuntu", "Debian-12"])
         #expect(LaunchProfiles.distributions(fromWSLList: Data()).isEmpty)
     }
+
+    @Test func profilesAreNamedIgnoringCase() {
+        let profiles = LaunchProfiles.available(wslDistributions: ["Ubuntu"], powerShell7: nil)
+        #expect(LaunchProfiles.named("wsl ubuntu", in: profiles)?.commandLine == "wsl.exe -d Ubuntu --cd ~")
+        #expect(LaunchProfiles.named("Bash", in: profiles) == nil)
+    }
 }
