@@ -28,6 +28,7 @@ WizardStyle=modern
 VersionInfoProductName=agterm
 VersionInfoVersion={#AppVersion}
 VersionInfoProductVersion={#AppVersion}
+SetupIconFile=..\Resources\agterm.ico
 UninstallDisplayIcon={app}\agterm-win.exe
 ; windows close for the upgrade; the zmx daemons behind their sessions are not in the filter and keep running
 CloseApplications=yes
