@@ -83,6 +83,9 @@ public enum TerminalClipboard {
     // linux has no per-descriptor SIGPIPE switch; a broken-pipe SIGPIPE goes to the writing thread, so blocking
     // and draining it there keeps the write's EPIPE and leaves every other thread alone
     private static func withBrokenPipeSignalBlocked(_ body: () -> Void) {
+        #if os(Windows)
+        body()
+        #else
         var pipeSignal = sigset_t()
         sigemptyset(&pipeSignal)
         sigaddset(&pipeSignal, SIGPIPE)
@@ -96,6 +99,7 @@ public enum TerminalClipboard {
             _ = sigtimedwait(&pipeSignal, nil, &noWait)
         }
         pthread_sigmask(SIG_SETMASK, &previous, nil)
+        #endif
     }
     #endif
 }

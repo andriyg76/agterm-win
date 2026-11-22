@@ -49,10 +49,19 @@ public struct OpenerStaging: Sendable {
         }
         sweep()
         let folder = root.path + "/" + UUID().uuidString
-        guard mkdir(folder, 0o700) == 0 else { throw Failure.system("cannot create \(folder): \(PasteStaging.errorText())") }
+        #if os(Windows)
+        let made = _mkdir(folder)
+        #else
+        let made = mkdir(folder, 0o700)
+        #endif
+        guard made == 0 else { throw Failure.system("cannot create \(folder): \(PasteStaging.errorText())") }
         let path = folder + "/" + name
         do {
+            #if os(Windows)
+            let fd = open(path, O_WRONLY | O_CREAT | O_EXCL | _O_BINARY, 0o600)
+            #else
             let fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+            #endif
             guard fd >= 0 else { throw Failure.system("cannot create \(path): \(PasteStaging.errorText())") }
             let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
             do {

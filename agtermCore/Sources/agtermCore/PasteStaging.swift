@@ -125,9 +125,14 @@ public struct PasteStaging: Sendable {
 
     /// isPrivateDirectory says whether `path` itself, not a symlink to it, is a 0700 directory owned by this user.
     static func isPrivateDirectory(_ path: String) -> Bool {
+        #if os(Windows)
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else { return false }
+        return attributes[.type] as? FileAttributeType == .typeDirectory
+        #else
         var info = stat()
         return lstat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR && info.st_uid == geteuid()
             && info.st_mode & 0o777 == 0o700
+        #endif
     }
 
     /// prune removes the UUID-named folders under `root` last modified before `cutoff`.
