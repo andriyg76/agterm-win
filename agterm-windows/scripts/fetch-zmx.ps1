@@ -15,7 +15,9 @@ $want = "$rev $zigVersion"
 if ((Test-Path $stamp) -and ((Get-Content $stamp) -eq $want) -and (Test-Path (Join-Path $target "zmx.exe"))) { exit 0 }
 
 $build = Join-Path $env:TEMP "agterm-zmx-$($rev.Substring(0, 12))"
-if (Test-Path $build) { Remove-Item -Recurse -Force $build }
+# the Ghostty package zig fetches into the tree has paths past MAX_PATH, which only the \\?\ form removes
+function Remove-Build { if (Test-Path $build) { cmd /c rd /s /q "\\?\$build" } }
+Remove-Build
 git init -q $build
 git -C $build remote add origin $repo
 git -C $build fetch -q --depth 1 origin $rev
@@ -37,4 +39,4 @@ if (Test-Path $target) { Remove-Item -Recurse -Force $target }
 New-Item -ItemType Directory -Force $target | Out-Null
 Copy-Item (Join-Path $build "zig-out\bin\zmx.exe"), (Join-Path $build "LICENSE") $target
 Set-Content $stamp $want
-Remove-Item -Recurse -Force $build
+Remove-Build
