@@ -41,6 +41,20 @@ int32_t nt_selection_text(nt_terminal *terminal, uint16_t *out, int32_t capacity
 void nt_cell_at(nt_terminal *terminal, int32_t x, int32_t y, int32_t *column, int32_t *row);
 // nt_mouse_modes: 1 clicks (?1000), 2 drags (?1002), 4 all motion (?1003), 8 SGR encoding (?1006), 16 alternate screen.
 int32_t nt_mouse_modes(nt_terminal *terminal);
+// nt_screen_text is the scrollback and the screen, one line per row, written when `capacity` holds it all.
+int32_t nt_screen_text(nt_terminal *terminal, uint16_t *out, int32_t capacity);
+// nt_reset starts a fresh emulator at the current grid, dropping screen, scrollback, modes and selection.
+void nt_reset(nt_terminal *terminal);
+void nt_dark_title_bar(void *window);
+
+// The sidebar: a dark Win32 tree whose items carry a caller's tag.
+void *nt_tree_create(void *parent, uint32_t dpi);
+void nt_tree_set_dpi(void *tree, uint32_t dpi);
+void nt_tree_clear(void *tree);
+void *nt_tree_add(void *tree, void *parent, const uint16_t *text, int64_t tag, int32_t expanded);
+void nt_tree_select(void *tree, void *item);
+// nt_tree_selection_changed reads a WM_NOTIFY lParam: 1 with the item's tag when the user moved the selection.
+int32_t nt_tree_selection_changed(intptr_t notification, int64_t *tag);
 
 #ifdef __cplusplus
 }

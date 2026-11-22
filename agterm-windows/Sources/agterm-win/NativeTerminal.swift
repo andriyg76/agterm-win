@@ -1,3 +1,4 @@
+import AgtermWinKit
 import Foundation
 import NativeShim
 import WinSDK
@@ -6,14 +7,14 @@ private let nativeOutputMessage = UINT(WM_APP + 11)
 private let nativeExitMessage = UINT(WM_APP + 12)
 private nonisolated(unsafe) var native: NativeTerminal!
 
-/// NativeTerminal is the `--native` spike: one program under ConPTY whose output agwinterm's emulator core parses and
-/// Direct2D with DirectWrite draws, with no WebView2.
+/// NativeTerminal is one terminal drawn without WebView2: the program under ConPTY, agwinterm's emulator core parsing
+/// its output, Direct2D with DirectWrite drawing it. It is a top-level window of its own (`--native -- <command>`) or
+/// a child of NativeShell beside the sidebar.
 @MainActor
 final class NativeTerminal {
     static let coreFile = "agwinterm_core-abi19.dll"
 
-    private let commandLine: String
-    private var window: HWND?
+    private(set) var window: HWND?
     private var terminal: OpaquePointer?
     private var console: PseudoConsole?
     private var grid = (columns: Int32(0), rows: Int32(0))
@@ -23,20 +24,24 @@ final class NativeTerminal {
     private var clicks = (count: 0, time: Int32(0), x: Int32(0), y: Int32(0))
     private var reportingButton: Int32?
     private var lastMotionCell = (column: Int32(0), row: Int32(0))
+    // a generation per started program, so output or an exit still queued from the previous one is dropped
+    private var generation = 0
     private let pendingLock = NSLock()
     nonisolated(unsafe) private var pending = Data()
+    nonisolated(unsafe) private var acceptedGeneration = 0
+    private let testScreen = ProcessInfo.processInfo.environment["AGTERM_WIN_TEST_SCREEN"]
 
-    private init(commandLine: String) {
-        self.commandLine = commandLine
-    }
-
+    /// open runs `commandLine` in a top-level terminal window.
     static func open(commandLine: String, core: URL) {
         nt_init_process()
-        native = NativeTerminal(commandLine: commandLine)
-        native.open(core: core)
+        let terminal = NativeTerminal(parent: nil, core: core)
+        ShowWindow(terminal.window, SW_SHOW)
+        terminal.resize()
+        terminal.start(commandLine)
     }
 
-    private func open(core: URL) {
+    init(parent: HWND?, core: URL) {
+        native = self
         let instance = GetModuleHandleW(nil)
         let className = Array("agterm-native".utf16) + [0]
         className.withUnsafeBufferPointer { name in
@@ -49,27 +54,33 @@ final class NativeTerminal {
             windowClass.lpszClassName = name.baseAddress
             RegisterClassExW(&windowClass)
         }
-        guard let window = CreateWindowExW(0, className, Array("agterm".utf16) + [0], DWORD(WS_OVERLAPPEDWINDOW),
-                                           CW_USEDEFAULT, CW_USEDEFAULT, 1100, 700, nil, nil, instance, nil) else {
+        let style = parent == nil ? DWORD(WS_OVERLAPPEDWINDOW) : DWORD(WS_CHILD) | DWORD(WS_VISIBLE) | DWORD(WS_CLIPSIBLINGS)
+        guard let window = CreateWindowExW(0, className, Array("agterm".utf16) + [0], style,
+                                           CW_USEDEFAULT, CW_USEDEFAULT, 1100, 700, parent, nil, instance, nil) else {
             log("native: CreateWindowExW failed: \(GetLastError())")
             exit(1)
         }
         self.window = window
+        if parent == nil { nt_dark_title_bar(UnsafeMutableRawPointer(window)) }
         var error = [UInt16](repeating: 0, count: 512)
         terminal = nt_create(UnsafeMutableRawPointer(window), Array(core.path.utf16) + [0], Array("Cascadia Mono".utf16) + [0], 11,
                              &error, Int32(error.count))
         guard terminal != nil else {
             let reason = String(decodingCString: error, as: UTF16.self)
             log("native: \(reason)")
-            MessageBoxW(window, Array(reason.utf16) + [0], Array("agterm".utf16) + [0], UINT(MB_ICONERROR))
+            MessageBoxW(parent ?? window, Array(reason.utf16) + [0], Array("agterm".utf16) + [0], UINT(MB_ICONERROR))
             exit(1)
         }
-        ShowWindow(window, SW_SHOW)
-        resize()
+    }
+
+    /// start replaces whatever ran in the terminal with `commandLine` on a fresh screen.
+    func start(_ commandLine: String) {
+        reset()
+        let generation = generation, window = window
         do {
             console = try PseudoConsole(commandLine: commandLine, columns: Int16(clamping: grid.columns), rows: Int16(clamping: grid.rows),
-                                        onOutput: { [unowned self] in enqueue($0, window: window) },
-                                        onExit: { PostMessageW(window, nativeExitMessage, WPARAM($0), 0) })
+                                        onOutput: { [unowned self] in enqueue($0, generation: generation, window: window) },
+                                        onExit: { PostMessageW(window, nativeExitMessage, WPARAM($0), LPARAM(generation)) })
             log("native: started \(commandLine) at \(grid.columns)x\(grid.rows)")
         } catch {
             log("native: start failed: \(error)")
@@ -77,8 +88,29 @@ final class NativeTerminal {
         }
     }
 
-    nonisolated private func enqueue(_ data: Data, window: HWND?) {
+    /// show replaces whatever ran in the terminal with a dimmed line and no program.
+    func show(notice: String) {
+        reset()
+        feed(Data("\u{1b}[2m\(notice)\u{1b}[0m\r\n".utf8))
+    }
+
+    private func reset() {
+        console?.close()
+        console = nil
+        generation += 1
         pendingLock.lock()
+        pending = Data()
+        acceptedGeneration = generation
+        pendingLock.unlock()
+        if let terminal { nt_reset(terminal) }
+    }
+
+    nonisolated private func enqueue(_ data: Data, generation: Int, window: HWND?) {
+        pendingLock.lock()
+        guard generation == acceptedGeneration else {
+            pendingLock.unlock()
+            return
+        }
         let first = pending.isEmpty
         pending.append(data)
         pendingLock.unlock()
@@ -104,11 +136,24 @@ final class NativeTerminal {
         }
     }
 
-    fileprivate func exited(_ code: DWORD) {
+    fileprivate func exited(_ code: DWORD, generation: Int) {
+        guard generation == self.generation else { return }
+        flush()
         log("native: program exited \(code)")
-        feed(Data("\r\n\u{1b}[2m[process exited \(code)]\u{1b}[0m\r\n".utf8))
+        feed(Data("\r\n\u{1b}[2m[process exited with code \(code)]\u{1b}[0m\r\n".utf8))
         console?.close()
         console = nil
+        if let testScreen, let terminal {
+            let length = nt_screen_text(terminal, nil, 0)
+            var text = [UInt16](repeating: 0, count: Int(length))
+            nt_screen_text(terminal, &text, length)
+            try? Data(String(decoding: text, as: UTF16.self).utf8).write(to: URL(fileURLWithPath: testScreen))
+            DestroyWindow(GetAncestor(window, UINT(GA_ROOT)))
+        }
+    }
+
+    func move(x: Int32, y: Int32, width: Int32, height: Int32) {
+        MoveWindow(window, x, y, width, height, true)
     }
 
     fileprivate func resize() {
@@ -122,12 +167,16 @@ final class NativeTerminal {
         console?.resize(columns: Int16(clamping: columns), rows: Int16(clamping: rows))
     }
 
-    fileprivate func dpiChanged(_ dpi: UInt32, suggested: RECT) {
+    func setDPI(_ dpi: UInt32) {
         guard let terminal else { return }
         nt_set_dpi(terminal, dpi)
+        resize()
+    }
+
+    fileprivate func dpiChanged(_ dpi: UInt32, suggested: RECT) {
         SetWindowPos(window, nil, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top,
                      UINT(SWP_NOZORDER | SWP_NOACTIVATE))
-        resize()
+        setDPI(dpi)
     }
 
     fileprivate func paint() {
@@ -137,6 +186,16 @@ final class NativeTerminal {
     fileprivate func focus(_ focused: Bool) {
         if let terminal { nt_set_focus(terminal, focused ? 1 : 0) }
     }
+
+    private var modifiers: TerminalInput.Modifiers {
+        var modifiers: TerminalInput.Modifiers = []
+        if GetKeyState(VK_SHIFT) < 0 { modifiers.insert(.shift) }
+        if GetKeyState(VK_MENU) < 0 { modifiers.insert(.alt) }
+        if GetKeyState(VK_CONTROL) < 0 { modifiers.insert(.control) }
+        return modifiers
+    }
+
+    private var applicationCursor: Bool { terminal.map { nt_application_cursor($0) != 0 } ?? false }
 
     private var mouseModes: Int32 { terminal.map { nt_mouse_modes($0) } ?? 0 }
 
@@ -151,7 +210,7 @@ final class NativeTerminal {
         if reportsMouse {
             for _ in 0..<notches { report(delta > 0 ? 64 : 65, x: x, y: y, release: false) }
         } else if mouseModes & 16 != 0 {
-            send(String(repeating: cursorKey(delta > 0 ? "A" : "B", modifier: 1), count: Int(notches) * 3))
+            send(TerminalInput.wheel(up: delta > 0, notches: Int(notches), applicationCursor: applicationCursor))
         } else {
             nt_scroll(terminal, Int32(delta) / 40)
         }
@@ -160,6 +219,7 @@ final class NativeTerminal {
     /// mouseDown takes button 0 left, 1 middle, 2 right at a client pixel.
     fileprivate func mouseDown(_ button: Int32, x: Int32, y: Int32) {
         guard let terminal else { return }
+        SetFocus(window)
         SetCapture(window)
         if reportsMouse {
             reportingButton = button
@@ -201,27 +261,12 @@ final class NativeTerminal {
         }
     }
 
-    /// report encodes a mouse event for the program: SGR when it asked for ?1006, the X10 bytes otherwise.
     private func report(_ button: Int32, x: Int32, y: Int32, release: Bool, motion: Bool = false) {
         guard let terminal else { return }
         var column: Int32 = 0, row: Int32 = 0
         nt_cell_at(terminal, x, y, &column, &row)
-        var code = button + (motion ? 32 : 0)
-        if GetKeyState(VK_SHIFT) < 0 { code += 4 }
-        if GetKeyState(VK_MENU) < 0 { code += 8 }
-        if GetKeyState(VK_CONTROL) < 0 { code += 16 }
-        if mouseModes & 8 != 0 {
-            console?.write(Data("\u{1b}[<\(code);\(column);\(row)\(release ? "m" : "M")".utf8))
-        } else {
-            if release { code = (code & ~3) | 3 }
-            let clamp = { (value: Int32) in UInt8(clamping: min(value + 32, 255)) }
-            console?.write(Data([0x1B, 0x5B, 0x4D, clamp(code), clamp(column), clamp(row)]))
-        }
-    }
-
-    private func cursorKey(_ final: String, modifier: Int) -> String {
-        let application = terminal.map { nt_application_cursor($0) != 0 } ?? false
-        return modifier > 1 ? "\u{1b}[1;\(modifier)\(final)" : application ? "\u{1b}O\(final)" : "\u{1b}[\(final)"
+        console?.write(Data(TerminalInput.mouse(button: Int(button), column: Int(column), row: Int(row), release: release,
+                                                motion: motion, modifiers: modifiers, sgr: mouseModes & 8 != 0)))
     }
 
     private func copySelection() {
@@ -241,52 +286,39 @@ final class NativeTerminal {
 
     /// key sends what a non-character key types; false leaves the key to Windows (Alt+F4, Alt+Space).
     fileprivate func key(_ key: Int32) -> Bool {
-        let shift = GetKeyState(VK_SHIFT) < 0, control = GetKeyState(VK_CONTROL) < 0, alt = GetKeyState(VK_MENU) < 0
-        if shift, control, key == Int32(UInt8(ascii: "V")) {
+        let modifiers = modifiers
+        if modifiers == [.shift, .control], key == Int32(UInt8(ascii: "V")) {
             swallowCharacter = true
             paste()
             return true
         }
-        if control, key == Int32(UInt8(ascii: "C")), shift || terminal.map({ nt_has_selection($0) != 0 }) == true {
+        if modifiers.contains(.control), key == Int32(UInt8(ascii: "C")),
+           modifiers.contains(.shift) || terminal.map({ nt_has_selection($0) != 0 }) == true {
             swallowCharacter = true
             copySelection()
             return true
         }
-        if shift, key == VK_PRIOR || key == VK_NEXT, let terminal {
+        if modifiers == .shift, key == VK_PRIOR || key == VK_NEXT, let terminal {
             nt_scroll(terminal, (key == VK_PRIOR ? 1 : -1) * max(grid.rows / 2, 1))
             return true
         }
-        if alt, key == VK_F4 { return false }
-        let modifier = 1 + (shift ? 1 : 0) + (alt ? 2 : 0) + (control ? 4 : 0)
-        let cursor = { (final: String) in self.cursorKey(final, modifier: modifier) }
-        let tilde = { (code: Int) in modifier == 1 ? "\u{1b}[\(code)~" : "\u{1b}[\(code);\(modifier)~" }
-        let function = { (final: String) in modifier == 1 ? "\u{1b}O\(final)" : "\u{1b}[1;\(modifier)\(final)" }
-        let sequence: String? = switch key {
-        case VK_UP: cursor("A")
-        case VK_DOWN: cursor("B")
-        case VK_RIGHT: cursor("C")
-        case VK_LEFT: cursor("D")
-        case VK_HOME: cursor("H")
-        case VK_END: cursor("F")
-        case VK_INSERT: tilde(2)
-        case VK_DELETE: tilde(3)
-        case VK_PRIOR: tilde(5)
-        case VK_NEXT: tilde(6)
-        case VK_F1: function("P")
-        case VK_F2: function("Q")
-        case VK_F3: function("R")
-        case VK_F4: function("S")
-        case VK_F5: tilde(15)
-        case VK_F6: tilde(17)
-        case VK_F7: tilde(18)
-        case VK_F8: tilde(19)
-        case VK_F9: tilde(20)
-        case VK_F10: tilde(21)
-        case VK_F11: tilde(23)
-        case VK_F12: tilde(24)
+        if modifiers.contains(.alt), key == VK_F4 { return false }
+        let mapped: TerminalInput.Key? = switch key {
+        case VK_UP: .up
+        case VK_DOWN: .down
+        case VK_RIGHT: .right
+        case VK_LEFT: .left
+        case VK_HOME: .home
+        case VK_END: .end
+        case VK_INSERT: .insert
+        case VK_DELETE: .delete
+        case VK_PRIOR: .pageUp
+        case VK_NEXT: .pageDown
+        case VK_F1...VK_F12: .function(Int(key - VK_F1) + 1)
         default: nil
         }
-        guard let sequence else { return false }
+        guard let mapped, let sequence = TerminalInput.sequence(for: mapped, modifiers: modifiers, applicationCursor: applicationCursor)
+        else { return false }
         send(sequence)
         return true
     }
@@ -302,8 +334,7 @@ final class NativeTerminal {
         }
         let units = highSurrogate.map { (0xDC00..<0xE000).contains(unit) ? [$0, unit] : [unit] } ?? [unit]
         highSurrogate = nil
-        let text = unit == 0x08 ? "\u{7f}" : String(decoding: units, as: UTF16.self)
-        send((alt ? "\u{1b}" : "") + text)
+        send(TerminalInput.character(String(decoding: units, as: UTF16.self), alt: alt))
     }
 
     private func paste() {
@@ -312,8 +343,7 @@ final class NativeTerminal {
         guard let handle = GetClipboardData(UINT(CF_UNICODETEXT)), let pointer = GlobalLock(handle) else { return }
         defer { GlobalUnlock(handle) }
         let text = String(decodingCString: pointer.assumingMemoryBound(to: UInt16.self), as: UTF16.self)
-            .replacingOccurrences(of: "\r\n", with: "\r").replacingOccurrences(of: "\n", with: "\r")
-        send(nt_bracketed_paste(terminal) != 0 ? "\u{1b}[200~\(text)\u{1b}[201~" : text)
+        send(TerminalInput.paste(text, bracketed: nt_bracketed_paste(terminal) != 0))
     }
 
     private func send(_ text: String) {
@@ -324,7 +354,7 @@ final class NativeTerminal {
         console?.write(Data(text.utf8))
     }
 
-    fileprivate func destroy() {
+    func destroy() {
         console?.close()
         console = nil
         nt_destroy(terminal)
@@ -334,6 +364,7 @@ final class NativeTerminal {
 
 private let nativeWindowProcedure: WNDPROC = { window, message, wParam, lParam in
     MainActor.assumeIsolated {
+        let x = Int32(Int16(truncatingIfNeeded: lParam)), y = Int32(Int16(truncatingIfNeeded: lParam >> 16))
         switch message {
         case UINT(WM_SIZE):
             native.resize()
@@ -352,21 +383,18 @@ private let nativeWindowProcedure: WNDPROC = { window, message, wParam, lParam i
             native.focus(message == UINT(WM_SETFOCUS))
             return 0
         case UINT(WM_MOUSEWHEEL):
-            var point = POINT(x: Int32(Int16(truncatingIfNeeded: lParam)), y: Int32(Int16(truncatingIfNeeded: lParam >> 16)))
+            var point = POINT(x: x, y: y)
             ScreenToClient(window, &point)
             native.wheel(Int16(truncatingIfNeeded: wParam >> 16), x: point.x, y: point.y)
             return 0
         case UINT(WM_LBUTTONDOWN), UINT(WM_MBUTTONDOWN), UINT(WM_RBUTTONDOWN):
-            let button: Int32 = message == UINT(WM_LBUTTONDOWN) ? 0 : message == UINT(WM_MBUTTONDOWN) ? 1 : 2
-            native.mouseDown(button, x: Int32(Int16(truncatingIfNeeded: lParam)), y: Int32(Int16(truncatingIfNeeded: lParam >> 16)))
+            native.mouseDown(message == UINT(WM_LBUTTONDOWN) ? 0 : message == UINT(WM_MBUTTONDOWN) ? 1 : 2, x: x, y: y)
             return 0
         case UINT(WM_LBUTTONUP), UINT(WM_MBUTTONUP), UINT(WM_RBUTTONUP):
-            let button: Int32 = message == UINT(WM_LBUTTONUP) ? 0 : message == UINT(WM_MBUTTONUP) ? 1 : 2
-            native.mouseUp(button, x: Int32(Int16(truncatingIfNeeded: lParam)), y: Int32(Int16(truncatingIfNeeded: lParam >> 16)))
+            native.mouseUp(message == UINT(WM_LBUTTONUP) ? 0 : message == UINT(WM_MBUTTONUP) ? 1 : 2, x: x, y: y)
             return 0
         case UINT(WM_MOUSEMOVE):
-            native.mouseMove(x: Int32(Int16(truncatingIfNeeded: lParam)), y: Int32(Int16(truncatingIfNeeded: lParam >> 16)),
-                             leftHeld: wParam & WPARAM(MK_LBUTTON) != 0)
+            native.mouseMove(x: x, y: y, leftHeld: wParam & WPARAM(MK_LBUTTON) != 0)
             return 0
         case UINT(WM_KEYDOWN), UINT(WM_SYSKEYDOWN):
             return native.key(Int32(truncatingIfNeeded: wParam)) ? 0 : DefWindowProcW(window, message, wParam, lParam)
@@ -381,9 +409,11 @@ private let nativeWindowProcedure: WNDPROC = { window, message, wParam, lParam i
             native.flush()
             return 0
         case nativeExitMessage:
-            native.exited(DWORD(truncatingIfNeeded: wParam))
+            native.exited(DWORD(truncatingIfNeeded: wParam), generation: Int(lParam))
             return 0
         case UINT(WM_DESTROY):
+            // a child terminal goes with its shell, which owns quitting
+            guard GetParent(window) == nil else { return 0 }
             native.destroy()
             PostQuitMessage(0)
             return 0

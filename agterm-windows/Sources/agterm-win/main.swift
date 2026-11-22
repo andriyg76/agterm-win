@@ -8,7 +8,8 @@ import agtermCore
 //                  [--install-server]       first install or upgrade agterm-server there to the release AGTERM_VERSION names
 //   agterm-win.exe --local [<name>]         local zmx session <name> (default agterm), kept when the window closes
 //   agterm-win.exe -- <command line>        one local program instead, no sidebar
-//   agterm-win.exe --native [-- <command>]  spike: one program drawn natively by agwinterm's core, no WebView2
+//   agterm-win.exe --native [--wsl <distribution>]  spike: the sidebar and terminal drawn natively, no WebView2
+//   agterm-win.exe --native -- <command>             spike: one program drawn natively by agwinterm's core
 
 // AGTERM_WIN_STATE_DIR isolates a test or second instance; AGTERM_WIN_TEST_SCREEN makes the window write the
 // terminal's text there when its program exits, then close.
@@ -302,10 +303,15 @@ MainActor.assumeIsolated {
     log("agterm-win starting on \(UpdateCheck.hostName)")
     let arguments = CommandLine.arguments
     if arguments.contains("--native") {
-        let separator = arguments.firstIndex(of: "--")
-        let command = separator.map { arguments[($0 + 1)...].joined(separator: " ") } ?? ""
-        NativeTerminal.open(commandLine: command.isEmpty ? "powershell.exe" : command,
-                            core: bundled(NativeTerminal.coreFile, source: "vendor/agwcore/\(NativeTerminal.coreFile)"))
+        let core = bundled(NativeTerminal.coreFile, source: "vendor/agwcore/\(NativeTerminal.coreFile)")
+        if let separator = arguments.firstIndex(of: "--") {
+            let command = arguments[(separator + 1)...].joined(separator: " ")
+            NativeTerminal.open(commandLine: command.isEmpty ? "powershell.exe" : command, core: core)
+        } else {
+            let flag = arguments.firstIndex(of: "--wsl")
+            let distribution = flag.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? "Ubuntu"
+            NativeShell.open(remote: RemoteWindow(host: WSLHost(distribution: distribution), stateDirectory: stateDirectory), core: core)
+        }
         return
     }
     if let flag = arguments.firstIndex(of: "--local") {

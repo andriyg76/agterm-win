@@ -30,11 +30,15 @@ let package = Package(
         ),
         .target(
             name: "NativeShim",
-            linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("user32")]
+            linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("dwmapi"), .linkedLibrary("user32"),
+                             .linkedLibrary("comctl32"), .linkedLibrary("uxtheme"), .linkedLibrary("gdi32")]
         ),
+        // the Win32-free logic the native window runs, so `swift test` covers it on any host
+        .target(name: "AgtermWinKit", dependencies: [.product(name: "agtermCore", package: "agtermCore")]),
+        .testTarget(name: "AgtermWinKitTests", dependencies: ["AgtermWinKit"], path: "tests/AgtermWinKitTests"),
         .executableTarget(
             name: "agterm-win",
-            dependencies: ["WebView2Shim", "NativeShim", .product(name: "agtermCore", package: "agtermCore")],
+            dependencies: ["WebView2Shim", "NativeShim", "AgtermWinKit", .product(name: "agtermCore", package: "agtermCore")],
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 .linkedLibrary("user32"),

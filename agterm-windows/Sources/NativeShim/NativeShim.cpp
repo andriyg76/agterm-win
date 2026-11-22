@@ -3,6 +3,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <d2d1.h>
+#include <dwmapi.h>
 #include <dwrite.h>
 #include <wrl/client.h>
 
@@ -335,7 +336,7 @@ struct nt_terminal {
         if (bytes) core.freeBuffer(bytes, length);
         if (next == title) return;
         title = next;
-        SetWindowTextW(window, title.empty() ? L"agterm" : title.c_str());
+        SetWindowTextW(GetAncestor(window, GA_ROOT), title.empty() ? L"agterm" : title.c_str());
     }
 };
 
@@ -570,6 +571,36 @@ extern "C" void nt_select_clear(nt_terminal *terminal) {
 
 extern "C" int32_t nt_has_selection(nt_terminal *terminal) { return terminal->hasSelection; }
 
+namespace {
+
+// rowText is cells first...last as UTF-16, wide-character tails skipped and trailing blanks dropped
+std::wstring rowText(const std::vector<Cell> &cells, int32_t first, int32_t last) {
+    std::wstring row;
+    for (int32_t column = first; column <= last; column++) {
+        const Cell &cell = cells[column];
+        if (cell.width == 0) continue;
+        uint32_t rune = cell.rune > 0 ? static_cast<uint32_t>(cell.rune) : ' ';
+        if (rune > 0xFFFF) {
+            rune -= 0x10000;
+            row += static_cast<wchar_t>(0xD800 + (rune >> 10));
+            row += static_cast<wchar_t>(0xDC00 + (rune & 0x3FF));
+        } else {
+            row += static_cast<wchar_t>(rune);
+        }
+    }
+    size_t end = row.find_last_not_of(L' ');
+    row.erase(end == std::wstring::npos ? 0 : end + 1);
+    return row;
+}
+
+int32_t give(const std::wstring &text, uint16_t *out, int32_t capacity) {
+    int32_t length = static_cast<int32_t>(text.size());
+    if (out && capacity >= length) std::memcpy(out, text.data(), text.size() * sizeof(wchar_t));
+    return length;
+}
+
+}  // namespace
+
 extern "C" int32_t nt_selection_text(nt_terminal *terminal, uint16_t *out, int32_t capacity) {
     if (!terminal->hasSelection) return 0;
     Info state = terminal->info();
@@ -580,26 +611,45 @@ extern "C" int32_t nt_selection_text(nt_terminal *terminal, uint16_t *out, int32
         terminal->rowCells(state, line, cells);
         int32_t first = line == start.line ? start.column : 0;
         int32_t last = std::min<int32_t>(line == end.line ? end.column : INT32_MAX, static_cast<int32_t>(cells.size()) - 1);
-        std::wstring row;
-        for (int32_t column = first; column <= last; column++) {
-            const Cell &cell = cells[column];
-            if (cell.width == 0) continue;
-            uint32_t rune = cell.rune > 0 ? static_cast<uint32_t>(cell.rune) : ' ';
-            if (rune > 0xFFFF) {
-                rune -= 0x10000;
-                row += static_cast<wchar_t>(0xD800 + (rune >> 10));
-                row += static_cast<wchar_t>(0xDC00 + (rune & 0x3FF));
-            } else {
-                row += static_cast<wchar_t>(rune);
-            }
-        }
-        row.erase(row.find_last_not_of(L' ') == std::wstring::npos ? 0 : row.find_last_not_of(L' ') + 1);
-        text += row;
+        text += rowText(cells, first, last);
         if (line < end.line) text += L"\r\n";
     }
-    int32_t length = static_cast<int32_t>(text.size());
-    if (out && capacity >= length) std::memcpy(out, text.data(), text.size() * sizeof(wchar_t));
-    return length;
+    return give(text, out, capacity);
+}
+
+extern "C" int32_t nt_screen_text(nt_terminal *terminal, uint16_t *out, int32_t capacity) {
+    Info state = terminal->info();
+    std::wstring text;
+    std::vector<Cell> cells(state.columns);
+    for (uint32_t line = 0; line < state.historyCount; line++) {
+        terminal->core.copyHistoryRow(terminal->emulator, line, cells.data(), state.columns);
+        text += rowText(cells, 0, static_cast<int32_t>(state.columns) - 1) + L"\n";
+    }
+    std::vector<Cell> grid(static_cast<size_t>(state.columns) * state.rows);
+    terminal->core.copyGrid(terminal->emulator, grid.data(), static_cast<uint32_t>(grid.size()));
+    for (uint32_t row = 0; row < state.rows; row++) {
+        std::copy_n(grid.begin() + static_cast<size_t>(row) * state.columns, state.columns, cells.begin());
+        text += rowText(cells, 0, static_cast<int32_t>(state.columns) - 1) + L"\n";
+    }
+    return give(text, out, capacity);
+}
+
+extern "C" void nt_reset(nt_terminal *terminal) {
+    void *fresh = terminal->core.create(terminal->columns, terminal->rows);
+    if (!fresh) return;
+    terminal->core.free(terminal->emulator);
+    terminal->emulator = fresh;
+    terminal->core.setDefaultColors(fresh, terminal->foreground, terminal->background);
+    terminal->core.setScrollback(fresh, 10000);
+    terminal->scroll = 0;
+    terminal->applicationCursor = false;
+    terminal->hasSelection = terminal->selecting = false;
+    InvalidateRect(terminal->window, nullptr, FALSE);
+}
+
+extern "C" void nt_dark_title_bar(void *window) {
+    BOOL dark = TRUE;
+    DwmSetWindowAttribute(static_cast<HWND>(window), 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof(dark));
 }
 
 extern "C" void nt_cell_at(nt_terminal *terminal, int32_t x, int32_t y, int32_t *column, int32_t *row) {
