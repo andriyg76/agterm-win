@@ -64,15 +64,13 @@ struct WSLHost {
 
     /// download fetches a release asset with the system curl.exe, over HTTPS only and within ServerInstall's limit.
     private static func download(_ url: URL, to file: URL) throws {
-        let curl = Process()
-        curl.executableURL = URL(fileURLWithPath: system32 + "curl.exe")
-        curl.arguments = ["--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--proto-redir", "=https",
-                          "--max-filesize", String(ServerInstall.downloadLimit), "--output", file.path, url.absoluteString]
-        let errors = Pipe()
-        curl.standardError = errors
-        curl.standardInput = FileHandle.nullDevice
-        try curl.run()
-        let stderr = errors.fileHandleForReading.readDataToEndOfFile()
+        let arguments = [system32 + "curl.exe", "--fail", "--silent", "--show-error", "--location", "--proto", "=https",
+                         "--proto-redir", "=https", "--max-filesize", String(ServerInstall.downloadLimit), "--output", file.path,
+                         url.absoluteString]
+        let curl = try HiddenProcess(commandLine: arguments.map(windowsQuoted).joined(separator: " "), captureErrors: true)
+        curl.closeInput()
+        _ = curl.readToEnd()
+        let stderr = curl.readErrorsToEnd()
         curl.waitUntilExit()
         guard curl.terminationStatus == 0 else {
             throw Failure.command("downloading \(url.absoluteString)", curl.terminationStatus, String(decoding: stderr, as: UTF8.self))
@@ -88,32 +86,24 @@ struct WSLHost {
 
     /// attachCommandLine is the Windows command line that attaches a ConPTY to `daemon` for the pane's lifetime.
     func attachCommandLine(endpoint: ControlZmxEndpoint, daemon: String) throws -> String {
-        let line = try RemoteSession.attachCommand(host: Self.placeholderHost, endpoint: endpoint, daemon: daemon).last!
-        return ([Self.wsl] + arguments(line)).map(Self.windowsQuoted).joined(separator: " ")
+        commandLine(try RemoteSession.attachCommand(host: Self.placeholderHost, endpoint: endpoint, daemon: daemon).last!)
     }
 
-    private func arguments(_ line: String) -> [String] {
-        ["-d", distribution, "-e", "/bin/sh", "-c", line]
+    private func commandLine(_ line: String) -> String {
+        [Self.wsl, "-d", distribution, "-e", "/bin/sh", "-c", line].map(Self.windowsQuoted).joined(separator: " ")
     }
 
-    /// process is `line` under `/bin/sh -c` in the distribution, not yet started.
-    func process(_ line: String) -> Process {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: Self.wsl)
-        process.arguments = arguments(line)
-        return process
+    /// start runs `line` under `/bin/sh -c` in the distribution, with `input` on its stdin when given.
+    func start(_ line: String, input: URL? = nil, captureErrors: Bool) throws -> HiddenProcess {
+        try HiddenProcess(commandLine: commandLine(line), input: input, captureErrors: captureErrors)
     }
 
     /// run runs `line` to completion, with `input` on its stdin, and returns what it printed.
     func run(_ line: String, input: URL? = nil) throws -> (status: Int32, stdout: String, stderr: String) {
-        let process = process(line)
-        let output = Pipe(), errors = Pipe()
-        process.standardOutput = output
-        process.standardError = errors
-        process.standardInput = try input.map { try FileHandle(forReadingFrom: $0) } ?? FileHandle.nullDevice
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        let stderr = errors.fileHandleForReading.readDataToEndOfFile()
+        let process = try start(line, input: input, captureErrors: true)
+        process.closeInput()
+        let data = process.readToEnd()
+        let stderr = process.readErrorsToEnd()
         process.waitUntilExit()
         return (process.terminationStatus, String(decoding: data, as: UTF8.self), String(decoding: stderr, as: UTF8.self))
     }

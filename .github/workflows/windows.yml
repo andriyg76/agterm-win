@@ -57,10 +57,9 @@ jobs:
           cache: true
       - uses: actions/cache@v6
         with:
-          path: |
-            agterm-windows/.build
-            agterm-windows/vendor
-          key: app-${{ env.SWIFT_BUILD }}-${{ hashFiles('agterm-windows/Package.swift', 'agtermCore/Package.swift', 'agtermCore/Package.resolved', 'agterm-windows/scripts/fetch-*.ps1') }}
+          # not .build: its debug link comes back from the cache unreadable, and stage.ps1 copies through it
+          path: agterm-windows/vendor
+          key: app-vendor-${{ env.SWIFT_BUILD }}-${{ hashFiles('agterm-windows/Package.swift', 'agtermCore/Package.swift', 'agtermCore/Package.resolved', 'agterm-windows/scripts/fetch-*.ps1') }}
       - run: ./scripts/fetch-webview2.ps1; ./scripts/fetch-xterm.ps1; ./scripts/fetch-server.ps1
       - run: swift build
       - run: ./scripts/stage.ps1 -Output "$env:RUNNER_TEMP\agterm-win"
