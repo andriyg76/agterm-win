@@ -118,16 +118,20 @@ final class NativeShell {
         saveSettings()
     }
 
-    /// restorePlacement shows the window where it last was, unless that rectangle is on no monitor now.
+    /// restorePlacement shows the window where it last was, or where Windows put it when that rectangle is on no monitor
+    /// now, fitted inside its monitor's work area either way.
     private func restorePlacement() {
-        guard let frame = settings.frame else {
-            ShowWindow(window, settings.maximized ? SW_SHOWMAXIMIZED : SW_SHOW)
-            return
-        }
-        var rect = RECT(left: frame.left, top: frame.top, right: frame.right, bottom: frame.bottom)
-        guard MonitorFromRect(&rect, DWORD(MONITOR_DEFAULTTONULL)) != nil else {
-            ShowWindow(window, SW_SHOW)
-            return
+        var current = RECT()
+        GetWindowRect(window, &current)
+        var rect = settings.frame.map { RECT(left: $0.left, top: $0.top, right: $0.right, bottom: $0.bottom) } ?? current
+        if MonitorFromRect(&rect, DWORD(MONITOR_DEFAULTTONULL)) == nil { rect = current }
+        var monitor = MONITORINFO()
+        monitor.cbSize = DWORD(MemoryLayout<MONITORINFO>.size)
+        if GetMonitorInfoW(MonitorFromRect(&rect, DWORD(MONITOR_DEFAULTTONEAREST)), &monitor) {
+            let work = monitor.rcWork
+            let fitted = NativeSettings.Frame(left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom)
+                .fitted(in: .init(left: work.left, top: work.top, right: work.right, bottom: work.bottom))
+            rect = RECT(left: fitted.left, top: fitted.top, right: fitted.right, bottom: fitted.bottom)
         }
         var placement = WINDOWPLACEMENT()
         placement.length = UINT(MemoryLayout<WINDOWPLACEMENT>.size)

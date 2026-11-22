@@ -11,6 +11,13 @@ public struct NativeSettings: Codable, Equatable, Sendable {
             self.right = right
             self.bottom = bottom
         }
+
+        /// fitted is this rectangle moved, and shrunk when it is larger, to lie inside `area` (a monitor's work area).
+        public func fitted(in area: Frame) -> Frame {
+            let width = min(right - left, area.right - area.left), height = min(bottom - top, area.bottom - area.top)
+            let x = min(max(left, area.left), area.right - width), y = min(max(top, area.top), area.bottom - height)
+            return Frame(left: x, top: y, right: x + width, bottom: y + height)
+        }
     }
 
     /// LocalSession is a local session to start again at the next launch: its name and what it ran.

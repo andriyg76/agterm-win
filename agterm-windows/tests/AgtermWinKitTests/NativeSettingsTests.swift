@@ -48,4 +48,12 @@ struct NativeSettingsTests {
         #expect(settings.localSessions == [.init(title: "b", commandLine: "cmd.exe")])
         #expect(settings.selectedLocal == nil)
     }
+
+    @Test func framesFitTheWorkArea() {
+        let area = NativeSettings.Frame(left: 0, top: 0, right: 984, bottom: 1013)
+        #expect(NativeSettings.Frame(left: 100, top: 50, right: 700, bottom: 550).fitted(in: area) == .init(left: 100, top: 50, right: 700, bottom: 550))
+        #expect(NativeSettings.Frame(left: 8, top: 120, right: 1308, bottom: 880).fitted(in: area) == .init(left: 0, top: 120, right: 984, bottom: 880))
+        #expect(NativeSettings.Frame(left: 600, top: 900, right: 1000, bottom: 1200).fitted(in: area) == .init(left: 584, top: 713, right: 984, bottom: 1013))
+        #expect(NativeSettings.Frame(left: -3000, top: 0, right: -2000, bottom: 400).fitted(in: area) == .init(left: 0, top: 0, right: 1000 - 16, bottom: 400))
+    }
 }
