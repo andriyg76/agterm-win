@@ -45,6 +45,16 @@ package.dependencies.append(.package(url: "https://github.com/swiftlang/swift-ma
 package.targets[0].dependencies.append(.product(name: "Markdown", package: "swift-markdown"))
 #endif
 
+#if os(Windows)
+// agterm-server hosts sessions on Linux; the Windows client only connects to one. agtermctl runs inside a session
+// on its own host, so on Windows it waits for local sessions, which need a CreateProcess/ConPTY port of its POSIX job control.
+package.products.removeAll { ["agterm-server", "agtermctl"].contains($0.name) }
+package.targets.removeAll {
+    ["AgtermServerKit", "agterm-server", "AgtermServerTests",
+     "agtermctlKit", "agtermctl", "session-wait-watchdog-probe", "agtermctlKitTests"].contains($0.name)
+}
+#endif
+
 #if os(macOS)
 package.products.append(.executable(name: "agterm-session-host", targets: ["agterm-session-host"]))
 package.targets += [

@@ -1,3 +1,4 @@
+#if !os(Windows) // TODO(windows): socketpair has no Winsock equivalent; rebuild the fixture on a listening AF_UNIX pair
 import Foundation
 import Testing
 @testable import agtermCore
@@ -191,3 +192,4 @@ final class ControlStreamFramingTests {
         #expect(recorder.lines.isEmpty)
     }
 }
+#endif

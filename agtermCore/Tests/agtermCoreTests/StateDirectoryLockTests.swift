@@ -58,6 +58,7 @@ struct StateDirectoryLockTests {
     }
 
     // regression: a child spawned while the lock was held kept it locked after release
+    #if !os(Windows)
     @Test func releasingTheLockFreesItWhileAChildHoldsACopyOfItsDescriptor() throws {
         let dir = makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -88,6 +89,7 @@ struct StateDirectoryLockTests {
         #expect(ownedLock(StateDirectoryLock.acquire(directory: dir)) != nil)
     }
 
+    #endif
     @Test func aDirectoryPathHeldByAFileIsUnavailableNotHeld() throws {
         let file = makeTempDir()
         defer { try? FileManager.default.removeItem(at: file) }
