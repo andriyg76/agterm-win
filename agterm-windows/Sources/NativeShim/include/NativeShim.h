@@ -29,6 +29,18 @@ void nt_set_focus(nt_terminal *terminal, int32_t focused);
 int32_t nt_bracketed_paste(nt_terminal *terminal);
 // nt_application_cursor is DECCKM: arrows, Home and End are SS3 sequences while a program has set it.
 int32_t nt_application_cursor(nt_terminal *terminal);
+// Selection in client pixels: `mode` 0 selects cells, 1 words, 2 lines; a start without movement selects nothing.
+void nt_select_start(nt_terminal *terminal, int32_t x, int32_t y, int32_t mode);
+void nt_select_extend(nt_terminal *terminal, int32_t x, int32_t y);
+void nt_select_end(nt_terminal *terminal);
+void nt_select_clear(nt_terminal *terminal);
+int32_t nt_has_selection(nt_terminal *terminal);
+// nt_selection_text returns the selection's length in UTF-16 units and writes it when `capacity` holds it all.
+int32_t nt_selection_text(nt_terminal *terminal, uint16_t *out, int32_t capacity);
+// nt_cell_at is the 1-based cell under a client pixel, as mouse reports count it.
+void nt_cell_at(nt_terminal *terminal, int32_t x, int32_t y, int32_t *column, int32_t *row);
+// nt_mouse_modes: 1 clicks (?1000), 2 drags (?1002), 4 all motion (?1003), 8 SGR encoding (?1006), 16 alternate screen.
+int32_t nt_mouse_modes(nt_terminal *terminal);
 
 #ifdef __cplusplus
 }

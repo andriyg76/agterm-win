@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cwchar>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -103,6 +105,19 @@ struct Style {
     uint32_t foreground, background, face, attributes;
 };
 
+// a buffer position: lines count from the oldest scrollback row, so a selection stays put while the view scrolls
+struct Point {
+    int64_t line;
+    int32_t column;
+    bool operator<(const Point &other) const { return line < other.line || (line == other.line && column < other.column); }
+};
+
+bool wordCharacter(int32_t rune) {
+    if (rune <= ' ') return false;
+    static const wchar_t *delimiters = L"()[]{}<>'\"`|,;";
+    return rune > 0xFFFF || !std::wcschr(delimiters, static_cast<wchar_t>(rune));
+}
+
 }  // namespace
 
 struct nt_terminal {
@@ -125,6 +140,11 @@ struct nt_terminal {
     int32_t scroll = 0;
     bool focused = true;
     bool applicationCursor = false;
+    uint32_t selectionColor = 0x264F78;
+    bool selecting = false, hasSelection = false;
+    int32_t selectionMode = 0;  // 0 cells, 1 words, 2 lines
+    Point anchor{}, head{};
+    std::pair<Point, Point> paintSpan{};  // range() once per frame, not per row
     uint32_t foreground = 0xCCCCCC, background = 0x1E1E1E;
     std::vector<Cell> grid, history;
     std::wstring title;
@@ -132,6 +152,54 @@ struct nt_terminal {
     std::vector<FLOAT> advances;
 
     float scale() const { return dpi / 96.f; }
+
+    Info info() const {
+        Info result{};
+        core.info(emulator, &result);
+        return result;
+    }
+
+    void rowCells(const Info &state, int64_t line, std::vector<Cell> &out) const {
+        out.resize(state.columns);
+        if (line < static_cast<int64_t>(state.historyCount)) {
+            core.copyHistoryRow(emulator, static_cast<uint32_t>(line), out.data(), state.columns);
+        } else {
+            std::vector<Cell> all(static_cast<size_t>(state.columns) * state.rows);
+            core.copyGrid(emulator, all.data(), static_cast<uint32_t>(all.size()));
+            size_t row = static_cast<size_t>(std::clamp<int64_t>(line - state.historyCount, 0, state.rows - 1));
+            std::copy_n(all.begin() + row * state.columns, state.columns, out.begin());
+        }
+    }
+
+    Point point(int32_t x, int32_t y) const {
+        Info state = info();
+        int32_t column = std::clamp((x - paddingPixels) / cellWidthPixels, 0, static_cast<int32_t>(state.columns) - 1);
+        int32_t row = std::clamp((y - paddingPixels) / cellHeightPixels, 0, static_cast<int32_t>(state.rows) - 1);
+        return {static_cast<int64_t>(state.historyCount) - scroll + row, column};
+    }
+
+    // range is the selection in reading order, widened to whole words or lines
+    std::pair<Point, Point> range() const {
+        Point start = std::min(anchor, head), end = std::max(anchor, head);
+        if (selectionMode == 2) return {{start.line, 0}, {end.line, INT32_MAX}};
+        if (selectionMode == 1) {
+            Info state = info();
+            std::vector<Cell> cells;
+            rowCells(state, start.line, cells);
+            while (start.column > 0 && wordCharacter(cells[start.column - 1].rune) && wordCharacter(cells[start.column].rune)) start.column--;
+            rowCells(state, end.line, cells);
+            while (end.column + 1 < static_cast<int32_t>(cells.size()) && wordCharacter(cells[end.column + 1].rune) &&
+                   wordCharacter(cells[end.column].rune)) {
+                end.column++;
+            }
+        }
+        return {start, end};
+    }
+
+    bool selected(const std::pair<Point, Point> &span, int64_t line, uint32_t column) const {
+        Point here{line, static_cast<int32_t>(column)};
+        return hasSelection && !(here < span.first) && !(span.second < here);
+    }
 
     void measure() {
         emSize = points * 96.f / 72.f;
@@ -193,12 +261,17 @@ struct nt_terminal {
 
     // drawRow draws `count` cells from `x`, each glyph pinned to its cell so a run never drifts off the grid;
     // `override` is the cursor's inverted glyph color, drawn over a background already filled.
-    void drawRow(const Cell *cells, uint32_t count, float x, float y, const uint32_t *override = nullptr) {
+    void drawRow(const Cell *cells, uint32_t count, float x, float y, const uint32_t *override = nullptr, int64_t line = -1) {
         if (!override) {
+            const auto &span = paintSpan;
+            auto cellBackground = [&](uint32_t column) {
+                if (column >= count) return background;
+                return selected(span, line, column) ? selectionColor : style(cells[column]).background;
+            };
             uint32_t start = 0;
             for (uint32_t column = 0; column <= count; column++) {
-                uint32_t bg = column < count ? style(cells[column]).background : background;
-                uint32_t runBG = start < count ? style(cells[start]).background : background;
+                uint32_t bg = cellBackground(column);
+                uint32_t runBG = cellBackground(start);
                 if (column == count || bg != runBG) {
                     if (runBG != background) fill(x + start * cellWidth, y, x + column * cellWidth, y + cellHeight, runBG);
                     start = column;
@@ -412,6 +485,7 @@ extern "C" void nt_paint(nt_terminal *terminal) {
     target->BeginDraw();
     target->Clear(color(terminal->background));
     float origin = terminal->paddingPixels / terminal->scale();
+    if (terminal->hasSelection) terminal->paintSpan = terminal->range();
     for (uint32_t row = 0; row < rows; row++) {
         int64_t line = static_cast<int64_t>(info.historyCount) - scroll + row;
         const Cell *cells = nullptr;
@@ -421,7 +495,7 @@ extern "C" void nt_paint(nt_terminal *terminal) {
         } else {
             cells = &terminal->grid[static_cast<size_t>(line - info.historyCount) * columns];
         }
-        terminal->drawRow(cells, columns, origin, origin + row * terminal->cellHeight);
+        terminal->drawRow(cells, columns, origin, origin + row * terminal->cellHeight, nullptr, line);
     }
     if (scroll == 0 && info.cursorVisible && info.cursorRow < rows && columns > 0) {
         uint32_t column = std::min(info.cursorColumn, columns - 1);
@@ -468,6 +542,77 @@ extern "C" void nt_set_focus(nt_terminal *terminal, int32_t focused) {
 }
 
 extern "C" int32_t nt_application_cursor(nt_terminal *terminal) { return terminal->applicationCursor; }
+
+extern "C" void nt_select_start(nt_terminal *terminal, int32_t x, int32_t y, int32_t mode) {
+    terminal->anchor = terminal->head = terminal->point(x, y);
+    terminal->selectionMode = mode;
+    terminal->selecting = true;
+    terminal->hasSelection = mode != 0;
+    InvalidateRect(terminal->window, nullptr, FALSE);
+}
+
+extern "C" void nt_select_extend(nt_terminal *terminal, int32_t x, int32_t y) {
+    if (!terminal->selecting) return;
+    Point next = terminal->point(x, y);
+    if (next.line == terminal->head.line && next.column == terminal->head.column && terminal->hasSelection) return;
+    terminal->head = next;
+    terminal->hasSelection = terminal->hasSelection || terminal->anchor < next || next < terminal->anchor;
+    InvalidateRect(terminal->window, nullptr, FALSE);
+}
+
+extern "C" void nt_select_end(nt_terminal *terminal) { terminal->selecting = false; }
+
+extern "C" void nt_select_clear(nt_terminal *terminal) {
+    if (!terminal->hasSelection && !terminal->selecting) return;
+    terminal->hasSelection = terminal->selecting = false;
+    InvalidateRect(terminal->window, nullptr, FALSE);
+}
+
+extern "C" int32_t nt_has_selection(nt_terminal *terminal) { return terminal->hasSelection; }
+
+extern "C" int32_t nt_selection_text(nt_terminal *terminal, uint16_t *out, int32_t capacity) {
+    if (!terminal->hasSelection) return 0;
+    Info state = terminal->info();
+    auto [start, end] = terminal->range();
+    std::wstring text;
+    std::vector<Cell> cells;
+    for (int64_t line = start.line; line <= end.line; line++) {
+        terminal->rowCells(state, line, cells);
+        int32_t first = line == start.line ? start.column : 0;
+        int32_t last = std::min<int32_t>(line == end.line ? end.column : INT32_MAX, static_cast<int32_t>(cells.size()) - 1);
+        std::wstring row;
+        for (int32_t column = first; column <= last; column++) {
+            const Cell &cell = cells[column];
+            if (cell.width == 0) continue;
+            uint32_t rune = cell.rune > 0 ? static_cast<uint32_t>(cell.rune) : ' ';
+            if (rune > 0xFFFF) {
+                rune -= 0x10000;
+                row += static_cast<wchar_t>(0xD800 + (rune >> 10));
+                row += static_cast<wchar_t>(0xDC00 + (rune & 0x3FF));
+            } else {
+                row += static_cast<wchar_t>(rune);
+            }
+        }
+        row.erase(row.find_last_not_of(L' ') == std::wstring::npos ? 0 : row.find_last_not_of(L' ') + 1);
+        text += row;
+        if (line < end.line) text += L"\r\n";
+    }
+    int32_t length = static_cast<int32_t>(text.size());
+    if (out && capacity >= length) std::memcpy(out, text.data(), text.size() * sizeof(wchar_t));
+    return length;
+}
+
+extern "C" void nt_cell_at(nt_terminal *terminal, int32_t x, int32_t y, int32_t *column, int32_t *row) {
+    Info state = terminal->info();
+    *column = std::clamp((x - terminal->paddingPixels) / terminal->cellWidthPixels, 0, static_cast<int32_t>(state.columns) - 1) + 1;
+    *row = std::clamp((y - terminal->paddingPixels) / terminal->cellHeightPixels, 0, static_cast<int32_t>(state.rows) - 1) + 1;
+}
+
+extern "C" int32_t nt_mouse_modes(nt_terminal *terminal) {
+    Info state = terminal->info();
+    return (state.mouseClick ? 1 : 0) | (state.mouseDrag ? 2 : 0) | (state.mouseMotion ? 4 : 0) | (state.mouseSGR ? 8 : 0) |
+           (state.alternateScreen ? 16 : 0);
+}
 
 extern "C" int32_t nt_bracketed_paste(nt_terminal *terminal) {
     Info info{};

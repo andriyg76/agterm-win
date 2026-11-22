@@ -18,6 +18,11 @@ final class NativeTerminal {
     private var console: PseudoConsole?
     private var grid = (columns: Int32(0), rows: Int32(0))
     private var highSurrogate: UInt16?
+    // a shortcut's key also reaches TranslateMessage, whose WM_CHAR (^C, ^V) must not type
+    private var swallowCharacter = false
+    private var clicks = (count: 0, time: Int32(0), x: Int32(0), y: Int32(0))
+    private var reportingButton: Int32?
+    private var lastMotionCell = (column: Int32(0), row: Int32(0))
     private let pendingLock = NSLock()
     nonisolated(unsafe) private var pending = Data()
 
@@ -133,15 +138,118 @@ final class NativeTerminal {
         if let terminal { nt_set_focus(terminal, focused ? 1 : 0) }
     }
 
-    fileprivate func wheel(_ delta: Int16) {
-        if let terminal { nt_scroll(terminal, Int32(delta) / 40) }
+    private var mouseModes: Int32 { terminal.map { nt_mouse_modes($0) } ?? 0 }
+
+    /// reportsMouse is a program asking for the mouse; Shift keeps the mouse for selecting, as in other terminals.
+    private var reportsMouse: Bool { mouseModes & 7 != 0 && GetKeyState(VK_SHIFT) >= 0 }
+
+    /// wheel scrolls the scrollback, or reports the wheel to a program that takes the mouse, or on an alternate
+    /// screen without mouse reporting (less, man) sends arrow keys.
+    fileprivate func wheel(_ delta: Int16, x: Int32, y: Int32) {
+        guard let terminal else { return }
+        let notches = max(abs(Int32(delta)) / 120, 1)
+        if reportsMouse {
+            for _ in 0..<notches { report(delta > 0 ? 64 : 65, x: x, y: y, release: false) }
+        } else if mouseModes & 16 != 0 {
+            send(String(repeating: cursorKey(delta > 0 ? "A" : "B", modifier: 1), count: Int(notches) * 3))
+        } else {
+            nt_scroll(terminal, Int32(delta) / 40)
+        }
+    }
+
+    /// mouseDown takes button 0 left, 1 middle, 2 right at a client pixel.
+    fileprivate func mouseDown(_ button: Int32, x: Int32, y: Int32) {
+        guard let terminal else { return }
+        SetCapture(window)
+        if reportsMouse {
+            reportingButton = button
+            report(button, x: x, y: y, release: false)
+            return
+        }
+        if button == 0 {
+            let time = GetMessageTime()
+            let near = abs(x - clicks.x) <= GetSystemMetrics(SM_CXDOUBLECLK) && abs(y - clicks.y) <= GetSystemMetrics(SM_CYDOUBLECLK)
+            let count = near && UInt32(bitPattern: time &- clicks.time) <= GetDoubleClickTime() ? clicks.count % 3 + 1 : 1
+            clicks = (count, time, x, y)
+            nt_select_start(terminal, x, y, Int32(count - 1))
+        } else if button == 2 {
+            if nt_has_selection(terminal) != 0 { copySelection() } else { paste() }
+        }
+    }
+
+    fileprivate func mouseUp(_ button: Int32, x: Int32, y: Int32) {
+        ReleaseCapture()
+        if let held = reportingButton {
+            reportingButton = nil
+            report(held, x: x, y: y, release: true)
+        } else if button == 0, let terminal {
+            nt_select_end(terminal)
+        }
+    }
+
+    fileprivate func mouseMove(x: Int32, y: Int32, leftHeld: Bool) {
+        guard let terminal else { return }
+        let modes = mouseModes
+        if reportingButton != nil ? modes & 6 != 0 : modes & 4 != 0 && GetKeyState(VK_SHIFT) >= 0 {
+            var column: Int32 = 0, row: Int32 = 0
+            nt_cell_at(terminal, x, y, &column, &row)
+            guard (column, row) != lastMotionCell else { return }
+            lastMotionCell = (column, row)
+            report(reportingButton ?? 3, x: x, y: y, release: false, motion: true)
+        } else if leftHeld, reportingButton == nil {
+            nt_select_extend(terminal, x, y)
+        }
+    }
+
+    /// report encodes a mouse event for the program: SGR when it asked for ?1006, the X10 bytes otherwise.
+    private func report(_ button: Int32, x: Int32, y: Int32, release: Bool, motion: Bool = false) {
+        guard let terminal else { return }
+        var column: Int32 = 0, row: Int32 = 0
+        nt_cell_at(terminal, x, y, &column, &row)
+        var code = button + (motion ? 32 : 0)
+        if GetKeyState(VK_SHIFT) < 0 { code += 4 }
+        if GetKeyState(VK_MENU) < 0 { code += 8 }
+        if GetKeyState(VK_CONTROL) < 0 { code += 16 }
+        if mouseModes & 8 != 0 {
+            console?.write(Data("\u{1b}[<\(code);\(column);\(row)\(release ? "m" : "M")".utf8))
+        } else {
+            if release { code = (code & ~3) | 3 }
+            let clamp = { (value: Int32) in UInt8(clamping: min(value + 32, 255)) }
+            console?.write(Data([0x1B, 0x5B, 0x4D, clamp(code), clamp(column), clamp(row)]))
+        }
+    }
+
+    private func cursorKey(_ final: String, modifier: Int) -> String {
+        let application = terminal.map { nt_application_cursor($0) != 0 } ?? false
+        return modifier > 1 ? "\u{1b}[1;\(modifier)\(final)" : application ? "\u{1b}O\(final)" : "\u{1b}[\(final)"
+    }
+
+    private func copySelection() {
+        guard let terminal else { return }
+        let length = nt_selection_text(terminal, nil, 0)
+        var text = [UInt16](repeating: 0, count: Int(length) + 1)
+        nt_selection_text(terminal, &text, length)
+        nt_select_clear(terminal)
+        guard length > 0, OpenClipboard(window) else { return }
+        defer { CloseClipboard() }
+        EmptyClipboard()
+        guard let memory = GlobalAlloc(UINT(GMEM_MOVEABLE), SIZE_T(text.count * 2)), let pointer = GlobalLock(memory) else { return }
+        text.withUnsafeBytes { pointer.copyMemory(from: $0.baseAddress!, byteCount: $0.count) }
+        GlobalUnlock(memory)
+        SetClipboardData(UINT(CF_UNICODETEXT), memory)
     }
 
     /// key sends what a non-character key types; false leaves the key to Windows (Alt+F4, Alt+Space).
     fileprivate func key(_ key: Int32) -> Bool {
         let shift = GetKeyState(VK_SHIFT) < 0, control = GetKeyState(VK_CONTROL) < 0, alt = GetKeyState(VK_MENU) < 0
         if shift, control, key == Int32(UInt8(ascii: "V")) {
+            swallowCharacter = true
             paste()
+            return true
+        }
+        if control, key == Int32(UInt8(ascii: "C")), shift || terminal.map({ nt_has_selection($0) != 0 }) == true {
+            swallowCharacter = true
+            copySelection()
             return true
         }
         if shift, key == VK_PRIOR || key == VK_NEXT, let terminal {
@@ -150,10 +258,7 @@ final class NativeTerminal {
         }
         if alt, key == VK_F4 { return false }
         let modifier = 1 + (shift ? 1 : 0) + (alt ? 2 : 0) + (control ? 4 : 0)
-        let application = terminal.map { nt_application_cursor($0) != 0 } ?? false
-        let cursor = { (final: String) in
-            modifier > 1 ? "\u{1b}[1;\(modifier)\(final)" : application ? "\u{1b}O\(final)" : "\u{1b}[\(final)"
-        }
+        let cursor = { (final: String) in self.cursorKey(final, modifier: modifier) }
         let tilde = { (code: Int) in modifier == 1 ? "\u{1b}[\(code)~" : "\u{1b}[\(code);\(modifier)~" }
         let function = { (final: String) in modifier == 1 ? "\u{1b}O\(final)" : "\u{1b}[1;\(modifier)\(final)" }
         let sequence: String? = switch key {
@@ -187,6 +292,10 @@ final class NativeTerminal {
     }
 
     fileprivate func character(_ unit: UInt16, alt: Bool) {
+        if swallowCharacter {
+            swallowCharacter = false
+            return
+        }
         if (0xD800..<0xDC00).contains(unit) {
             highSurrogate = unit
             return
@@ -208,7 +317,10 @@ final class NativeTerminal {
     }
 
     private func send(_ text: String) {
-        if let terminal { nt_scroll_to_bottom(terminal) }
+        if let terminal {
+            nt_scroll_to_bottom(terminal)
+            nt_select_clear(terminal)
+        }
         console?.write(Data(text.utf8))
     }
 
@@ -240,7 +352,21 @@ private let nativeWindowProcedure: WNDPROC = { window, message, wParam, lParam i
             native.focus(message == UINT(WM_SETFOCUS))
             return 0
         case UINT(WM_MOUSEWHEEL):
-            native.wheel(Int16(truncatingIfNeeded: wParam >> 16))
+            var point = POINT(x: Int32(Int16(truncatingIfNeeded: lParam)), y: Int32(Int16(truncatingIfNeeded: lParam >> 16)))
+            ScreenToClient(window, &point)
+            native.wheel(Int16(truncatingIfNeeded: wParam >> 16), x: point.x, y: point.y)
+            return 0
+        case UINT(WM_LBUTTONDOWN), UINT(WM_MBUTTONDOWN), UINT(WM_RBUTTONDOWN):
+            let button: Int32 = message == UINT(WM_LBUTTONDOWN) ? 0 : message == UINT(WM_MBUTTONDOWN) ? 1 : 2
+            native.mouseDown(button, x: Int32(Int16(truncatingIfNeeded: lParam)), y: Int32(Int16(truncatingIfNeeded: lParam >> 16)))
+            return 0
+        case UINT(WM_LBUTTONUP), UINT(WM_MBUTTONUP), UINT(WM_RBUTTONUP):
+            let button: Int32 = message == UINT(WM_LBUTTONUP) ? 0 : message == UINT(WM_MBUTTONUP) ? 1 : 2
+            native.mouseUp(button, x: Int32(Int16(truncatingIfNeeded: lParam)), y: Int32(Int16(truncatingIfNeeded: lParam >> 16)))
+            return 0
+        case UINT(WM_MOUSEMOVE):
+            native.mouseMove(x: Int32(Int16(truncatingIfNeeded: lParam)), y: Int32(Int16(truncatingIfNeeded: lParam >> 16)),
+                             leftHeld: wParam & WPARAM(MK_LBUTTON) != 0)
             return 0
         case UINT(WM_KEYDOWN), UINT(WM_SYSKEYDOWN):
             return native.key(Int32(truncatingIfNeeded: wParam)) ? 0 : DefWindowProcW(window, message, wParam, lParam)
