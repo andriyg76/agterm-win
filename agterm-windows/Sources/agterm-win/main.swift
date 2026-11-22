@@ -331,7 +331,9 @@ MainActor.assumeIsolated {
     app.window = window
     ShowWindow(window, SW_SHOW)
 
-    let created = wv_create(UnsafeMutableRawPointer(window), stateDirectory.appendingPathComponent("WebView2").path.wide,
+    // a fixed-version runtime for a machine without WebView2, such as Windows Sandbox
+    let runtime = environment["AGTERM_WIN_WEBVIEW2_RUNTIME"]?.wide
+    let created = wv_create(UnsafeMutableRawPointer(window), runtime, stateDirectory.appendingPathComponent("WebView2").path.wide,
                             TerminalPage.html(assets: xtermAssets()).wide,
                             { _, result in log(result == 0 ? "webview ready" : "webview failed: HRESULT \(String(UInt32(bitPattern: result), radix: 16))") },
                             { _, message in
