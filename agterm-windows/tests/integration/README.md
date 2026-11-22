@@ -7,6 +7,7 @@ Build, fetch, and stage a self-contained app folder first:
 cd agterm-windows
 powershell -ExecutionPolicy Bypass -File scripts\fetch-webview2.ps1
 powershell -ExecutionPolicy Bypass -File scripts\fetch-xterm.ps1
+powershell -ExecutionPolicy Bypass -File scripts\fetch-server.ps1
 swift build
 powershell -ExecutionPolicy Bypass -File scripts\stage.ps1 -Output $env:TEMP\agterm-win-stage
 ```

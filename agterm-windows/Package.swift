@@ -13,11 +13,20 @@ let package = Package(
     targets: [
         .target(
             name: "WebView2Shim",
-            cxxSettings: [.unsafeFlags(["-I", webView2 + "/include"])],
+            cxxSettings: [
+                .unsafeFlags(["-I", webView2 + "/include"]),
+                // MSVC 14.5x's STL asserts a newer clang than the Swift toolchain's; the shim uses none of what changed
+                .define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH"),
+            ],
             linkerSettings: [
                 .unsafeFlags(["-L", webView2 + "/x64"]),
-                .linkedLibrary("WebView2Loader.dll"),
+                // static, so no Microsoft DLL ships beside the exe
+                .linkedLibrary("WebView2LoaderStatic"),
+                .linkedLibrary("version"),
+                .linkedLibrary("advapi32"),
+                .linkedLibrary("shell32"),
                 .linkedLibrary("ole32"),
+                .linkedLibrary("bcrypt"),
                 .linkedLibrary("user32"),
             ]
         ),
