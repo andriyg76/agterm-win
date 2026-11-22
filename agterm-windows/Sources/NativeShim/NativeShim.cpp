@@ -645,6 +645,19 @@ extern "C" int32_t nt_screen_text(nt_terminal *terminal, uint16_t *out, int32_t 
     return give(text, out, capacity);
 }
 
+extern "C" int32_t nt_row_runes(nt_terminal *terminal, int32_t x, int32_t y, uint32_t *runes, int32_t capacity, int32_t *column) {
+    Info state = terminal->info();
+    Point at = terminal->point(x, y);
+    std::vector<Cell> cells;
+    terminal->rowCells(state, at.line, cells);
+    *column = at.column;
+    int32_t count = static_cast<int32_t>(cells.size());
+    for (int32_t i = 0; i < std::min(count, capacity); i++) {
+        runes[i] = cells[i].width == 0 ? UINT32_MAX : static_cast<uint32_t>(std::max(cells[i].rune, 0));
+    }
+    return count;
+}
+
 extern "C" void nt_select_all(nt_terminal *terminal) {
     Info state = terminal->info();
     terminal->selectionMode = 0;

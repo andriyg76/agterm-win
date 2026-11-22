@@ -231,6 +231,11 @@ final class NativeTerminal {
     fileprivate func mouseDown(_ button: Int32, x: Int32, y: Int32) {
         guard let terminal else { return }
         SetFocus(window)
+        if button == 0, modifiers == .control, let url = link(x: x, y: y) {
+            log("native: opening \(url)")
+            ShellExecuteW(window, Array("open".utf16) + [0], Array(url.utf16) + [0], nil, nil, SW_SHOWNORMAL)
+            return
+        }
         SetCapture(window)
         if reportsMouse {
             reportingButton = button
@@ -244,6 +249,17 @@ final class NativeTerminal {
             clicks = (count, time, x, y)
             nt_select_start(terminal, x, y, Int32(count - 1))
         }
+    }
+
+    /// link is the web address under a client pixel; Ctrl+click opens it, over a program that takes the mouse too.
+    private func link(x: Int32, y: Int32) -> String? {
+        guard let terminal else { return nil }
+        var column: Int32 = 0
+        let count = nt_row_runes(terminal, x, y, nil, 0, &column)
+        var runes = [UInt32](repeating: 0, count: Int(count))
+        nt_row_runes(terminal, x, y, &runes, count, &column)
+        let row = TerminalLink.row(runes, column: Int(column))
+        return TerminalLink.url(in: row.text, at: row.index)
     }
 
     fileprivate func mouseUp(_ button: Int32, x: Int32, y: Int32) {

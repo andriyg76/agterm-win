@@ -49,6 +49,9 @@ void nt_dark_title_bar(void *window);
 // nt_show_title puts the program's title on the terminal's top-level window.
 void nt_show_title(nt_terminal *terminal);
 void nt_select_all(nt_terminal *terminal);
+// nt_row_runes writes the row under a client pixel, one rune a cell (0 blank, UINT32_MAX a wide character's second
+// cell), and that pixel's 0-based column; it returns the row's cell count.
+int32_t nt_row_runes(nt_terminal *terminal, int32_t x, int32_t y, uint32_t *runes, int32_t capacity, int32_t *column);
 // nt_clear_scrollback drops the scrollback the way ED 3 does, leaving the screen and the program alone.
 void nt_clear_scrollback(nt_terminal *terminal);
 // nt_set_font_size remeasures the cell; the caller resizes to get the grid that now fits.
