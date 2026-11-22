@@ -11,7 +11,7 @@ extern "C" void *nt_tree_create(void *parent, uint32_t dpi) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_TREEVIEW_CLASSES};
     InitCommonControlsEx(&controls);
     HWND tree = CreateWindowExW(0, WC_TREEVIEWW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_LINESATROOT |
-                                    TVS_SHOWSELALWAYS | TVS_FULLROWSELECT | TVS_TRACKSELECT,
+                                    TVS_SHOWSELALWAYS | TVS_FULLROWSELECT,
                                 0, 0, 100, 100, static_cast<HWND>(parent), nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!tree) return nullptr;
     SetWindowTheme(tree, L"DarkMode_Explorer", nullptr);
