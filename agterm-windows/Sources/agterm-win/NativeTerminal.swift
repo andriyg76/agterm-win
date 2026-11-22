@@ -485,7 +485,7 @@ func showMenu(_ entries: [NativeMenu.Entry], owner: HWND?, at point: POINT) -> N
         menus.append(menu)
         for entry in entries {
             let text = Array((entry.shortcut.isEmpty ? entry.title : "\(entry.title)\t\(entry.shortcut)").utf16) + [0]
-            let state = entry.enabled ? 0 : UINT(MF_GRAYED)
+            let state = (entry.enabled ? 0 : UINT(MF_GRAYED)) | (entry.checked ? UINT(MF_CHECKED) : 0)
             if !entry.children.isEmpty, let submenu = build(entry.children) {
                 menus.removeAll { $0 == submenu } // the parent menu destroys its submenus
                 AppendMenuW(menu, UINT(MF_POPUP) | state, UINT_PTR(UInt(bitPattern: Int(bitPattern: submenu))), text)

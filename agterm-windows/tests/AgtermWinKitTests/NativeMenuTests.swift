@@ -86,4 +86,19 @@ struct NativeMenuTests {
         #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: true, sessionCount: 1, canRenameSession: true)
             .first { $0.pick == .command(.renameSession) }?.enabled == true)
     }
+
+    @Test func theDefaultProfileCarriesTheShortcutAndTheCheck() {
+        let menu = NativeMenu.sessions(profiles: profiles, defaultProfile: 1, canCloseSession: false, sessionCount: 1)
+        #expect(menu[0].children.map(\.shortcut) == profiles.indices.map { $0 == 1 ? "Ctrl+Shift+T" : "" })
+        #expect(menu[1].title == "Default Profile")
+        #expect(menu[1].children.map(\.checked) == profiles.indices.map { $0 == 1 })
+        #expect(menu[1].children[1].pick == .defaultProfile(1))
+        #expect(NativeMenu.Pick(id: NativeMenu.Pick.defaultProfile(1).id) == .defaultProfile(1))
+    }
+
+    @Test func aMissingDefaultProfileFallsBackToTheFirst() {
+        #expect(NativeMenu.defaultProfile(named: profiles[1].name.uppercased(), in: profiles) == 1)
+        #expect(NativeMenu.defaultProfile(named: "Gone", in: profiles) == 0)
+        #expect(NativeMenu.defaultProfile(named: nil, in: profiles) == 0)
+    }
 }

@@ -29,6 +29,8 @@ public struct NativeSettings: Codable, Equatable, Sendable {
     public var frame: Frame?
     public var maximized = false
     public var localSessions: [LocalSession] = []
+    /// defaultProfile names the launch profile New Session's shortcut starts; nil is the first.
+    public var defaultProfile: String?
     /// selectedLocal indexes `localSessions` when one was in view at quit; nil leaves the selection to the server's.
     public var selectedLocal: Int?
 
@@ -60,5 +62,6 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         maximized = try container.decodeIfPresent(Bool.self, forKey: .maximized) ?? false
         localSessions = try container.decodeIfPresent([LocalSession].self, forKey: .localSessions) ?? []
         selectedLocal = try container.decodeIfPresent(Int.self, forKey: .selectedLocal)
+        defaultProfile = try container.decodeIfPresent(String.self, forKey: .defaultProfile)
     }
 }

@@ -12,6 +12,7 @@ struct NativeSettingsTests {
         settings.maximized = true
         settings.localSessions = [.init(title: "build", commandLine: "cmd.exe"), .init(title: "WSL Ubuntu", commandLine: "wsl.exe -d Ubuntu --cd ~")]
         settings.selectedLocal = 1
+        settings.defaultProfile = "WSL Ubuntu"
         try settings.save(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         #expect(NativeSettings.load(from: url) == settings)

@@ -280,6 +280,8 @@ final class NativeShell {
         rebuild()
     }
 
+    private var defaultProfile: Int { NativeMenu.defaultProfile(named: settings.defaultProfile, in: profiles) }
+
     private var serverLabel: String { "WSL \(remote.host.distribution)" }
 
     private func newServerSession() {
@@ -382,7 +384,7 @@ final class NativeShell {
     fileprivate func windowCommand(_ command: NativeMenu.Command) {
         log("native shell: \(command)")
         switch command {
-        case .newSession: if let profile = profiles.first { newSession(profile) }
+        case .newSession: if profiles.indices.contains(defaultProfile) { newSession(profiles[defaultProfile]) }
         case .newServerSession: newServerSession()
         case .renameSession: startRename()
         case .closeSession: closeSelected()
@@ -537,7 +539,7 @@ final class NativeShell {
     fileprivate func windowMenu() {
         var button = RECT()
         GetWindowRect(menuButton, &button)
-        let entries = NativeMenu.window(profiles: profiles, server: serverLabel, serverConnected: remote.connected,
+        let entries = NativeMenu.window(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
                                         canCloseSession: canCloseSelected, sessionCount: tagged.count, canRenameSession: canRename(selected), hasSelection: visibleTerminal.hasSelection,
                                         canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
         run(showMenu(entries, owner: window, at: POINT(x: button.left, y: button.bottom)))
@@ -550,7 +552,7 @@ final class NativeShell {
         let tag = nt_tree_item_at(tree, &point.x, &point.y)
         if tag > 0, Int(tag) <= tagged.count { select(tagged[Int(tag) - 1]) }
         if x != -1 || y != -1 { point = POINT(x: x, y: y) }
-        run(showMenu(NativeMenu.sessions(profiles: profiles, server: serverLabel, serverConnected: remote.connected,
+        run(showMenu(NativeMenu.sessions(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
                                          canCloseSession: canCloseSelected, sessionCount: tagged.count,
                                          canRenameSession: canRename(selected)),
                      owner: window, at: point))
@@ -561,6 +563,9 @@ final class NativeShell {
         switch pick {
         case .command(let command)?: windowCommand(command)
         case .profile(let index)? where profiles.indices.contains(index): newSession(profiles[index])
+        case .defaultProfile(let index)? where profiles.indices.contains(index):
+            settings.defaultProfile = profiles[index].name
+            saveSettings()
         default: break
         }
         focus()

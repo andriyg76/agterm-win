@@ -49,19 +49,24 @@ public enum NativeMenu {
     public enum Pick: Equatable, Sendable {
         case command(Command)
         case profile(Int)
+        case defaultProfile(Int)
 
         static let profileBase = 1000
+        static let defaultProfileBase = 2000
 
         /// id is the Win32 menu item id; 0 is reserved for a dismissed menu.
         public var id: Int {
             switch self {
             case .command(let command): command.rawValue
             case .profile(let index): Self.profileBase + index
+            case .defaultProfile(let index): Self.defaultProfileBase + index
             }
         }
 
         public init?(id: Int) {
-            if id >= Self.profileBase {
+            if id >= Self.defaultProfileBase {
+                self = .defaultProfile(id - Self.defaultProfileBase)
+            } else if id >= Self.profileBase {
                 self = .profile(id - Self.profileBase)
             } else if let command = Command(rawValue: id) {
                 self = .command(command)
@@ -78,6 +83,7 @@ public enum NativeMenu {
         public let pick: Pick?
         public let enabled: Bool
         public let children: [Entry]
+        public var checked = false
 
         static let separator = Entry(title: "", shortcut: "", pick: nil, enabled: false, children: [])
 
@@ -91,27 +97,38 @@ public enum NativeMenu {
          .command(.clearScrollback), .separator, .command(.fontBigger), .command(.fontSmaller), .command(.fontReset)]
     }
 
-    /// sessions is the sidebar's menu: New Session lists the profiles, the first of them on New Session's shortcut, then
-    /// the agterm-server named `server`, enabled while it is connected.
-    public static func sessions(profiles: [LaunchProfile], server: String? = nil, serverConnected: Bool = false, canCloseSession: Bool,
-                                sessionCount: Int, canRenameSession: Bool = false) -> [Entry] {
+    /// defaultProfile is the index of the profile named `name`, the one New Session's shortcut starts; the first profile
+    /// when none is named or the named one is gone.
+    public static func defaultProfile(named name: String?, in profiles: [LaunchProfile]) -> Int {
+        name.flatMap { name in profiles.firstIndex { $0.name.caseInsensitiveCompare(name) == .orderedSame } } ?? 0
+    }
+
+    /// sessions is the sidebar's menu: New Session lists the profiles, the default one on New Session's shortcut, then
+    /// the agterm-server named `server`, enabled while it is connected; Default Profile picks that default.
+    public static func sessions(profiles: [LaunchProfile], defaultProfile: Int = 0, server: String? = nil, serverConnected: Bool = false,
+                                canCloseSession: Bool, sessionCount: Int, canRenameSession: Bool = false) -> [Entry] {
         var launches = profiles.enumerated().map { index, profile in
-            Entry(title: profile.name, shortcut: index == 0 ? Command.newSession.shortcut : "", pick: .profile(index), enabled: true,
-                  children: [])
+            Entry(title: profile.name, shortcut: index == defaultProfile ? Command.newSession.shortcut : "", pick: .profile(index),
+                  enabled: true, children: [])
+        }
+        let defaults = profiles.enumerated().map { index, profile in
+            Entry(title: profile.name, shortcut: "", pick: .defaultProfile(index), enabled: true, children: [], checked: index == defaultProfile)
         }
         if let server {
             launches += [.separator, Entry(title: "\(server) (agterm-server)", shortcut: Command.newServerSession.shortcut,
                                            pick: .command(.newServerSession), enabled: serverConnected, children: [])]
         }
         return [Entry(title: Command.newSession.title, shortcut: "", pick: nil, enabled: !launches.isEmpty, children: launches),
+                Entry(title: "Default Profile", shortcut: "", pick: nil, enabled: !defaults.isEmpty, children: defaults),
                 .command(.renameSession, enabled: canRenameSession), .command(.closeSession, enabled: canCloseSession),
                 .command(.nextSession, enabled: sessionCount > 1), .command(.previousSession, enabled: sessionCount > 1)]
     }
 
     /// window is the ☰ menu: the sidebar's menu, Find, the terminal's menu, and Quit.
-    public static func window(profiles: [LaunchProfile], server: String? = nil, serverConnected: Bool = false, canCloseSession: Bool,
-                              sessionCount: Int, canRenameSession: Bool = false, hasSelection: Bool, canPaste: Bool) -> [Entry] {
-        sessions(profiles: profiles, server: server, serverConnected: serverConnected, canCloseSession: canCloseSession,
+    public static func window(profiles: [LaunchProfile], defaultProfile: Int = 0, server: String? = nil, serverConnected: Bool = false,
+                              canCloseSession: Bool, sessionCount: Int, canRenameSession: Bool = false, hasSelection: Bool,
+                              canPaste: Bool) -> [Entry] {
+        sessions(profiles: profiles, defaultProfile: defaultProfile, server: server, serverConnected: serverConnected, canCloseSession: canCloseSession,
                  sessionCount: sessionCount, canRenameSession: canRenameSession) + [.separator, .command(.find)]
             + terminal(hasSelection: hasSelection, canPaste: canPaste) + [.separator, .command(.quit)]
     }
