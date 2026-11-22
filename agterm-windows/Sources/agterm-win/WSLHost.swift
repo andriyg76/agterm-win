@@ -43,10 +43,17 @@ struct WSLHost {
         ["-d", distribution, "-e", "/bin/sh", "-c", line]
     }
 
-    private func run(_ line: String, what: String) throws -> Data {
+    /// process is `line` under `/bin/sh -c` in the distribution, not yet started.
+    func process(_ line: String) -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: Self.wsl)
         process.arguments = arguments(line)
+        return process
+    }
+
+    /// run runs `line` to completion and returns what it printed.
+    func run(_ line: String) throws -> (status: Int32, stdout: String, stderr: String) {
+        let process = process(line)
         let output = Pipe(), errors = Pipe()
         process.standardOutput = output
         process.standardError = errors
@@ -55,10 +62,13 @@ struct WSLHost {
         let data = output.fileHandleForReading.readDataToEndOfFile()
         let stderr = errors.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw Failure.command(what, process.terminationStatus, String(decoding: stderr, as: UTF8.self))
-        }
-        return data
+        return (process.terminationStatus, String(decoding: data, as: UTF8.self), String(decoding: stderr, as: UTF8.self))
+    }
+
+    private func run(_ line: String, what: String) throws -> Data {
+        let result = try run(line)
+        guard result.status == 0 else { throw Failure.command(what, result.status, result.stderr) }
+        return Data(result.stdout.utf8)
     }
 
     /// windowsQuoted quotes one argument for CommandLineToArgvW, which is how wsl.exe splits its command line.
