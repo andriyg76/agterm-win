@@ -5,6 +5,7 @@ import agtermCore
 
 // One window: a sidebar and one xterm.js terminal, its program under ConPTY. Usage:
 //   agterm-win.exe [--wsl <distribution>]   agterm-server's sessions there; the default distribution is Ubuntu
+//   agterm-win.exe --local [<name>]         local zmx session <name> (default agterm), kept when the window closes
 //   agterm-win.exe -- <command line>        one local program instead, no sidebar
 
 private let stateDirectory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["LOCALAPPDATA"] ?? ".")
@@ -187,6 +188,14 @@ final class App {
     }
 }
 
+/// localZmx is the zmx.exe beside agterm-win.exe, else the one scripts/fetch-zmx.ps1 built into vendor/zmx.
+private func localZmx() -> String {
+    let beside = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("zmx.exe")
+    if FileManager.default.fileExists(atPath: beside.path) { return beside.path }
+    return URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("vendor/zmx/zmx.exe").path
+}
+
 // Swift's main actor is the main dispatch queue, which nothing drains while a Win32 message loop blocks; these are
 // the hooks CoreFoundation's run loop uses for the same purpose on Windows.
 @_silgen_name("_dispatch_get_main_queue_handle_4CF") private func mainQueueHandle() -> HANDLE?
@@ -224,7 +233,10 @@ MainActor.assumeIsolated {
     try? FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
     log("agterm-win starting on \(UpdateCheck.hostName)")
     let arguments = CommandLine.arguments
-    if let separator = arguments.firstIndex(of: "--"), separator + 1 < arguments.count {
+    if let flag = arguments.firstIndex(of: "--local") {
+        let name = flag + 1 < arguments.count ? arguments[flag + 1] : "agterm"
+        app = App(remote: nil, localCommand: "\"\(localZmx())\" attach \(name)")
+    } else if let separator = arguments.firstIndex(of: "--"), separator + 1 < arguments.count {
         app = App(remote: nil, localCommand: arguments[(separator + 1)...].joined(separator: " "))
     } else {
         let flag = arguments.firstIndex(of: "--wsl")
