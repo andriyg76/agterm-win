@@ -20,9 +20,6 @@ New-Item -ItemType Directory $Output | Out-Null
 Copy-Item (Join-Path $build "agterm-win.exe") $Output
 Copy-Item (Join-Path $root "vendor\webview2\build\native\x64\WebView2Loader.dll") $Output
 Copy-Item -Recurse (Join-Path $root "vendor\xterm") (Join-Path $Output "xterm")
-if (Test-Path (Join-Path $root "vendor\zmx\zmx.exe")) {
-    Copy-Item (Join-Path $root "vendor\zmx\zmx.exe") $Output
-}
 Get-ChildItem $build -Directory -Filter "*.resources" | % { Copy-Item -Recurse $_.FullName $Output }
 Get-ChildItem $SwiftRuntime -Filter "*.dll" | % { Copy-Item $_.FullName $Output }
 foreach ($dll in "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll") {
