@@ -8,6 +8,7 @@ import agtermCore
 //                  [--install-server]       first install or upgrade agterm-server there to the release AGTERM_VERSION names
 //   agterm-win.exe --local [<name>]         local zmx session <name> (default agterm), kept when the window closes
 //   agterm-win.exe -- <command line>        one local program instead, no sidebar
+//   agterm-win.exe --native [-- <command>]  spike: one program drawn natively by agwinterm's core, no WebView2
 
 // AGTERM_WIN_STATE_DIR isolates a test or second instance; AGTERM_WIN_TEST_SCREEN makes the window write the
 // terminal's text there when its program exits, then close.
@@ -300,6 +301,13 @@ MainActor.assumeIsolated {
     crash_log_install(stateDirectory.appendingPathComponent("crash.log").path.wide)
     log("agterm-win starting on \(UpdateCheck.hostName)")
     let arguments = CommandLine.arguments
+    if arguments.contains("--native") {
+        let separator = arguments.firstIndex(of: "--")
+        let command = separator.map { arguments[($0 + 1)...].joined(separator: " ") } ?? ""
+        NativeTerminal.open(commandLine: command.isEmpty ? "powershell.exe" : command,
+                            core: bundled(NativeTerminal.coreFile, source: "vendor/agwcore/\(NativeTerminal.coreFile)"))
+        return
+    }
     if let flag = arguments.firstIndex(of: "--local") {
         let name = flag + 1 < arguments.count ? arguments[flag + 1] : "agterm"
         app = App(remote: nil, localCommand: "\"\(localZmx())\" attach \(name)")

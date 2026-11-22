@@ -28,9 +28,13 @@ let package = Package(
                 .linkedLibrary("user32"),
             ]
         ),
+        .target(
+            name: "NativeShim",
+            linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("user32")]
+        ),
         .executableTarget(
             name: "agterm-win",
-            dependencies: ["WebView2Shim", .product(name: "agtermCore", package: "agtermCore")],
+            dependencies: ["WebView2Shim", "NativeShim", .product(name: "agtermCore", package: "agtermCore")],
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 .linkedLibrary("user32"),

@@ -32,6 +32,13 @@ if (Test-Path (Join-Path $zmx "zmx.exe")) {
 } else {
     Write-Warning "no vendor\zmx\zmx.exe (scripts\fetch-zmx.ps1); staged without zmx, so --local falls back to the source tree"
 }
+$agwcore = Join-Path $root "vendor\agwcore"
+if (Test-Path (Join-Path $agwcore "*.dll")) {
+    Copy-Item (Join-Path $agwcore "*.dll") $Output
+    Copy-Item (Join-Path $agwcore "LICENSE") (Join-Path $Output "agwinterm-core-LICENSE")
+} else {
+    Write-Warning "no vendor\agwcore (scripts\fetch-agwcore.ps1); staged without the --native spike's core"
+}
 Get-ChildItem $build -Directory -Filter "*.resources" | % { Copy-Item -Recurse $_.FullName $Output }
 Get-ChildItem $SwiftRuntime -Filter "*.dll" | % { Copy-Item $_.FullName $Output }
 foreach ($dll in "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll") {
