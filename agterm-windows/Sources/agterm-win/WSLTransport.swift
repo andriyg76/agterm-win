@@ -15,7 +15,7 @@ final class WSLTransport: RemotePresentationTransport {
               onClose: @escaping @MainActor (String) -> Void) -> RemotePresentationLink {
         let link = WSLLink()
         do {
-            try link.start(host.process(argv.last ?? ""), onLine: onLine, onClose: onClose)
+            try link.start(host.start(argv.last ?? "", captureErrors: false), onLine: onLine, onClose: onClose)
         } catch {
             let reason = "wsl.exe did not start: \(error)"
             DispatchQueue.main.async { MainActor.assumeIsolated { onClose(reason) } }
@@ -38,23 +38,15 @@ final class WSLTransport: RemotePresentationTransport {
 }
 
 final class WSLLink: RemotePresentationLink {
-    private var process: Process?
-    private var input: FileHandle?
+    private var process: HiddenProcess?
 
-    func start(_ process: Process, onLine: @escaping @MainActor (Data) -> Void,
-               onClose: @escaping @MainActor (String) -> Void) throws {
-        let output = Pipe(), stdin = Pipe()
-        process.standardOutput = output
-        process.standardInput = stdin
-        process.standardError = FileHandle.nullDevice
-        try process.run()
+    func start(_ process: HiddenProcess, onLine: @escaping @MainActor (Data) -> Void,
+               onClose: @escaping @MainActor (String) -> Void) {
         self.process = process
-        input = stdin.fileHandleForWriting
-        let reader = output.fileHandleForReading
         Thread {
             var buffer = Data()
             while true {
-                let chunk = reader.availableData
+                let chunk = process.read()
                 if chunk.isEmpty { break }
                 buffer.append(chunk)
                 while let newline = buffer.firstIndex(of: 0x0A) {
@@ -72,12 +64,11 @@ final class WSLLink: RemotePresentationLink {
 
     /// send writes `line` as given: agtermCore's codecs end every frame with its newline.
     func send(_ line: Data) {
-        input?.write(line)
+        process?.write(line)
     }
 
     func stop() {
-        try? input?.close()
-        input = nil
+        process?.closeInput()
         if let process, process.isRunning { process.terminate() }
         process = nil
     }
