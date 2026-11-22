@@ -8,8 +8,12 @@ import agtermCore
 //   agterm-win.exe --local [<name>]         local zmx session <name> (default agterm), kept when the window closes
 //   agterm-win.exe -- <command line>        one local program instead, no sidebar
 
-private let stateDirectory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["LOCALAPPDATA"] ?? ".")
-    .appendingPathComponent("agterm-win")
+// AGTERM_WIN_STATE_DIR isolates a test or second instance; AGTERM_WIN_TEST_SCREEN makes the window write the
+// terminal's text there when its program exits, then close.
+private let environment = ProcessInfo.processInfo.environment
+private let stateDirectory = environment["AGTERM_WIN_STATE_DIR"].map { URL(fileURLWithPath: $0) }
+    ?? URL(fileURLWithPath: environment["LOCALAPPDATA"] ?? ".").appendingPathComponent("agterm-win")
+private let testScreen = environment["AGTERM_WIN_TEST_SCREEN"]
 private let logURL = stateDirectory.appendingPathComponent("agterm-win.log")
 private let logLock = NSLock()
 
@@ -95,12 +99,13 @@ final class App {
         write("\r\n\u{1b}[2m[process exited with code \(exit.code)]\u{1b}[0m\r\n")
         console?.close()
         console = nil
+        if testScreen != nil { post(["t": "dump"]) }
     }
 
     func received(_ text: String) {
         guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
               let kind = object["t"] as? String else { return }
-        if kind != "in" { log("page: \(text)") }
+        if kind != "in" && kind != "screen" { log("page: \(text)") }
         switch kind {
         case "ready":
             size = (object["cols"] as? Int ?? 80, object["rows"] as? Int ?? 24)
@@ -121,6 +126,11 @@ final class App {
         case "title":
             if let title = object["title"] as? String, let window {
                 SetWindowTextW(window, (title.isEmpty ? "agterm" : title + " — agterm").wide)
+            }
+        case "screen":
+            if let path = testScreen, let text = object["text"] as? String {
+                try? Data(text.utf8).write(to: URL(fileURLWithPath: path))
+                if let window { DestroyWindow(window) }
             }
         case "select":
             if let id = (object["id"] as? String).flatMap(Foundation.UUID.init(uuidString:)) { select(id) }
@@ -197,6 +207,14 @@ private func localZmx() -> String {
         .appendingPathComponent("vendor/zmx/zmx.exe").path
 }
 
+/// xtermAssets is the xterm folder beside agterm-win.exe, else vendor/xterm of the source tree.
+private func xtermAssets() -> URL {
+    let beside = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("xterm")
+    if FileManager.default.fileExists(atPath: beside.path) { return beside }
+    return URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("vendor/xterm")
+}
+
 // Swift's main actor is the main dispatch queue, which nothing drains while a Win32 message loop blocks; these are
 // the hooks CoreFoundation's run loop uses for the same purpose on Windows.
 @_silgen_name("_dispatch_get_main_queue_handle_4CF") private func mainQueueHandle() -> HANDLE?
@@ -269,7 +287,7 @@ MainActor.assumeIsolated {
     ShowWindow(window, SW_SHOW)
 
     let created = wv_create(UnsafeMutableRawPointer(window), stateDirectory.appendingPathComponent("WebView2").path.wide,
-                            TerminalPage.html.wide,
+                            TerminalPage.html(assets: xtermAssets()).wide,
                             { _, result in log(result == 0 ? "webview ready" : "webview failed: HRESULT \(String(UInt32(bitPattern: result), radix: 16))") },
                             { _, message in
                                 guard let message else { return }
