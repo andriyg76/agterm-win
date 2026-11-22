@@ -2,6 +2,8 @@
 
 #include <windows.h>
 #include <wrl.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string>
 
 #include "WebView2.h"
@@ -15,6 +17,48 @@ ComPtr<ICoreWebView2> webview;
 
 const wchar_t *wide(const uint16_t *s) { return reinterpret_cast<const wchar_t *>(s); }
 } // namespace
+
+namespace {
+wchar_t crashLog[MAX_PATH];
+
+void crashLine(const char *text) {
+    HANDLE file = CreateFileW(crashLog, FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, 0, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    DWORD written;
+    WriteFile(file, text, static_cast<DWORD>(strlen(text)), &written, nullptr);
+    CloseHandle(file);
+}
+
+LONG WINAPI unhandled(EXCEPTION_POINTERS *info) {
+    char line[256];
+    HMODULE module = nullptr;
+    char name[MAX_PATH] = "?";
+    void *address = info->ExceptionRecord->ExceptionAddress;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           static_cast<LPCSTR>(address), &module)) {
+        GetModuleFileNameA(module, name, MAX_PATH);
+    }
+    snprintf(line, sizeof line, "unhandled exception 0x%08lx at %p (%s+0x%llx) thread %lu\n",
+             info->ExceptionRecord->ExceptionCode, address, name,
+             static_cast<unsigned long long>(static_cast<char *>(address) - reinterpret_cast<char *>(module)),
+             GetCurrentThreadId());
+    crashLine(line);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void invalidParameter(const wchar_t *, const wchar_t *, const wchar_t *, unsigned int, uintptr_t) {
+    char line[96];
+    snprintf(line, sizeof line, "UCRT invalid parameter, thread %lu\n", GetCurrentThreadId());
+    crashLine(line);
+    TerminateProcess(GetCurrentProcess(), 0xC000000D);
+}
+} // namespace
+
+extern "C" void crash_log_install(const uint16_t *path) {
+    wcsncpy_s(crashLog, wide(path), _TRUNCATE);
+    SetUnhandledExceptionFilter(unhandled);
+    _set_invalid_parameter_handler(invalidParameter);
+}
 
 extern "C" void wv_init_process(void) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
