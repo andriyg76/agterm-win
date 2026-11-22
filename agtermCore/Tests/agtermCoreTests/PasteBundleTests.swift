@@ -170,7 +170,11 @@ struct PasteFixture {
 
     func drain(_ data: Data, limits: PasteBundle.Limits = .standard) throws {
         var reader = PasteBundle.Reader(handle: try raw(data), limits: limits)
+        #if os(Windows)
+        let sink = open("NUL", O_WRONLY)
+        #else
         let sink = open("/dev/null", O_WRONLY)
+        #endif
         defer { close(sink) }
         while let header = try reader.next() {
             if header.kind == .file { try reader.copyBody(to: sink) }
