@@ -71,11 +71,6 @@ if (-not $SkipDmgCheck) {
     Remove-Item -Recurse -Force $dmgDir
 }
 
-$webView2Setup = Join-Path $root "vendor\webview2\MicrosoftEdgeWebview2Setup.exe"
-if (-not (Test-Path $webView2Setup)) {
-    Invoke-WebRequest -UseBasicParsing "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $webView2Setup
-}
-
 Push-Location $root
 try {
     swift build -c release
@@ -96,7 +91,7 @@ if ($signArguments) {
         if ($LASTEXITCODE) { throw "signing $($file.Name) failed" }
     }
 }
-$defines = @("/DAppVersion=$Version", "/DStage=$stage", "/DOutput=$out", "/DZmxRev=$zmxRev", "/DWebView2Setup=$webView2Setup")
+$defines = @("/DAppVersion=$Version", "/DStage=$stage", "/DOutput=$out", "/DZmxRev=$zmxRev")
 if ($signArguments) {
     $quoted = ($sign | ForEach-Object { if ($_ -match '\s') { "`$q$_`$q" } else { $_ } }) -join " "
     $defines += @("/DSign", "/Sagterm=`$q$signtool`$q $quoted `$f")

@@ -16,7 +16,11 @@ let package = Package(
             cxxSettings: [.unsafeFlags(["-I", webView2 + "/include"])],
             linkerSettings: [
                 .unsafeFlags(["-L", webView2 + "/x64"]),
-                .linkedLibrary("WebView2Loader.dll"),
+                // static, so no Microsoft DLL ships beside the exe
+                .linkedLibrary("WebView2LoaderStatic"),
+                .linkedLibrary("version"),
+                .linkedLibrary("advapi32"),
+                .linkedLibrary("shell32"),
                 .linkedLibrary("ole32"),
                 .linkedLibrary("bcrypt"),
                 .linkedLibrary("user32"),

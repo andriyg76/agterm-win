@@ -1,4 +1,4 @@
-# Stages a self-contained agterm-win folder: the built exe, the WebView2 loader, xterm.js, the agterm version it is
+# Stages a self-contained agterm-win folder: the built exe, xterm.js, the agterm version it is
 # locked to with its server tarballs' sha256, zmx, and the Swift and MSVC runtime DLLs it loads, so it runs on a machine
 # with no Swift toolchain (Windows Sandbox, a package).
 param(
@@ -19,7 +19,6 @@ if (-not $SwiftRuntime) {
 if (Test-Path $Output) { Remove-Item -Recurse -Force $Output }
 New-Item -ItemType Directory $Output | Out-Null
 Copy-Item (Join-Path $build "agterm-win.exe") $Output
-Copy-Item (Join-Path $root "vendor\webview2\build\native\x64\WebView2Loader.dll") $Output
 Copy-Item -Recurse (Join-Path $root "vendor\xterm") (Join-Path $Output "xterm")
 Copy-Item (Join-Path $root "AGTERM_VERSION"), (Join-Path $root "vendor\server\agterm-server.sha256") $Output
 # zmx goes to zmx\<rev>, named by zmx\current: an upgrade adds a folder beside the one a running daemon holds open
