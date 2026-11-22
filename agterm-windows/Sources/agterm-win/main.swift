@@ -100,6 +100,7 @@ final class App {
     func received(_ text: String) {
         guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
               let kind = object["t"] as? String else { return }
+        if kind != "in" { log("page: \(text)") }
         switch kind {
         case "ready":
             size = (object["cols"] as? Int ?? 80, object["rows"] as? Int ?? 24)
@@ -231,6 +232,7 @@ private let windowProcedure: WNDPROC = { window, message, wParam, lParam in
 
 MainActor.assumeIsolated {
     try? FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+    crash_log_install(stateDirectory.appendingPathComponent("crash.log").path.wide)
     log("agterm-win starting on \(UpdateCheck.hostName)")
     let arguments = CommandLine.arguments
     if let flag = arguments.firstIndex(of: "--local") {
