@@ -5,13 +5,17 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 
+#include <algorithm>
+#include <cstring>
+#include <cwchar>
+
 #pragma comment(lib, "uxtheme")
 
 extern "C" void *nt_tree_create(void *parent, uint32_t dpi) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_TREEVIEW_CLASSES};
     InitCommonControlsEx(&controls);
     HWND tree = CreateWindowExW(0, WC_TREEVIEWW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_LINESATROOT |
-                                    TVS_SHOWSELALWAYS | TVS_FULLROWSELECT,
+                                    TVS_SHOWSELALWAYS | TVS_FULLROWSELECT | TVS_EDITLABELS,
                                 0, 0, 100, 100, static_cast<HWND>(parent), nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!tree) return nullptr;
     SetWindowTheme(tree, L"DarkMode_Explorer", nullptr);
@@ -136,4 +140,31 @@ extern "C" void *nt_find_bar_create(void *parent, uint32_t dpi) {
     SendMessageW(edit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Find"));
     setFont(edit, dpi);
     return edit;
+}
+
+extern "C" int32_t nt_tree_label_edit(intptr_t notification, int64_t *tag, uint16_t *text, int32_t capacity) {
+    auto header = reinterpret_cast<const NMHDR *>(notification);
+    if (header->code != TVN_BEGINLABELEDITW && header->code != TVN_ENDLABELEDITW) return 0;
+    auto edit = reinterpret_cast<const NMTVDISPINFOW *>(notification);
+    *tag = static_cast<int64_t>(edit->item.lParam);
+    if (header->code == TVN_BEGINLABELEDITW) return 1;
+    if (!edit->item.pszText) return 3;
+    if (text && capacity > 0) {
+        size_t count = std::min<size_t>(wcslen(edit->item.pszText), static_cast<size_t>(capacity - 1));
+        memcpy(text, edit->item.pszText, count * sizeof(wchar_t));
+        text[count] = 0;
+    }
+    return 2;
+}
+
+extern "C" void nt_tree_edit(void *tree, void *item) {
+    SetFocus(static_cast<HWND>(tree));
+    TreeView_EditLabel(static_cast<HWND>(tree), static_cast<HTREEITEM>(item));
+}
+
+extern "C" void nt_tree_set_edit_text(void *tree, const uint16_t *text) {
+    if (HWND edit = TreeView_GetEditControl(static_cast<HWND>(tree))) {
+        SetWindowTextW(edit, reinterpret_cast<const wchar_t *>(text));
+        SendMessageW(edit, EM_SETSEL, 0, -1);
+    }
 }

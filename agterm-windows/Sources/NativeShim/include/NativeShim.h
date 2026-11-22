@@ -71,6 +71,12 @@ void *nt_tree_add(void *tree, void *parent, const uint16_t *text, int64_t tag, i
 void nt_tree_select(void *tree, void *item);
 // nt_tree_selection_changed reads a WM_NOTIFY lParam: 1 with the item's tag when the user moved the selection.
 int32_t nt_tree_selection_changed(intptr_t notification, int64_t *tag);
+// nt_tree_label_edit reads a WM_NOTIFY lParam for in-place renaming: 1 an edit begins (answer 1 to refuse it), 2 it
+// ended with the new name in `text`, 3 it was cancelled, 0 any other notification; `tag` is the item's.
+int32_t nt_tree_label_edit(intptr_t notification, int64_t *tag, uint16_t *text, int32_t capacity);
+void nt_tree_edit(void *tree, void *item);
+// nt_tree_set_edit_text replaces the text an in-place edit starts from (the label without its marks).
+void nt_tree_set_edit_text(void *tree, const uint16_t *text);
 // nt_tree_item_at is the tag of the item at a WM_CONTEXTMENU's screen point (0 off any item, a workspace row
 // included); for a keyboard menu (-1, -1) it is the selected item's, and the point moves to that item's corner.
 int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y);

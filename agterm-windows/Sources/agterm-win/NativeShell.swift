@@ -15,7 +15,7 @@ private let localWorkspaceID = Foundation.UUID()
 final class NativeShell {
     private struct LocalSession {
         let id = Foundation.UUID()
-        let title: String
+        var title: String
         let terminal: NativeTerminal
         var exited = false
         var attention = false
@@ -289,6 +289,57 @@ final class NativeShell {
         }
     }
 
+    /// canRename is whether `id` takes a new name: a local session, or a server session while the server is connected.
+    private func canRename(_ id: Foundation.UUID?) -> Bool {
+        guard let id else { return false }
+        return locals.contains { $0.id == id } || (remote.connected && remote.session(id) != nil)
+    }
+
+    private func name(of id: Foundation.UUID) -> String? {
+        locals.first { $0.id == id }?.title ?? remote.session(id)?.displayName
+    }
+
+    private func startRename() {
+        guard let tree, canRename(selected), let selected, let item = items[selected] else { return }
+        nt_tree_edit(tree, item)
+    }
+
+    /// labelEdit answers the tree's in-place rename: it starts from the plain name, and a non-empty result renames
+    /// the local session here or the server's session there.
+    fileprivate func labelEdit(_ notification: LPARAM) -> LRESULT? {
+        var tag: Int64 = 0
+        var text = [UInt16](repeating: 0, count: 512)
+        let stage = nt_tree_label_edit(Int(notification), &tag, &text, Int32(text.count))
+        guard stage != 0 else { return nil }
+        let id = tag > 0 && Int(tag) <= tagged.count ? tagged[Int(tag) - 1] : nil
+        switch stage {
+        case 1:
+            guard let id, canRename(id), let tree, let name = name(of: id) else { return 1 }
+            nt_tree_set_edit_text(tree, Array(name.utf16) + [0])
+            return 0
+        case 2:
+            let name = String(decodingCString: text, as: UTF16.self)
+            if let id, !name.isEmpty { rename(id, to: name) }
+            focus()
+            return 0
+        default:
+            focus()
+            return 0
+        }
+    }
+
+    private func rename(_ id: Foundation.UUID, to name: String) {
+        if let index = locals.firstIndex(where: { $0.id == id }) {
+            locals[index].title = name
+            rebuild()
+            return
+        }
+        Task { @MainActor in
+            let response = await remote.perform(.renameSession(id, name: name))
+            log("native shell: rename on \(serverLabel): \(response.ok ? "ok" : response.error ?? "failed")")
+        }
+    }
+
     private var canCloseSelected: Bool {
         locals.contains { $0.id == selected } || (remote.connected && selected.flatMap(remote.session) != nil)
     }
@@ -310,11 +361,12 @@ final class NativeShell {
         }
     }
 
-    private func windowCommand(_ command: NativeMenu.Command) {
+    fileprivate func windowCommand(_ command: NativeMenu.Command) {
         log("native shell: \(command)")
         switch command {
         case .newSession: if let profile = profiles.first { newSession(profile) }
         case .newServerSession: newServerSession()
+        case .renameSession: startRename()
         case .closeSession: closeSelected()
         case .nextSession, .previousSession:
             if let next = SessionSidebar.neighbor(of: selected, in: tagged, forward: command == .nextSession) {
@@ -468,7 +520,7 @@ final class NativeShell {
         var button = RECT()
         GetWindowRect(menuButton, &button)
         let entries = NativeMenu.window(profiles: profiles, server: serverLabel, serverConnected: remote.connected,
-                                        canCloseSession: canCloseSelected, sessionCount: tagged.count, hasSelection: visibleTerminal.hasSelection,
+                                        canCloseSession: canCloseSelected, sessionCount: tagged.count, canRenameSession: canRename(selected), hasSelection: visibleTerminal.hasSelection,
                                         canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
         run(showMenu(entries, owner: window, at: POINT(x: button.left, y: button.bottom)))
     }
@@ -481,7 +533,8 @@ final class NativeShell {
         if tag > 0, Int(tag) <= tagged.count { select(tagged[Int(tag) - 1]) }
         if x != -1 || y != -1 { point = POINT(x: x, y: y) }
         run(showMenu(NativeMenu.sessions(profiles: profiles, server: serverLabel, serverConnected: remote.connected,
-                                         canCloseSession: canCloseSelected, sessionCount: tagged.count),
+                                         canCloseSession: canCloseSelected, sessionCount: tagged.count,
+                                         canRenameSession: canRename(selected)),
                      owner: window, at: point))
     }
 
@@ -520,6 +573,12 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             return 0
         case UINT(WM_NOTIFY):
             if let result = shell.customDraw(lParam) { return result }
+            if let result = shell.labelEdit(lParam) { return result }
+            if let key = UnsafePointer<NMTVKEYDOWN>(bitPattern: Int(lParam)), key.pointee.hdr.code == UINT(TVN_KEYDOWN),
+               key.pointee.wVKey == WORD(VK_F2) {
+                shell.windowCommand(.renameSession)
+                return 1
+            }
             var tag: Int64 = 0
             if nt_tree_selection_changed(Int(lParam), &tag) != 0 { shell.userSelected(tag) }
             return 0

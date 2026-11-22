@@ -2,7 +2,7 @@
 /// window's own commands. Every command is also a shortcut, so a menu never holds the only way to do something.
 public enum NativeMenu {
     public enum Command: Int, CaseIterable, Sendable {
-        case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, newServerSession, closeSession, nextSession, previousSession, find, quit
+        case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, newServerSession, renameSession, closeSession, nextSession, previousSession, find, quit
 
         public var title: String {
             switch self {
@@ -15,6 +15,7 @@ public enum NativeMenu {
             case .fontReset: "Default Font Size"
             case .newSession: "New Session"
             case .newServerSession: "New Session on Server"
+            case .renameSession: "Rename Session"
             case .closeSession: "Close Session"
             case .nextSession: "Next Session"
             case .previousSession: "Previous Session"
@@ -34,6 +35,7 @@ public enum NativeMenu {
             case .fontReset: "Ctrl+0"
             case .newSession: "Ctrl+Shift+T"
             case .newServerSession: "Ctrl+Shift+N"
+            case .renameSession: "F2"
             case .closeSession: "Ctrl+Shift+W"
             case .nextSession: "Ctrl+Tab"
             case .previousSession: "Ctrl+Shift+Tab"
@@ -92,7 +94,7 @@ public enum NativeMenu {
     /// sessions is the sidebar's menu: New Session lists the profiles, the first of them on New Session's shortcut, then
     /// the agterm-server named `server`, enabled while it is connected.
     public static func sessions(profiles: [LaunchProfile], server: String? = nil, serverConnected: Bool = false, canCloseSession: Bool,
-                                sessionCount: Int) -> [Entry] {
+                                sessionCount: Int, canRenameSession: Bool = false) -> [Entry] {
         var launches = profiles.enumerated().map { index, profile in
             Entry(title: profile.name, shortcut: index == 0 ? Command.newSession.shortcut : "", pick: .profile(index), enabled: true,
                   children: [])
@@ -102,15 +104,15 @@ public enum NativeMenu {
                                            pick: .command(.newServerSession), enabled: serverConnected, children: [])]
         }
         return [Entry(title: Command.newSession.title, shortcut: "", pick: nil, enabled: !launches.isEmpty, children: launches),
-                .command(.closeSession, enabled: canCloseSession),
+                .command(.renameSession, enabled: canRenameSession), .command(.closeSession, enabled: canCloseSession),
                 .command(.nextSession, enabled: sessionCount > 1), .command(.previousSession, enabled: sessionCount > 1)]
     }
 
     /// window is the ☰ menu: the sidebar's menu, Find, the terminal's menu, and Quit.
     public static func window(profiles: [LaunchProfile], server: String? = nil, serverConnected: Bool = false, canCloseSession: Bool,
-                              sessionCount: Int, hasSelection: Bool, canPaste: Bool) -> [Entry] {
+                              sessionCount: Int, canRenameSession: Bool = false, hasSelection: Bool, canPaste: Bool) -> [Entry] {
         sessions(profiles: profiles, server: server, serverConnected: serverConnected, canCloseSession: canCloseSession,
-                 sessionCount: sessionCount) + [.separator, .command(.find)]
+                 sessionCount: sessionCount, canRenameSession: canRenameSession) + [.separator, .command(.find)]
             + terminal(hasSelection: hasSelection, canPaste: canPaste) + [.separator, .command(.quit)]
     }
 

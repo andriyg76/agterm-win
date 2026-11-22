@@ -79,4 +79,11 @@ struct NativeMenuTests {
     @Test func closingAServerSessionNamesWhatEnds() {
         #expect(NativeMenu.closeQuestion(session: "api", server: "WSL Ubuntu") == "Close api on WSL Ubuntu? Its programs on the server end.")
     }
+
+    @Test func renameIsEnabledByTheCaller() {
+        #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: true, sessionCount: 1)
+            .first { $0.pick == .command(.renameSession) }?.enabled == false)
+        #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: true, sessionCount: 1, canRenameSession: true)
+            .first { $0.pick == .command(.renameSession) }?.enabled == true)
+    }
 }
