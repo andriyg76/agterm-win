@@ -3,8 +3,9 @@ import WebView2Shim
 import WinSDK
 import agtermCore
 
-// First milestone: one window, one xterm.js terminal, one program under ConPTY. Usage:
+// One window, one xterm.js terminal, one program under ConPTY. Usage:
 //   agterm-win.exe [-- <command line>]      default: wsl.exe --cd ~
+//   agterm-win.exe --wsl <distribution>     attach the first pane of agterm-server's first session there
 
 private let stateDirectory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["LOCALAPPDATA"] ?? ".")
     .appendingPathComponent("agterm-win")
@@ -117,6 +118,21 @@ private func commandLineFromArguments() -> String {
     let arguments = CommandLine.arguments
     if let separator = arguments.firstIndex(of: "--"), separator + 1 < arguments.count {
         return arguments[(separator + 1)...].joined(separator: " ")
+    }
+    if let flag = arguments.firstIndex(of: "--wsl"), flag + 1 < arguments.count {
+        let host = WSLHost(distribution: arguments[flag + 1])
+        do {
+            let tree = try host.tree()
+            log("zmx tree: \(tree.sessions.count) session(s), zmx \(tree.endpoint.executable), dir \(tree.endpoint.socketDirectory)")
+            guard let session = tree.sessions.first, let pane = session.panes.first else {
+                return "cmd.exe /k echo agterm-server in \(host.distribution) has no attachable session"
+            }
+            log("attaching \(session.name) \(pane.pane) pane, daemon \(pane.daemon)")
+            return try host.attachCommandLine(endpoint: tree.endpoint, daemon: pane.daemon)
+        } catch {
+            log("wsl attach failed: \(error)")
+            return "cmd.exe /k echo wsl attach failed, see %LOCALAPPDATA%\\agterm-win\\agterm-win.log"
+        }
     }
     return "wsl.exe --cd ~"
 }
