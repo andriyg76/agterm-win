@@ -378,17 +378,27 @@ extension HtmlOverlay {
     /// web origin, `about:blank`, is named by that address: no site is shown, so none is claimed.
     public var identity: String {
         switch source {
-        case .file(let path, _): return URL(fileURLWithPath: current?.page ?? path).lastPathComponent
-        case .replica(let path, .html), .replica(let path, .markdown): return URL(fileURLWithPath: current?.page ?? path).lastPathComponent
-        case .replica(let path, _): return URL(fileURLWithPath: path).lastPathComponent
-        case .markdown(let path): return URL(fileURLWithPath: current?.page ?? path).lastPathComponent
+        case .file(let path, _): return Self.fileName(current?.page ?? path)
+        case .replica(let path, .html), .replica(let path, .markdown): return Self.fileName(current?.page ?? path)
+        case .replica(let path, _): return Self.fileName(path)
+        case .markdown(let path): return Self.fileName(current?.page ?? path)
         case .image(let path), .text(let path, _), .document(let path):
-            return URL(fileURLWithPath: path).lastPathComponent
+            return Self.fileName(path)
         case .unreadable: return "unreadable page"
         case .url(let url):
             let shown = browse ? current.map { URL(string: $0.page).flatMap(HtmlOrigin.init)?.display ?? $0.page } : nil
             return shown ?? HtmlOrigin(url)?.display ?? url.absoluteString
         }
+    }
+
+    // a page path may be a remote host's POSIX path; Windows Foundation would read it as a local path and traps on
+    // one past MAX_PATH-scale lengths, so the name is split off the string there
+    private static func fileName(_ path: String) -> String {
+        #if os(Windows)
+        path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? path
+        #else
+        URL(fileURLWithPath: path).lastPathComponent
+        #endif
     }
 }
 
