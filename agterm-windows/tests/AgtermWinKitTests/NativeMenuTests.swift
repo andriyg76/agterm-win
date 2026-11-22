@@ -58,4 +58,10 @@ struct NativeMenuTests {
         #expect(NativeMenu.points(after: .fontReset, from: 20) == NativeMenu.defaultPoints)
         #expect(NativeMenu.points(after: .copy, from: 14) == 14)
     }
+
+    @Test func quitAsksOnlyWhileLocalSessionsRun() {
+        #expect(NativeMenu.quitQuestion(runningLocalSessions: 0) == nil)
+        #expect(NativeMenu.quitQuestion(runningLocalSessions: 1) == "Quit agterm? A local session is still running and will end.")
+        #expect(NativeMenu.quitQuestion(runningLocalSessions: 3)?.contains("3 local sessions") == true)
+    }
 }

@@ -138,6 +138,13 @@ final class NativeShell {
         }
     }
 
+    /// confirmQuit asks before running local sessions end with the window.
+    fileprivate func confirmQuit() -> Bool {
+        guard let question = NativeMenu.quitQuestion(runningLocalSessions: locals.filter { !$0.exited }.count) else { return true }
+        return MessageBoxW(window, Array(question.utf16) + [0], Array("agterm".utf16) + [0],
+                           UINT(MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)) == IDOK
+    }
+
     fileprivate func closing() {
         var placement = WINDOWPLACEMENT()
         placement.length = UINT(MemoryLayout<WINDOWPLACEMENT>.size)
@@ -252,7 +259,7 @@ final class NativeShell {
                 focus()
             }
         case .find: showFindBar()
-        case .quit: DestroyWindow(window)
+        case .quit: if confirmQuit() { DestroyWindow(window) }
         default: visibleTerminal.perform(command)
         }
     }
@@ -472,6 +479,9 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             if let suggested = UnsafePointer<RECT>(bitPattern: UInt(lParam)) {
                 shell.dpiChanged(UInt32(wParam >> 16 & 0xFFFF), suggested: suggested.pointee)
             }
+            return 0
+        case UINT(WM_CLOSE):
+            if shell.confirmQuit() { DestroyWindow(window) }
             return 0
         case UINT(WM_DESTROY):
             shell.closing()

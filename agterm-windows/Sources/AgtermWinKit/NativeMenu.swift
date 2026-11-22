@@ -105,6 +105,14 @@ public enum NativeMenu {
             + terminal(hasSelection: hasSelection, canPaste: canPaste) + [.separator, .command(.quit)]
     }
 
+    /// quitQuestion is what closing the window asks while local sessions still run, nil when nothing would be lost;
+    /// agterm-server's sessions keep running on the server.
+    public static func quitQuestion(runningLocalSessions count: Int) -> String? {
+        guard count > 0 else { return nil }
+        return count == 1 ? "Quit agterm? A local session is still running and will end."
+            : "Quit agterm? \(count) local sessions are still running and will end."
+    }
+
     public static let defaultPoints: Float = 11
     public static let pointRange: ClosedRange<Float> = 6...36
 
