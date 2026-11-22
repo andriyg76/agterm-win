@@ -310,7 +310,8 @@ MainActor.assumeIsolated {
         } else {
             let flag = arguments.firstIndex(of: "--wsl")
             let distribution = flag.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? "Ubuntu"
-            NativeShell.open(remote: RemoteWindow(host: WSLHost(distribution: distribution), stateDirectory: stateDirectory), core: core)
+            NativeShell.open(remote: RemoteWindow(host: WSLHost(distribution: distribution), stateDirectory: stateDirectory), core: core,
+                             settings: stateDirectory.appendingPathComponent("native.json"))
         }
         return
     }

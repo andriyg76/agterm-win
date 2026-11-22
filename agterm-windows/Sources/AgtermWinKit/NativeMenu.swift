@@ -104,7 +104,7 @@ public enum NativeMenu {
     }
 
     public static let defaultPoints: Float = 11
-    static let pointRange: ClosedRange<Float> = 6...36
+    public static let pointRange: ClosedRange<Float> = 6...36
 
     /// points is the font size a font command leaves: one point a step, within 6 to 36.
     public static func points(after command: Command, from current: Float) -> Float {

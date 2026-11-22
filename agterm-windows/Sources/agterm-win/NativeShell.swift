@@ -22,6 +22,8 @@ final class NativeShell {
 
     private let remote: RemoteWindow
     private let core: URL
+    private let settingsURL: URL
+    private var settings: NativeSettings
     private var window: HWND?
     private var tree: UnsafeMutableRawPointer?
     private var notice: HWND?
@@ -39,15 +41,17 @@ final class NativeShell {
     private let darkBrush = CreateSolidBrush(0x262525)
     private var dpi: UInt32 = 96
 
-    static func open(remote: RemoteWindow, core: URL) {
+    static func open(remote: RemoteWindow, core: URL, settings: URL) {
         nt_init_process()
-        shell = NativeShell(remote: remote, core: core)
+        shell = NativeShell(remote: remote, core: core, settingsURL: settings)
         shell.create()
     }
 
-    private init(remote: RemoteWindow, core: URL) {
+    private init(remote: RemoteWindow, core: URL, settingsURL: URL) {
         self.remote = remote
         self.core = core
+        self.settingsURL = settingsURL
+        settings = NativeSettings.load(from: settingsURL)
     }
 
     private func create() {
@@ -81,8 +85,8 @@ final class NativeShell {
         notice = CreateWindowExW(0, Array("STATIC".utf16) + [0], nil, DWORD(WS_CHILD) | DWORD(SS_LEFT), 0, 0, 10, 10, window, nil,
                                  instance, nil)
         remoteTerminal = makeTerminal()
+        restorePlacement()
         layout()
-        ShowWindow(window, SW_SHOW)
         discoverProfiles()
         remote.changed = { [weak self] in self?.catalogChanged() }
         catalogChanged()
@@ -90,10 +94,56 @@ final class NativeShell {
     }
 
     private func makeTerminal() -> NativeTerminal {
-        let terminal = NativeTerminal(parent: window, core: core)
+        let terminal = NativeTerminal(parent: window, core: core, points: settings.fontPoints)
         terminal.onWindowCommand = { [unowned self] in windowCommand($0) }
+        terminal.onFontSize = { [unowned self] in setFontSize($0) }
         terminal.setDPI(dpi)
         return terminal
+    }
+
+    // MARK: settings
+
+    private func setFontSize(_ points: Float) {
+        settings.fontPoints = points
+        terminalsShown.forEach { $0.setFontSize(points) }
+        saveSettings()
+    }
+
+    /// restorePlacement shows the window where it last was, unless that rectangle is on no monitor now.
+    private func restorePlacement() {
+        guard let frame = settings.frame else {
+            ShowWindow(window, settings.maximized ? SW_SHOWMAXIMIZED : SW_SHOW)
+            return
+        }
+        var rect = RECT(left: frame.left, top: frame.top, right: frame.right, bottom: frame.bottom)
+        guard MonitorFromRect(&rect, DWORD(MONITOR_DEFAULTTONULL)) != nil else {
+            ShowWindow(window, SW_SHOW)
+            return
+        }
+        var placement = WINDOWPLACEMENT()
+        placement.length = UINT(MemoryLayout<WINDOWPLACEMENT>.size)
+        placement.showCmd = UINT(settings.maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL)
+        placement.rcNormalPosition = rect
+        SetWindowPlacement(window, &placement)
+    }
+
+    private func saveSettings() {
+        do {
+            try settings.save(to: settingsURL)
+        } catch {
+            log("native shell: saving \(settingsURL.path) failed: \(error)")
+        }
+    }
+
+    fileprivate func closing() {
+        var placement = WINDOWPLACEMENT()
+        placement.length = UINT(MemoryLayout<WINDOWPLACEMENT>.size)
+        if GetWindowPlacement(window, &placement) {
+            let rect = placement.rcNormalPosition
+            settings.frame = .init(left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom)
+            settings.maximized = placement.showCmd == UINT(SW_SHOWMAXIMIZED)
+        }
+        saveSettings()
     }
 
     // MARK: launch profiles
@@ -370,6 +420,7 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             }
             return 0
         case UINT(WM_DESTROY):
+            shell.closing()
             PostQuitMessage(0)
             return 0
         default:

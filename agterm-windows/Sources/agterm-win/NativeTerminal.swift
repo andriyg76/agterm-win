@@ -35,6 +35,8 @@ final class NativeTerminal {
     /// onWindowCommand takes the commands a terminal inside a window passes up (New and Close Session, Quit); without
     /// it those shortcuts are not taken and Quit closes the terminal's own window.
     var onWindowCommand: ((NativeMenu.Command) -> Void)?
+    /// onFontSize takes a font command's new size, for a window that sizes all its terminals together.
+    var onFontSize: ((Float) -> Void)?
 
     /// open runs `commandLine` in a top-level terminal window.
     static func open(commandLine: String, core: URL) {
@@ -45,7 +47,8 @@ final class NativeTerminal {
         terminal.start(commandLine)
     }
 
-    init(parent: HWND?, core: URL) {
+    init(parent: HWND?, core: URL, points: Float = NativeMenu.defaultPoints) {
+        self.points = points
         let instance = GetModuleHandleW(nil)
         let className = Array("agterm-native".utf16) + [0]
         className.withUnsafeBufferPointer { name in
@@ -272,9 +275,8 @@ final class NativeTerminal {
         case .selectAll: nt_select_all(terminal)
         case .clearScrollback: nt_clear_scrollback(terminal)
         case .fontBigger, .fontSmaller, .fontReset:
-            points = NativeMenu.points(after: command, from: points)
-            nt_set_font_size(terminal, points)
-            resize()
+            let next = NativeMenu.points(after: command, from: points)
+            if let onFontSize { onFontSize(next) } else { setFontSize(next) }
         case .newSession, .closeSession, .nextSession, .previousSession, .quit:
             if let onWindowCommand { onWindowCommand(command) } else if command == .quit { DestroyWindow(window) }
         }
@@ -411,6 +413,13 @@ final class NativeTerminal {
             nt_select_clear(terminal)
         }
         console?.write(Data(text.utf8))
+    }
+
+    func setFontSize(_ points: Float) {
+        guard let terminal else { return }
+        self.points = points
+        nt_set_font_size(terminal, points)
+        resize()
     }
 
     func setVisible(_ visible: Bool) {
