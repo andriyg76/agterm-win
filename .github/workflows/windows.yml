@@ -12,6 +12,8 @@ concurrency:
   group: windows-${{ github.ref }}
   cancel-in-progress: true
 
+# windows-2022 keeps Visual Studio 2022 (MSVC 14.4x), the toolchain the Swift 6.4.3 clang supports and the dev
+# machine builds with; windows-2025 ships MSVC 14.5x, whose STL refuses that clang
 env:
   SWIFT_VERSION: swift-6.4.3-release
   SWIFT_BUILD: 6.4.3-RELEASE
@@ -19,7 +21,7 @@ env:
 jobs:
   # agtermCore with its tests must keep compiling for Windows; running them waits on the known failures
   core:
-    runs-on: windows-2025
+    runs-on: windows-2022
     timeout-minutes: 60
     defaults:
       run:
@@ -40,7 +42,7 @@ jobs:
 
   # the real window on the runner's interactive desktop, as tests/integration/README.md runs it locally
   app:
-    runs-on: windows-2025
+    runs-on: windows-2022
     timeout-minutes: 60
     defaults:
       run:
