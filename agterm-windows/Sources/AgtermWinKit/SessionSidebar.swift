@@ -11,6 +11,14 @@ public enum SessionSidebar {
         public let isWorkspace: Bool
         public let ended: Bool
         public let children: [Item]
+
+        public init(id: UUID, title: String, isWorkspace: Bool, ended: Bool, children: [Item]) {
+            self.id = id
+            self.title = title
+            self.isWorkspace = isWorkspace
+            self.ended = ended
+            self.children = children
+        }
     }
 
     public enum Launch: Equatable, Sendable {

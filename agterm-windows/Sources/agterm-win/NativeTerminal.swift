@@ -5,7 +5,8 @@ import WinSDK
 
 private let nativeOutputMessage = UINT(WM_APP + 11)
 private let nativeExitMessage = UINT(WM_APP + 12)
-private nonisolated(unsafe) var native: NativeTerminal!
+// the window procedure finds its terminal here; a terminal is in it from its window's creation to its destruction
+private nonisolated(unsafe) var terminals: [HWND: NativeTerminal] = [:]
 
 /// NativeTerminal is one terminal drawn without WebView2: the program under ConPTY, agwinterm's emulator core parsing
 /// its output, Direct2D with DirectWrite drawing it. It is a top-level window of its own (`--native -- <command>`) or
@@ -29,6 +30,11 @@ final class NativeTerminal {
     nonisolated(unsafe) private var pending = Data()
     nonisolated(unsafe) private var acceptedGeneration = 0
     private let testScreen = ProcessInfo.processInfo.environment["AGTERM_WIN_TEST_SCREEN"]
+    /// onExit runs when the started program exits.
+    var onExit: (() -> Void)?
+    /// onWindowCommand takes the commands a terminal inside a window passes up (New and Close Session, Quit); without
+    /// it those shortcuts are not taken and Quit closes the terminal's own window.
+    var onWindowCommand: ((NativeMenu.Command) -> Void)?
 
     /// open runs `commandLine` in a top-level terminal window.
     static func open(commandLine: String, core: URL) {
@@ -40,7 +46,6 @@ final class NativeTerminal {
     }
 
     init(parent: HWND?, core: URL) {
-        native = self
         let instance = GetModuleHandleW(nil)
         let className = Array("agterm-native".utf16) + [0]
         className.withUnsafeBufferPointer { name in
@@ -60,6 +65,7 @@ final class NativeTerminal {
             exit(1)
         }
         self.window = window
+        terminals[window] = self
         if parent == nil { nt_dark_title_bar(UnsafeMutableRawPointer(window)) }
         var error = [UInt16](repeating: 0, count: 512)
         terminal = nt_create(UnsafeMutableRawPointer(window), Array(core.path.utf16) + [0], Array("Cascadia Mono".utf16) + [0], points,
@@ -73,11 +79,11 @@ final class NativeTerminal {
     }
 
     /// start replaces whatever ran in the terminal with `commandLine` on a fresh screen.
-    func start(_ commandLine: String) {
+    func start(_ commandLine: String, directory: String? = nil) {
         reset()
         let generation = generation, window = window
         do {
-            console = try PseudoConsole(commandLine: commandLine, columns: Int16(clamping: grid.columns), rows: Int16(clamping: grid.rows),
+            console = try PseudoConsole(commandLine: commandLine, directory: directory, columns: Int16(clamping: grid.columns), rows: Int16(clamping: grid.rows),
                                         onOutput: { [unowned self] in enqueue($0, generation: generation, window: window) },
                                         onExit: { PostMessageW(window, nativeExitMessage, WPARAM($0), LPARAM(generation)) })
             log("native: started \(commandLine) at \(grid.columns)x\(grid.rows)")
@@ -127,11 +133,11 @@ final class NativeTerminal {
     private func feed(_ data: Data) {
         guard let terminal, !data.isEmpty else { return }
         data.withUnsafeBytes { raw in
-            nt_feed(terminal, raw.bindMemory(to: UInt8.self).baseAddress, UInt32(raw.count), { _, bytes, length in
-                guard let bytes else { return }
+            nt_feed(terminal, raw.bindMemory(to: UInt8.self).baseAddress, UInt32(raw.count), { context, bytes, length in
+                guard let context, let bytes else { return }
                 let reply = Data(bytes: bytes, count: Int(length))
-                MainActor.assumeIsolated { native.console?.write(reply) }
-            }, nil)
+                MainActor.assumeIsolated { Unmanaged<NativeTerminal>.fromOpaque(context).takeUnretainedValue().console?.write(reply) }
+            }, Unmanaged.passUnretained(self).toOpaque())
         }
     }
 
@@ -142,6 +148,7 @@ final class NativeTerminal {
         feed(Data("\r\n\u{1b}[2m[process exited with code \(code)]\u{1b}[0m\r\n".utf8))
         console?.close()
         console = nil
+        onExit?()
         if let testScreen, let terminal {
             let length = nt_screen_text(terminal, nil, 0)
             var text = [UInt16](repeating: 0, count: Int(length))
@@ -254,7 +261,7 @@ final class NativeTerminal {
     fileprivate func contextMenu(at point: POINT) {
         let entries = NativeMenu.terminal(hasSelection: terminal.map { nt_has_selection($0) != 0 } ?? false,
                                           canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
-        if let command = showMenu(entries, owner: window, at: point) { perform(command) }
+        if case .command(let command)? = showMenu(entries, owner: window, at: point) { perform(command) }
     }
 
     func perform(_ command: NativeMenu.Command) {
@@ -268,7 +275,8 @@ final class NativeTerminal {
             points = NativeMenu.points(after: command, from: points)
             nt_set_font_size(terminal, points)
             resize()
-        case .quit: DestroyWindow(GetAncestor(window, UINT(GA_ROOT)))
+        case .newSession, .closeSession, .quit:
+            if let onWindowCommand { onWindowCommand(command) } else if command == .quit { DestroyWindow(window) }
         }
     }
 
@@ -317,6 +325,8 @@ final class NativeTerminal {
             if letter("V") { return .paste }
             if letter("A") { return .selectAll }
             if letter("K") { return .clearScrollback }
+            if onWindowCommand != nil, letter("T") { return .newSession }
+            if onWindowCommand != nil, letter("W") { return .closeSession }
         }
         guard modifiers == .control else { return nil }
         if letter("C"), terminal.map({ nt_has_selection($0) != 0 }) == true { return .copy }
@@ -400,32 +410,51 @@ final class NativeTerminal {
         console?.write(Data(text.utf8))
     }
 
-    func destroy() {
+    func setVisible(_ visible: Bool) {
+        ShowWindow(window, visible ? SW_SHOW : SW_HIDE)
+        if visible, let terminal { nt_show_title(terminal) }
+    }
+
+    fileprivate func destroyed() {
         console?.close()
         console = nil
         nt_destroy(terminal)
         terminal = nil
+        if let window { terminals[window] = nil }
     }
 }
 
-/// showMenu opens a dark popup of `entries` at a screen point and returns the command picked, nil when dismissed.
+/// showMenu opens a dark popup of `entries` at a screen point and returns what was picked, nil when dismissed.
 @MainActor
-func showMenu(_ entries: [NativeMenu.Entry], owner: HWND?, at point: POINT) -> NativeMenu.Command? {
-    guard let menu = CreatePopupMenu() else { return nil }
-    defer { DestroyMenu(menu) }
-    for entry in entries {
-        guard let command = entry.command else {
-            AppendMenuW(menu, UINT(MF_SEPARATOR), 0, nil)
-            continue
+func showMenu(_ entries: [NativeMenu.Entry], owner: HWND?, at point: POINT) -> NativeMenu.Pick? {
+    var menus: [HMENU] = []
+    defer { menus.forEach { DestroyMenu($0) } }
+    func build(_ entries: [NativeMenu.Entry]) -> HMENU? {
+        guard let menu = CreatePopupMenu() else { return nil }
+        menus.append(menu)
+        for entry in entries {
+            let text = Array((entry.shortcut.isEmpty ? entry.title : "\(entry.title)\t\(entry.shortcut)").utf16) + [0]
+            let state = entry.enabled ? 0 : UINT(MF_GRAYED)
+            if !entry.children.isEmpty, let submenu = build(entry.children) {
+                menus.removeAll { $0 == submenu } // the parent menu destroys its submenus
+                AppendMenuW(menu, UINT(MF_POPUP) | state, UINT_PTR(UInt(bitPattern: Int(bitPattern: submenu))), text)
+            } else if let pick = entry.pick {
+                AppendMenuW(menu, UINT(MF_STRING) | state, UINT_PTR(pick.id), text)
+            } else if entry.children.isEmpty, entry.title.isEmpty {
+                AppendMenuW(menu, UINT(MF_SEPARATOR), 0, nil)
+            } else {
+                AppendMenuW(menu, UINT(MF_STRING) | UINT(MF_GRAYED), 0, text)
+            }
         }
-        AppendMenuW(menu, UINT(MF_STRING) | (entry.enabled ? 0 : UINT(MF_GRAYED)), UINT_PTR(command.rawValue),
-                    Array("\(command.title)\t\(command.shortcut)".utf16) + [0])
+        return menu
     }
-    return NativeMenu.Command(rawValue: Int(nt_track_menu(UnsafeMutableRawPointer(menu), UnsafeMutableRawPointer(owner), point.x, point.y)))
+    guard let menu = build(entries) else { return nil }
+    return NativeMenu.Pick(id: Int(nt_track_menu(UnsafeMutableRawPointer(menu), UnsafeMutableRawPointer(owner), point.x, point.y)))
 }
 
 private let nativeWindowProcedure: WNDPROC = { window, message, wParam, lParam in
     MainActor.assumeIsolated {
+        guard let window, let native = terminals[window] else { return DefWindowProcW(window, message, wParam, lParam) }
         let x = Int32(Int16(truncatingIfNeeded: lParam)), y = Int32(Int16(truncatingIfNeeded: lParam >> 16))
         switch message {
         case UINT(WM_SIZE):
@@ -474,10 +503,9 @@ private let nativeWindowProcedure: WNDPROC = { window, message, wParam, lParam i
             native.exited(DWORD(truncatingIfNeeded: wParam), generation: Int(lParam))
             return 0
         case UINT(WM_DESTROY):
-            // a child terminal goes with its shell, which owns quitting
-            guard GetParent(window) == nil else { return 0 }
-            native.destroy()
-            PostQuitMessage(0)
+            native.destroyed()
+            // a child terminal's shell owns quitting
+            if GetParent(window) == nil { PostQuitMessage(0) }
             return 0
         default:
             return DefWindowProcW(window, message, wParam, lParam)

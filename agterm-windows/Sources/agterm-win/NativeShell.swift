@@ -6,18 +6,30 @@ import agtermCore
 
 private nonisolated(unsafe) var shell: NativeShell!
 private let menuButtonID = 100
+private let localWorkspaceID = Foundation.UUID()
 
-/// NativeShell is a remote window drawn without WebView2: the session sidebar as a Win32 tree beside one
-/// NativeTerminal showing the selected session.
+/// NativeShell is a window drawn without WebView2: the sidebar as a Win32 tree beside the selected session's
+/// terminal. It holds local sessions started from launch profiles, each with a terminal of its own, and the catalog
+/// of an agterm-server in WSL, whose sessions share one terminal that attaches whichever is selected.
 @MainActor
 final class NativeShell {
+    private struct LocalSession {
+        let id = Foundation.UUID()
+        let title: String
+        let terminal: NativeTerminal
+        var exited = false
+    }
+
     private let remote: RemoteWindow
+    private let core: URL
     private var window: HWND?
     private var tree: UnsafeMutableRawPointer?
     private var notice: HWND?
     private var menuButton: HWND?
     private var menuFont: HFONT?
-    private var terminal: NativeTerminal!
+    private var remoteTerminal: NativeTerminal!
+    private var locals: [LocalSession] = []
+    private var profiles = LaunchProfiles.available(wslDistributions: [], powerShell7: NativeShell.powerShell7())
     private var selected: Foundation.UUID?
     private var running: Foundation.UUID?
     // the tree's tags index these; 0 is a workspace row
@@ -29,15 +41,16 @@ final class NativeShell {
 
     static func open(remote: RemoteWindow, core: URL) {
         nt_init_process()
-        shell = NativeShell(remote: remote)
-        shell.create(core: core)
+        shell = NativeShell(remote: remote, core: core)
+        shell.create()
     }
 
-    private init(remote: RemoteWindow) {
+    private init(remote: RemoteWindow, core: URL) {
         self.remote = remote
+        self.core = core
     }
 
-    private func create(core: URL) {
+    private func create() {
         let instance = GetModuleHandleW(nil)
         let className = Array("agterm-shell".utf16) + [0]
         className.withUnsafeBufferPointer { name in
@@ -51,7 +64,7 @@ final class NativeShell {
             windowClass.lpszClassName = name.baseAddress
             RegisterClassExW(&windowClass)
         }
-        guard let window = CreateWindowExW(0, className, Array("agterm — WSL \(remote.host.distribution)".utf16) + [0],
+        guard let window = CreateWindowExW(0, className, Array("agterm".utf16) + [0],
                                            DWORD(WS_OVERLAPPEDWINDOW) | DWORD(WS_CLIPCHILDREN), CW_USEDEFAULT, CW_USEDEFAULT, 1300, 760,
                                            nil, nil, instance, nil) else {
             log("native shell: CreateWindowExW failed: \(GetLastError())")
@@ -60,22 +73,97 @@ final class NativeShell {
         self.window = window
         nt_dark_title_bar(UnsafeMutableRawPointer(window))
         dpi = GetDpiForWindow(window)
-        tree = nt_tree_create(UnsafeMutableRawPointer(window), dpi)
         menuButton = CreateWindowExW(0, Array("BUTTON".utf16) + [0], Array("Menu".utf16) + [0],
                                      DWORD(WS_CHILD) | DWORD(WS_VISIBLE) | DWORD(BS_OWNERDRAW), 0, 0, 10, 10, window,
                                      HMENU(bitPattern: menuButtonID), instance, nil)
         updateMenuFont()
+        tree = nt_tree_create(UnsafeMutableRawPointer(window), dpi)
         notice = CreateWindowExW(0, Array("STATIC".utf16) + [0], nil, DWORD(WS_CHILD) | DWORD(SS_LEFT), 0, 0, 10, 10, window, nil,
                                  instance, nil)
-        terminal = NativeTerminal(parent: window, core: core)
+        remoteTerminal = makeTerminal()
         layout()
         ShowWindow(window, SW_SHOW)
+        discoverProfiles()
         remote.changed = { [weak self] in self?.catalogChanged() }
         catalogChanged()
         remote.start()
     }
 
-    private var sidebarWidth: Int32 { Int32(MulDiv(240, Int32(dpi), 96)) }
+    private func makeTerminal() -> NativeTerminal {
+        let terminal = NativeTerminal(parent: window, core: core)
+        terminal.onWindowCommand = { [unowned self] in windowCommand($0) }
+        terminal.setDPI(dpi)
+        return terminal
+    }
+
+    // MARK: launch profiles
+
+    private static func powerShell7() -> String? {
+        let paths = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ";").map { "\($0)\\pwsh.exe" }
+            + [#"C:\Program Files\PowerShell\7\pwsh.exe"#]
+        return paths.first { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    /// discoverProfiles adds the WSL distributions once `wsl.exe` lists them, off the UI thread: the first call can
+    /// wait for the WSL service.
+    private func discoverProfiles() {
+        let powerShell7 = Self.powerShell7()
+        DispatchQueue.global().async {
+            let listing = (try? HiddenProcess(commandLine: "wsl.exe --list --quiet", captureErrors: false))?.readToEnd() ?? Data()
+            let distributions = LaunchProfiles.distributions(fromWSLList: listing)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    shell.profiles = LaunchProfiles.available(wslDistributions: distributions, powerShell7: powerShell7)
+                    log("native shell: \(shell.profiles.count) launch profile(s): \(shell.profiles.map(\.name).joined(separator: ", "))")
+                }
+            }
+        }
+    }
+
+    private func newSession(_ profile: LaunchProfile) {
+        let siblings = locals.filter { $0.title.hasPrefix(profile.name) }.count
+        let session = LocalSession(title: siblings == 0 ? profile.name : "\(profile.name) \(siblings + 1)", terminal: makeTerminal())
+        let id = session.id
+        session.terminal.onExit = { [unowned self] in localExited(id) }
+        locals.append(session)
+        layout()
+        log("native shell: new \(profile.name) session [\(id)]")
+        session.terminal.start(profile.commandLine, directory: ProcessInfo.processInfo.environment["USERPROFILE"])
+        rebuild()
+        select(id)
+    }
+
+    private func localExited(_ id: Foundation.UUID) {
+        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
+        locals[index].exited = true
+        rebuild()
+    }
+
+    private func closeSelected() {
+        guard let index = locals.firstIndex(where: { $0.id == selected }) else { return }
+        let closing = locals.remove(at: index)
+        DestroyWindow(closing.terminal.window)
+        selected = nil
+        rebuild()
+        if let next = locals.indices.contains(index) ? locals[index].id : locals.last?.id {
+            select(next)
+        } else {
+            catalogChanged()
+        }
+    }
+
+    private func windowCommand(_ command: NativeMenu.Command) {
+        switch command {
+        case .newSession: if let profile = profiles.first { newSession(profile) }
+        case .closeSession: closeSelected()
+        case .quit: DestroyWindow(window)
+        default: visibleTerminal.perform(command)
+        }
+    }
+
+    // MARK: sidebar
+
+    private var sidebarWidth: Int32 { scaled(240) }
     private func scaled(_ value: Int32) -> Int32 { MulDiv(value, Int32(dpi), 96) }
 
     private func updateMenuFont() {
@@ -83,6 +171,10 @@ final class NativeShell {
         menuFont = CreateFontW(-scaled(18), 0, 0, 0, FW_NORMAL, 0, 0, 0, DWORD(DEFAULT_CHARSET), DWORD(OUT_DEFAULT_PRECIS),
                                DWORD(CLIP_DEFAULT_PRECIS), DWORD(CLEARTYPE_QUALITY), DWORD(DEFAULT_PITCH), Array("Segoe UI Symbol".utf16) + [0])
     }
+
+    private var terminalsShown: [NativeTerminal] { [remoteTerminal] + locals.map(\.terminal) }
+
+    private var visibleTerminal: NativeTerminal { locals.first { $0.id == selected }?.terminal ?? remoteTerminal }
 
     private func layout() {
         guard let window else { return }
@@ -98,20 +190,32 @@ final class NativeShell {
         MoveWindow(notice, 8, buttonSize, width - 16, max(noticeHeight - 6, 0), true)
         let treeTop = buttonSize + noticeHeight
         MoveWindow(tree?.assumingMemoryBound(to: HWND__.self), 0, treeTop, width, height - treeTop, true)
-        terminal.move(x: width, y: 0, width: max(client.right - width, 1), height: height)
+        for terminal in terminalsShown {
+            terminal.move(x: width, y: 0, width: max(client.right - width, 1), height: height)
+        }
     }
 
     private func catalogChanged() {
+        rebuild()
+        layout()
+        guard !locals.contains(where: { $0.id == selected }) else { return }
         let workspaces = remote.store.workspaces
         let next = SessionSidebar.selection(current: selected, in: workspaces)
         log("native shell: \(workspaces.lazy.flatMap(\.sessions).count) session(s), selecting \(next?.uuidString ?? "none")")
-        rebuild(SessionSidebar.items(workspaces))
-        layout()
-        if let next { select(next) } else { selected = nil }
+        if let next { select(next) } else if let local = locals.last { select(local.id) } else { selected = nil }
     }
 
-    private func rebuild(_ workspaces: [SessionSidebar.Item]) {
+    private func rebuild() {
         guard let tree else { return }
+        var sidebar = SessionSidebar.items(remote.store.workspaces)
+        if !locals.isEmpty {
+            let children = locals.map {
+                SessionSidebar.Item(id: $0.id, title: $0.exited ? "\($0.title) (exited)" : $0.title, isWorkspace: false, ended: $0.exited,
+                                    children: [])
+            }
+            sidebar.insert(SessionSidebar.Item(id: localWorkspaceID, title: "Local", isWorkspace: true, ended: false, children: children),
+                           at: 0)
+        }
         nt_tree_clear(tree)
         tagged = []
         dimmed = []
@@ -127,7 +231,8 @@ final class NativeShell {
             if !item.isWorkspace { items[item.id] = node }
             item.children.forEach { add($0, under: node) }
         }
-        workspaces.forEach { add($0, under: nil) }
+        sidebar.forEach { add($0, under: nil) }
+        if let selected, let item = items[selected] { nt_tree_select(tree, item) }
     }
 
     fileprivate func customDraw(_ notification: LPARAM) -> LRESULT? {
@@ -138,23 +243,27 @@ final class NativeShell {
     fileprivate func userSelected(_ tag: Int64) {
         guard tag > 0, Int(tag) <= tagged.count else { return }
         select(tagged[Int(tag) - 1])
-        SetFocus(terminal.window)
+        focus()
     }
 
     private func select(_ id: Foundation.UUID) {
         selected = id
         if let tree, let item = items[id] { nt_tree_select(tree, item) }
-        guard let session = remote.session(id), id != running else { return }
+        let shown = visibleTerminal
+        for terminal in terminalsShown { terminal.setVisible(terminal === shown) }
+        guard !locals.contains(where: { $0.id == id }), let session = remote.session(id), id != running else { return }
         running = id
         remote.store.selectedSessionID = id
         switch SessionSidebar.launch(for: session, hostLabel: "WSL \(remote.host.distribution)") {
         case .command(let command):
             log("native shell: showing \(session.displayName) [\(id)]")
-            terminal.start(command)
+            remoteTerminal.start(command)
         case .notice(let text):
-            terminal.show(notice: text)
+            remoteTerminal.show(notice: text)
         }
     }
+
+    // MARK: window
 
     fileprivate func resized() { layout() }
 
@@ -162,7 +271,7 @@ final class NativeShell {
         self.dpi = dpi
         if let tree { nt_tree_set_dpi(tree, dpi) }
         updateMenuFont()
-        terminal.setDPI(dpi)
+        terminalsShown.forEach { $0.setDPI(dpi) }
         SetWindowPos(window, nil, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top,
                      UINT(SWP_NOZORDER | SWP_NOACTIVATE))
         layout()
@@ -174,15 +283,21 @@ final class NativeShell {
         return LRESULT(Int(bitPattern: darkBrush))
     }
 
-    fileprivate func focus() { SetFocus(terminal.window) }
+    fileprivate func focus() { SetFocus(visibleTerminal.window) }
 
-    /// windowMenu is the ☰ menu: the terminal's commands and the window's own.
+    /// windowMenu is the ☰ menu: new sessions from the launch profiles, the terminal's commands and the window's own.
     fileprivate func windowMenu() {
         var button = RECT()
         GetWindowRect(menuButton, &button)
-        let entries = NativeMenu.window(hasSelection: terminal.hasSelection, canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
-        if let command = showMenu(entries, owner: window, at: POINT(x: button.left, y: button.bottom)) { terminal.perform(command) }
-        SetFocus(terminal.window)
+        let entries = NativeMenu.window(profiles: profiles, canCloseSession: locals.contains { $0.id == selected },
+                                        hasSelection: visibleTerminal.hasSelection,
+                                        canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
+        switch showMenu(entries, owner: window, at: POINT(x: button.left, y: button.bottom)) {
+        case .command(let command)?: windowCommand(command)
+        case .profile(let index)? where profiles.indices.contains(index): newSession(profiles[index])
+        default: break
+        }
+        focus()
     }
 
     fileprivate func drawMenuButton(_ item: DRAWITEMSTRUCT) {
@@ -196,10 +311,6 @@ final class NativeShell {
         SetTextColor(item.hDC, 0xCCCCCC)
         DrawTextW(item.hDC, Array("\u{2630}".utf16) + [0], -1, &rect, UINT(DT_CENTER | DT_VCENTER | DT_SINGLELINE))
         SelectObject(item.hDC, previous)
-    }
-
-    fileprivate func destroy() {
-        terminal.destroy()
     }
 }
 
@@ -234,7 +345,6 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             }
             return 0
         case UINT(WM_DESTROY):
-            shell.destroy()
             PostQuitMessage(0)
             return 0
         default:

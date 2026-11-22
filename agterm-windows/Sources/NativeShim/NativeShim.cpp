@@ -336,8 +336,11 @@ struct nt_terminal {
         if (bytes) core.freeBuffer(bytes, length);
         if (next == title) return;
         title = next;
-        SetWindowTextW(GetAncestor(window, GA_ROOT), title.empty() ? L"agterm" : title.c_str());
+        if (IsWindowVisible(window)) showTitle();
     }
+
+    // the window's title is the shown terminal's; a hidden one keeps its title until it is shown
+    void showTitle() const { SetWindowTextW(GetAncestor(window, GA_ROOT), title.empty() ? L"agterm" : title.c_str()); }
 };
 
 extern "C" void nt_init_process(void) {
@@ -677,6 +680,8 @@ extern "C" void nt_reset(nt_terminal *terminal) {
     terminal->hasSelection = terminal->selecting = false;
     InvalidateRect(terminal->window, nullptr, FALSE);
 }
+
+extern "C" void nt_show_title(nt_terminal *terminal) { terminal->showTitle(); }
 
 extern "C" void nt_dark_title_bar(void *window) {
     BOOL dark = TRUE;

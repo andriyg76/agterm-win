@@ -1,8 +1,8 @@
 /// NativeMenu is what the native window's menus hold: the terminal's context menu, and the ☰ menu, which adds the
-/// window's own commands. Every entry is also a shortcut, so a menu never holds the only way to do something.
+/// window's own commands. Every command is also a shortcut, so a menu never holds the only way to do something.
 public enum NativeMenu {
     public enum Command: Int, CaseIterable, Sendable {
-        case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, quit
+        case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, closeSession, quit
 
         public var title: String {
             switch self {
@@ -13,6 +13,8 @@ public enum NativeMenu {
             case .fontBigger: "Bigger Font"
             case .fontSmaller: "Smaller Font"
             case .fontReset: "Default Font Size"
+            case .newSession: "New Session"
+            case .closeSession: "Close Session"
             case .quit: "Quit"
             }
         }
@@ -26,28 +28,68 @@ public enum NativeMenu {
             case .fontBigger: "Ctrl+="
             case .fontSmaller: "Ctrl+-"
             case .fontReset: "Ctrl+0"
+            case .newSession: "Ctrl+Shift+T"
+            case .closeSession: "Ctrl+Shift+W"
             case .quit: "Alt+F4"
             }
         }
     }
 
-    /// Entry is a command, or a separator when `command` is nil.
-    public struct Entry: Equatable, Sendable {
-        public let command: Command?
-        public let enabled: Bool
+    /// Pick is what choosing an entry does: run a command, or start a new session from a launch profile.
+    public enum Pick: Equatable, Sendable {
+        case command(Command)
+        case profile(Int)
 
-        static let separator = Entry(command: nil, enabled: false)
+        static let profileBase = 1000
+
+        /// id is the Win32 menu item id; 0 is reserved for a dismissed menu.
+        public var id: Int {
+            switch self {
+            case .command(let command): command.rawValue
+            case .profile(let index): Self.profileBase + index
+            }
+        }
+
+        public init?(id: Int) {
+            if id >= Self.profileBase {
+                self = .profile(id - Self.profileBase)
+            } else if let command = Command(rawValue: id) {
+                self = .command(command)
+            } else {
+                return nil
+            }
+        }
+    }
+
+    /// Entry is a pick, a submenu when `children` is not empty, or a separator when it has neither.
+    public struct Entry: Equatable, Sendable {
+        public let title: String
+        public let shortcut: String
+        public let pick: Pick?
+        public let enabled: Bool
+        public let children: [Entry]
+
+        static let separator = Entry(title: "", shortcut: "", pick: nil, enabled: false, children: [])
+
+        static func command(_ command: Command, enabled: Bool = true) -> Entry {
+            Entry(title: command.title, shortcut: command.shortcut, pick: .command(command), enabled: enabled, children: [])
+        }
     }
 
     public static func terminal(hasSelection: Bool, canPaste: Bool) -> [Entry] {
-        [Entry(command: .copy, enabled: hasSelection), Entry(command: .paste, enabled: canPaste),
-         Entry(command: .selectAll, enabled: true), Entry(command: .clearScrollback, enabled: true), .separator,
-         Entry(command: .fontBigger, enabled: true), Entry(command: .fontSmaller, enabled: true),
-         Entry(command: .fontReset, enabled: true)]
+        [.command(.copy, enabled: hasSelection), .command(.paste, enabled: canPaste), .command(.selectAll),
+         .command(.clearScrollback), .separator, .command(.fontBigger), .command(.fontSmaller), .command(.fontReset)]
     }
 
-    public static func window(hasSelection: Bool, canPaste: Bool) -> [Entry] {
-        terminal(hasSelection: hasSelection, canPaste: canPaste) + [.separator, Entry(command: .quit, enabled: true)]
+    /// window is the ☰ menu: New Session lists the profiles, the first of them on New Session's shortcut.
+    public static func window(profiles: [LaunchProfile], canCloseSession: Bool, hasSelection: Bool, canPaste: Bool) -> [Entry] {
+        let launches = profiles.enumerated().map { index, profile in
+            Entry(title: profile.name, shortcut: index == 0 ? Command.newSession.shortcut : "", pick: .profile(index), enabled: true,
+                  children: [])
+        }
+        return [Entry(title: Command.newSession.title, shortcut: "", pick: nil, enabled: !launches.isEmpty, children: launches),
+                .command(.closeSession, enabled: canCloseSession), .separator]
+            + terminal(hasSelection: hasSelection, canPaste: canPaste) + [.separator, .command(.quit)]
     }
 
     public static let defaultPoints: Float = 11

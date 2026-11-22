@@ -46,6 +46,8 @@ int32_t nt_screen_text(nt_terminal *terminal, uint16_t *out, int32_t capacity);
 // nt_reset starts a fresh emulator at the current grid, dropping screen, scrollback, modes and selection.
 void nt_reset(nt_terminal *terminal);
 void nt_dark_title_bar(void *window);
+// nt_show_title puts the program's title on the terminal's top-level window.
+void nt_show_title(nt_terminal *terminal);
 void nt_select_all(nt_terminal *terminal);
 // nt_clear_scrollback drops the scrollback the way ED 3 does, leaving the screen and the program alone.
 void nt_clear_scrollback(nt_terminal *terminal);

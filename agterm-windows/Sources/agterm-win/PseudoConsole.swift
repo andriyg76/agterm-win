@@ -13,7 +13,8 @@ final class PseudoConsole {
     private let process: HANDLE
     let processID: DWORD
 
-    init(commandLine: String, columns: Int16, rows: Int16,
+    /// `directory` is where the program starts, the caller's current directory when nil.
+    init(commandLine: String, directory: String? = nil, columns: Int16, rows: Int16,
          onOutput: @escaping (Data) -> Void, onExit: @escaping (DWORD) -> Void) throws {
         var inputRead: HANDLE?, inputWrite: HANDLE?, outputRead: HANDLE?, outputWrite: HANDLE?
         guard CreatePipe(&inputRead, &inputWrite, nil, 0), CreatePipe(&outputRead, &outputWrite, nil, 0) else {
@@ -43,9 +44,10 @@ final class PseudoConsole {
         startup.lpAttributeList = attributes
         var info = PROCESS_INFORMATION()
         var line = Array(commandLine.utf16) + [0]
+        let folder = directory.map { Array($0.utf16) + [0] }
         let started = withUnsafeMutablePointer(to: &startup) { pointer in
             pointer.withMemoryRebound(to: STARTUPINFOW.self, capacity: 1) { startupInfo in
-                CreateProcessW(nil, &line, nil, nil, false, DWORD(EXTENDED_STARTUPINFO_PRESENT), nil, nil, startupInfo, &info)
+                CreateProcessW(nil, &line, nil, nil, false, DWORD(EXTENDED_STARTUPINFO_PRESENT), nil, folder, startupInfo, &info)
             }
         }
         guard started else {
