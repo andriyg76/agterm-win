@@ -27,6 +27,8 @@ void nt_scroll(nt_terminal *terminal, int32_t lines);
 void nt_scroll_to_bottom(nt_terminal *terminal);
 void nt_set_focus(nt_terminal *terminal, int32_t focused);
 int32_t nt_bracketed_paste(nt_terminal *terminal);
+// nt_application_cursor is DECCKM: arrows, Home and End are SS3 sequences while a program has set it.
+int32_t nt_application_cursor(nt_terminal *terminal);
 
 #ifdef __cplusplus
 }

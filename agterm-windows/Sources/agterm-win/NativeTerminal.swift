@@ -150,7 +150,10 @@ final class NativeTerminal {
         }
         if alt, key == VK_F4 { return false }
         let modifier = 1 + (shift ? 1 : 0) + (alt ? 2 : 0) + (control ? 4 : 0)
-        let cursor = { (final: String) in modifier == 1 ? "\u{1b}[\(final)" : "\u{1b}[1;\(modifier)\(final)" }
+        let application = terminal.map { nt_application_cursor($0) != 0 } ?? false
+        let cursor = { (final: String) in
+            modifier > 1 ? "\u{1b}[1;\(modifier)\(final)" : application ? "\u{1b}O\(final)" : "\u{1b}[\(final)"
+        }
         let tilde = { (code: Int) in modifier == 1 ? "\u{1b}[\(code)~" : "\u{1b}[\(code);\(modifier)~" }
         let function = { (final: String) in modifier == 1 ? "\u{1b}O\(final)" : "\u{1b}[1;\(modifier)\(final)" }
         let sequence: String? = switch key {

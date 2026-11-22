@@ -124,6 +124,7 @@ struct nt_terminal {
     uint32_t columns = 80, rows = 24;
     int32_t scroll = 0;
     bool focused = true;
+    bool applicationCursor = false;
     uint32_t foreground = 0xCCCCCC, background = 0x1E1E1E;
     std::vector<Cell> grid, history;
     std::wstring title;
@@ -358,13 +359,23 @@ extern "C" void nt_feed(nt_terminal *terminal, const uint8_t *bytes, uint32_t le
             at += 4;
             return value;
         };
+        auto string = [&]() -> std::string {
+            uint32_t length = u32();
+            std::string text = at + length <= size ? std::string(reinterpret_cast<const char *>(actions + at), length) : std::string();
+            at += length;
+            return text;
+        };
         auto skipString = [&]() { at += u32(); };
         uint32_t count = u32();
         for (uint32_t index = 0; index < count && at < size; index++) {
             uint8_t kind = actions[at++];
-            if (kind == 1 || kind == 5) {
+            if (kind == 1) {
                 skipString();
                 skipString();
+            } else if (kind == 5) {
+                // the core leaves DECCKM (?1) to the host, which owns key encoding
+                std::string what = string(), detail = string();
+                if (what == "MODE" && (detail == "?1 h" || detail == "?1 l")) terminal->applicationCursor = detail.back() == 'h';
             } else if (kind == 2) {
                 at += 8;
             } else if (kind == 3) {
@@ -455,6 +466,8 @@ extern "C" void nt_set_focus(nt_terminal *terminal, int32_t focused) {
     terminal->focused = focused != 0;
     InvalidateRect(terminal->window, nullptr, FALSE);
 }
+
+extern "C" int32_t nt_application_cursor(nt_terminal *terminal) { return terminal->applicationCursor; }
 
 extern "C" int32_t nt_bracketed_paste(nt_terminal *terminal) {
     Info info{};
