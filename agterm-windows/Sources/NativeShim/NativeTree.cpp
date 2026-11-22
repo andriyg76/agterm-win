@@ -79,3 +79,25 @@ extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *di
     }
     return CDRF_DODEFAULT;
 }
+
+extern "C" int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y) {
+    auto window = static_cast<HWND>(tree);
+    TVITEMW item{};
+    item.mask = TVIF_PARAM;
+    if (*x == -1 && *y == -1) {  // from the keyboard: at the selected item
+        item.hItem = TreeView_GetSelection(window);
+        RECT rect{};
+        if (!item.hItem || !TreeView_GetItemRect(window, item.hItem, &rect, TRUE)) return 0;
+        POINT corner{rect.left, rect.bottom};
+        ClientToScreen(window, &corner);
+        *x = corner.x;
+        *y = corner.y;
+    } else {
+        TVHITTESTINFO hit{};
+        hit.pt = {*x, *y};
+        ScreenToClient(window, &hit.pt);
+        item.hItem = TreeView_HitTest(window, &hit);
+        if (!item.hItem || !(hit.flags & TVHT_ONITEM)) return 0;
+    }
+    return SendMessageW(window, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&item)) ? static_cast<int64_t>(item.lParam) : 0;
+}

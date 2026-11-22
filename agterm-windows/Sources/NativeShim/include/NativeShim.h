@@ -62,6 +62,9 @@ void *nt_tree_add(void *tree, void *parent, const uint16_t *text, int64_t tag, i
 void nt_tree_select(void *tree, void *item);
 // nt_tree_selection_changed reads a WM_NOTIFY lParam: 1 with the item's tag when the user moved the selection.
 int32_t nt_tree_selection_changed(intptr_t notification, int64_t *tag);
+// nt_tree_item_at is the tag of the item at a WM_CONTEXTMENU's screen point (0 off any item, a workspace row
+// included); for a keyboard menu (-1, -1) it is the selected item's, and the point moves to that item's corner.
+int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y);
 // nt_tree_custom_draw answers a tree's NM_CUSTOMDRAW (-1 for any other WM_NOTIFY): dark selection, and items whose
 // tag's `dimmed` byte is set drawn grey.
 intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count);

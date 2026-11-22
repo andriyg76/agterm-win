@@ -54,6 +54,14 @@ public enum SessionSidebar {
         return (sessions.first { !$0.ended } ?? sessions.first)?.id
     }
 
+    /// neighbor is the session after (or before) `current` in sidebar order, wrapping around; the first one when
+    /// `current` is not among them.
+    public nonisolated static func neighbor(of current: UUID?, in order: [UUID], forward: Bool) -> UUID? {
+        guard !order.isEmpty else { return nil }
+        guard let current, let index = order.firstIndex(of: current) else { return forward ? order.first : order.last }
+        return order[(index + (forward ? 1 : order.count - 1)) % order.count]
+    }
+
     /// launch is what selecting `session` runs: its attach command, or a notice where there is nothing to attach.
     /// agtermCore's placeholder for an ended or held pane is a POSIX line, with no /bin/sh to run it on Windows.
     public static func launch(for session: Session, hostLabel: String) -> Launch {

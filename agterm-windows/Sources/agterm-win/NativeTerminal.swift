@@ -275,7 +275,7 @@ final class NativeTerminal {
             points = NativeMenu.points(after: command, from: points)
             nt_set_font_size(terminal, points)
             resize()
-        case .newSession, .closeSession, .quit:
+        case .newSession, .closeSession, .nextSession, .previousSession, .quit:
             if let onWindowCommand { onWindowCommand(command) } else if command == .quit { DestroyWindow(window) }
         }
     }
@@ -327,6 +327,9 @@ final class NativeTerminal {
             if letter("K") { return .clearScrollback }
             if onWindowCommand != nil, letter("T") { return .newSession }
             if onWindowCommand != nil, letter("W") { return .closeSession }
+        }
+        if onWindowCommand != nil, key == VK_TAB, modifiers == .control || modifiers == [.shift, .control] {
+            return modifiers.contains(.shift) ? .previousSession : .nextSession
         }
         guard modifiers == .control else { return nil }
         if letter("C"), terminal.map({ nt_has_selection($0) != 0 }) == true { return .copy }

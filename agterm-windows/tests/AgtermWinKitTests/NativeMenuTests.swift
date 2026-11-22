@@ -14,19 +14,28 @@ struct NativeMenuTests {
     }
 
     @Test func windowMenuOffersEveryProfileUnderNewSession() {
-        let menu = NativeMenu.window(profiles: profiles, canCloseSession: false, hasSelection: false, canPaste: false)
+        let menu = NativeMenu.window(profiles: profiles, canCloseSession: false, sessionCount: 1, hasSelection: false, canPaste: false)
         let newSession = menu[0]
         #expect(newSession.title == "New Session")
         #expect(newSession.children.map(\.title) == ["Windows PowerShell", "WSL Ubuntu"])
         #expect(newSession.children.map(\.pick) == [.profile(0), .profile(1)])
         #expect(newSession.children.map(\.shortcut) == ["Ctrl+Shift+T", ""])
         #expect(menu.first { $0.pick == .command(.closeSession) }?.enabled == false)
+        #expect(menu.first { $0.pick == .command(.nextSession) }?.enabled == false)
         #expect(menu.last?.pick == .command(.quit))
+    }
+
+    @Test func sessionsMenuIsTheWindowMenusHead() {
+        let sessions = NativeMenu.sessions(profiles: profiles, canCloseSession: true, sessionCount: 2)
+        let window = NativeMenu.window(profiles: profiles, canCloseSession: true, sessionCount: 2, hasSelection: false, canPaste: false)
+        #expect(Array(window.prefix(sessions.count)) == sessions)
+        #expect(sessions.first { $0.pick == .command(.previousSession) }?.enabled == true)
+        #expect(!sessions.contains { $0.pick == .command(.copy) })
     }
 
     @Test func windowMenuContainsTheTerminalMenu() {
         let terminal = NativeMenu.terminal(hasSelection: true, canPaste: true)
-        let window = NativeMenu.window(profiles: profiles, canCloseSession: true, hasSelection: true, canPaste: true)
+        let window = NativeMenu.window(profiles: profiles, canCloseSession: true, sessionCount: 3, hasSelection: true, canPaste: true)
         #expect(window.contains(terminal[0]) && window.contains(terminal[terminal.count - 1]))
     }
 

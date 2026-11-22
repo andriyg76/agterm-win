@@ -50,4 +50,13 @@ struct SessionSidebarTests {
         #expect(SessionSidebar.launch(for: ended, hostLabel: "WSL Ubuntu") == .notice("Ended on WSL Ubuntu"))
         #expect(SessionSidebar.launch(for: session("b"), hostLabel: "WSL Ubuntu") == .notice("no pane to attach"))
     }
+
+    @Test func neighborWrapsAroundTheSidebarOrder() {
+        let a = UUID(), b = UUID(), c = UUID()
+        #expect(SessionSidebar.neighbor(of: a, in: [a, b, c], forward: true) == b)
+        #expect(SessionSidebar.neighbor(of: c, in: [a, b, c], forward: true) == a)
+        #expect(SessionSidebar.neighbor(of: a, in: [a, b, c], forward: false) == c)
+        #expect(SessionSidebar.neighbor(of: UUID(), in: [a, b], forward: false) == b)
+        #expect(SessionSidebar.neighbor(of: nil, in: [], forward: true) == nil)
+    }
 }

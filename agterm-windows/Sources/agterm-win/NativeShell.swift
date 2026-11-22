@@ -156,6 +156,11 @@ final class NativeShell {
         switch command {
         case .newSession: if let profile = profiles.first { newSession(profile) }
         case .closeSession: closeSelected()
+        case .nextSession, .previousSession:
+            if let next = SessionSidebar.neighbor(of: selected, in: tagged, forward: command == .nextSession) {
+                select(next)
+                focus()
+            }
         case .quit: DestroyWindow(window)
         default: visibleTerminal.perform(command)
         }
@@ -290,9 +295,25 @@ final class NativeShell {
         var button = RECT()
         GetWindowRect(menuButton, &button)
         let entries = NativeMenu.window(profiles: profiles, canCloseSession: locals.contains { $0.id == selected },
-                                        hasSelection: visibleTerminal.hasSelection,
+                                        sessionCount: tagged.count, hasSelection: visibleTerminal.hasSelection,
                                         canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
-        switch showMenu(entries, owner: window, at: POINT(x: button.left, y: button.bottom)) {
+        run(showMenu(entries, owner: window, at: POINT(x: button.left, y: button.bottom)))
+    }
+
+    /// treeMenu is the sidebar's menu, for the session under the right click, which it selects first.
+    fileprivate func treeMenu(x: Int32, y: Int32) {
+        guard let tree else { return }
+        var point = POINT(x: x, y: y)
+        let tag = nt_tree_item_at(tree, &point.x, &point.y)
+        if tag > 0, Int(tag) <= tagged.count { select(tagged[Int(tag) - 1]) }
+        if x != -1 || y != -1 { point = POINT(x: x, y: y) }
+        run(showMenu(NativeMenu.sessions(profiles: profiles, canCloseSession: locals.contains { $0.id == selected },
+                                         sessionCount: tagged.count),
+                     owner: window, at: point))
+    }
+
+    private func run(_ pick: NativeMenu.Pick?) {
+        switch pick {
         case .command(let command)?: windowCommand(command)
         case .profile(let index)? where profiles.indices.contains(index): newSession(profiles[index])
         default: break
@@ -337,6 +358,10 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
                 return 1
             }
             return DefWindowProcW(window, message, wParam, lParam)
+        case UINT(WM_CONTEXTMENU):
+            let x = Int32(Int16(truncatingIfNeeded: lParam)), y = Int32(Int16(truncatingIfNeeded: lParam >> 16))
+            shell.treeMenu(x: x, y: y)
+            return 0
         case UINT(WM_CTLCOLORSTATIC):
             return shell.staticColors(HDC(bitPattern: UInt(wParam)))
         case UINT(WM_DPICHANGED):

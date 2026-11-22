@@ -2,7 +2,7 @@
 /// window's own commands. Every command is also a shortcut, so a menu never holds the only way to do something.
 public enum NativeMenu {
     public enum Command: Int, CaseIterable, Sendable {
-        case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, closeSession, quit
+        case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, closeSession, nextSession, previousSession, quit
 
         public var title: String {
             switch self {
@@ -15,6 +15,8 @@ public enum NativeMenu {
             case .fontReset: "Default Font Size"
             case .newSession: "New Session"
             case .closeSession: "Close Session"
+            case .nextSession: "Next Session"
+            case .previousSession: "Previous Session"
             case .quit: "Quit"
             }
         }
@@ -30,6 +32,8 @@ public enum NativeMenu {
             case .fontReset: "Ctrl+0"
             case .newSession: "Ctrl+Shift+T"
             case .closeSession: "Ctrl+Shift+W"
+            case .nextSession: "Ctrl+Tab"
+            case .previousSession: "Ctrl+Shift+Tab"
             case .quit: "Alt+F4"
             }
         }
@@ -81,14 +85,21 @@ public enum NativeMenu {
          .command(.clearScrollback), .separator, .command(.fontBigger), .command(.fontSmaller), .command(.fontReset)]
     }
 
-    /// window is the ☰ menu: New Session lists the profiles, the first of them on New Session's shortcut.
-    public static func window(profiles: [LaunchProfile], canCloseSession: Bool, hasSelection: Bool, canPaste: Bool) -> [Entry] {
+    /// sessions is the sidebar's menu: New Session lists the profiles, the first of them on New Session's shortcut.
+    public static func sessions(profiles: [LaunchProfile], canCloseSession: Bool, sessionCount: Int) -> [Entry] {
         let launches = profiles.enumerated().map { index, profile in
             Entry(title: profile.name, shortcut: index == 0 ? Command.newSession.shortcut : "", pick: .profile(index), enabled: true,
                   children: [])
         }
         return [Entry(title: Command.newSession.title, shortcut: "", pick: nil, enabled: !launches.isEmpty, children: launches),
-                .command(.closeSession, enabled: canCloseSession), .separator]
+                .command(.closeSession, enabled: canCloseSession),
+                .command(.nextSession, enabled: sessionCount > 1), .command(.previousSession, enabled: sessionCount > 1)]
+    }
+
+    /// window is the ☰ menu: the sidebar's menu, the terminal's, and Quit.
+    public static func window(profiles: [LaunchProfile], canCloseSession: Bool, sessionCount: Int, hasSelection: Bool,
+                              canPaste: Bool) -> [Entry] {
+        sessions(profiles: profiles, canCloseSession: canCloseSession, sessionCount: sessionCount) + [.separator]
             + terminal(hasSelection: hasSelection, canPaste: canPaste) + [.separator, .command(.quit)]
     }
 
