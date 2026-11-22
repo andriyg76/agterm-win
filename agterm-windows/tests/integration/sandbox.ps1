@@ -1,12 +1,14 @@
 # Runs run.ps1 inside Windows Sandbox: an isolated desktop with no network, so the host stays usable meanwhile.
 # Stage the app first (scripts/stage.ps1). Exit code is the guest's: 0 pass, 1 test failure, 2 guest setup failure;
-# a missing result is an error, never a pass. The Sandbox stays open for inspection; close it before another run.
+# a missing result is an error, never a pass. A passing Sandbox shuts itself down; a failing one, or any with
+# -KeepOpen, stays open for inspection and must be closed before another run.
 param(
     [Parameter(Mandatory)][string]$App,
     [string]$OutputDirectory = (Join-Path $env:TEMP ("agterm-sandbox\" + (Get-Date).ToString("yyyyMMddTHHmmss"))),
     [ValidateRange(30, 3600)][int]$TimeoutSeconds = 600,
     [ValidateRange(2048, 65536)][int]$MemoryInMB = 4096,
     [switch]$DisableVGpu,
+    [switch]$KeepOpen,
     [switch]$PrepareOnly
 )
 $ErrorActionPreference = "Stop"
@@ -26,6 +28,12 @@ $results = Join-Path $OutputDirectory "results"
 New-Item -ItemType Directory $payload, $results | Out-Null
 Copy-Item -Recurse $App (Join-Path $payload "app")
 Copy-Item -Recurse $PSScriptRoot (Join-Path $payload "tests")
+if (-not $KeepOpen) { Set-Content (Join-Path $payload "close-on-pass") "" }
+# Sandbox's image has no WebView2 runtime: carry the host's, which agterm-win loads as a fixed-version one
+$webview = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft\EdgeWebView\Application" -Directory |
+    ? { $_.Name -match '^\d+(\.\d+){3}$' } | Sort-Object { [version]$_.Name } | Select-Object -Last 1
+if (-not $webview) { throw "no WebView2 runtime on the host to carry into the Sandbox" }
+Copy-Item -Recurse $webview.FullName (Join-Path $payload "webview2")
 $inputXml = [Security.SecurityElement]::Escape($payload)
 $resultsXml = [Security.SecurityElement]::Escape($results)
 $vgpu = if ($DisableVGpu) { "Disable" } else { "Enable" }
