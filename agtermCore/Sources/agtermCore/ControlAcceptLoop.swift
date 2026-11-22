@@ -1,4 +1,67 @@
 import Foundation
+#if os(Windows)
+import WinSDK
+
+/// Windows probe: Winsock cannot poll a pipe, so the loop polls the listener with a short timeout and checks
+/// `stopped` between waits instead of being woken.
+public final class ControlAcceptLoop: @unchecked Sendable {
+    public let listenFD: Int32
+    private let lock = NSLock()
+    private var stopped = false
+    private var finished = false
+
+    public init?(listenFD: Int32) {
+        self.listenFD = listenFD
+    }
+
+    public func stop() {
+        lock.lock()
+        defer { lock.unlock() }
+        stopped = true
+    }
+
+    private var isStopped: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopped
+    }
+
+    public func next() -> Int32? {
+        let listener = SOCKET(UInt32(bitPattern: listenFD))
+        while true {
+            if isStopped { return nil }
+            var fds = [WSAPOLLFD(fd: listener, events: Int16(POLLRDNORM), revents: 0)]
+            let ready = WSAPoll(&fds, 1, 250)
+            if ready < 0 { return nil }
+            if isStopped { return nil }
+            if ready == 0 { continue }
+            if fds[0].revents & Int16(POLLERR | POLLHUP | POLLNVAL) != 0 { return nil }
+            let conn = accept(listener, nil, nil)
+            if conn != INVALID_SOCKET {
+                let fd = Int32(bitPattern: UInt32(truncatingIfNeeded: conn))
+                if isStopped {
+                    UnixSocket.closeSocket(fd)
+                    return nil
+                }
+                return fd
+            }
+            switch WSAGetLastError() {
+            case WSAEWOULDBLOCK, WSAEINTR, WSAECONNRESET: continue
+            case WSAEMFILE, WSAENOBUFS: Sleep(100)
+            default: return nil
+            }
+        }
+    }
+
+    public func finish() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !finished else { return }
+        finished = true
+        UnixSocket.closeSocket(listenFD)
+    }
+}
+#else
 
 /// ControlAcceptLoop owns a listening socket for exactly as long as one accept loop uses it. A descriptor the
 /// main thread closed while the loop was busy came back as the next server's listener, or as a lock file, and
@@ -90,3 +153,4 @@ public final class ControlAcceptLoop: @unchecked Sendable {
         close(wakeWrite)
     }
 }
+#endif

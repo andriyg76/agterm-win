@@ -245,8 +245,14 @@ public struct AgentHooksFiles {
 
     private static func removeManagedV1Plugin(configurationDirectory: String) -> OpenCodeResult? {
         let path = AgentHooksInstall.OpenCode.pluginPath(configurationDirectory: configurationDirectory, version: .v1)
+        #if os(Windows)
+        guard (try? FileManager.default.attributesOfItem(atPath: path)) != nil else {
+            return FileManager.default.fileExists(atPath: path) ? .v1CleanupUnreadable(path: path) : nil
+        }
+        #else
         var entry = stat()
         guard lstat(path, &entry) == 0 else { return errno == ENOENT ? nil : .v1CleanupUnreadable(path: path) }
+        #endif
         guard let existing = try? String(contentsOfFile: path, encoding: .utf8) else { return .v1CleanupUnreadable(path: path) }
         guard AgentHooksInstall.OpenCode.mayOverwrite(fileExists: true, existingContents: existing, version: .v1) else {
             return .v1CleanupUserOwned(path: path)

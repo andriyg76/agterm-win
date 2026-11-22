@@ -1,4 +1,12 @@
 import Foundation
+#if os(Windows)
+import func WinSDK.gethostname
+import func WinSDK.inet_pton
+import struct WinSDK.in_addr
+import struct WinSDK.in6_addr
+import var WinSDK.AF_INET
+import var WinSDK.AF_INET6
+#endif
 
 /// Decides what agterm does when a terminal hyperlink is clicked (`GHOSTTY_ACTION_OPEN_URL`). A terminal
 /// renders UNTRUSTED program output, so an escape-sequence link can carry any scheme. `disposition(for:)`
@@ -154,7 +162,7 @@ public enum LinkPolicy {
     public static let localHostNames: Set<String> = {
         var raw: Set<String> = ["localhost"]
         var buffer = [CChar](repeating: 0, count: 256)   // gethostname() — the name GNU ls uses, no network
-        if gethostname(&buffer, buffer.count) == 0 {
+        if gethostname(&buffer, Int32(buffer.count)) == 0 {
             let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }   // trim at NUL, then decode
             raw.insert(String(decoding: bytes, as: UTF8.self))
         }

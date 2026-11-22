@@ -1,4 +1,7 @@
 import Foundation
+#if os(Windows)
+import func WinSDK.gethostname
+#endif
 
 /// UpdateCheck answers `update.check` from what the app's updater reports.
 public enum UpdateCheck {
@@ -8,7 +11,7 @@ public enum UpdateCheck {
     /// hostName is the `gethostname()` name without `.local`; `Host.current()` would resolve over mDNS.
     public static let hostName: String = {
         var buffer = [CChar](repeating: 0, count: 256)
-        guard gethostname(&buffer, buffer.count) == 0 else { return "this Mac" }
+        guard gethostname(&buffer, Int32(buffer.count)) == 0 else { return "this Mac" }
         let name = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
         return name.hasSuffix(".local") ? String(name.dropLast(6)) : name
     }()

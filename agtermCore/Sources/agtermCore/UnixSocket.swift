@@ -1,4 +1,106 @@
 import Foundation
+#if os(Windows)
+import WinSDK
+
+public typealias mode_t = Int32
+
+/// Windows probe: AF_UNIX stream sockets through Winsock (afunix.h). Descriptors stay Int32 at the API, so a
+/// SOCKET is narrowed on creation and widened on each call; Winsock handles fit in 32 bits in practice.
+public enum UnixSocket {
+    private static let started: Bool = {
+        var data = WSADATA()
+        return WSAStartup(0x0202, &data) == 0
+    }()
+
+    public static func write(_ fd: Int32, _ bytes: UnsafeRawPointer, _ count: Int) -> Int {
+        Int(WinSDK.send(SOCKET(UInt32(bitPattern: fd)), bytes.assumingMemoryBound(to: CChar.self), Int32(count), 0))
+    }
+
+    public static func shutdown(_ fd: Int32) {
+        _ = WinSDK.shutdown(SOCKET(UInt32(bitPattern: fd)), Int32(SD_BOTH))
+    }
+
+    public static func connect(_ fd: Int32, _ address: UnsafePointer<sockaddr>, _ length: socklen_t) -> Int32 {
+        WinSDK.connect(SOCKET(UInt32(bitPattern: fd)), address, length)
+    }
+
+    public enum Failure: Error, Equatable, CustomStringConvertible {
+        case pathTooLong(String)
+        case system(String)
+
+        public var description: String {
+            switch self {
+            case .pathTooLong(let path): "socket path too long (\(path.utf8.count) bytes): \(path)"
+            case .system(let message): message
+            }
+        }
+    }
+
+    public static let streamType = SOCK_STREAM
+
+    public static func address(for path: String) -> sockaddr_un? {
+        var addr = sockaddr_un()
+        let capacity = MemoryLayout.size(ofValue: addr.sun_path)
+        let bytes = path.utf8CString
+        guard bytes.count <= capacity else { return nil }
+        addr.sun_family = ADDRESS_FAMILY(AF_UNIX)
+        withUnsafeMutableBytes(of: &addr.sun_path) { raw in
+            bytes.withUnsafeBytes { raw.copyMemory(from: $0) }
+        }
+        return addr
+    }
+
+    public static func listening(path: String, mode: mode_t = 0o600) throws -> Int32 {
+        guard var addr = address(for: path) else { throw Failure.pathTooLong(path) }
+        let fd = streamSocket()
+        guard fd >= 0 else { throw Failure.system("socket() failed: \(errnoText())") }
+        _ = path.withCString { _unlink($0) }
+        let bound = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(SOCKET(UInt32(bitPattern: fd)), $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard bound == 0 else {
+            let message = errnoText()
+            closeSocket(fd)
+            throw Failure.system("bind(\(path)) failed: \(message)")
+        }
+        guard listen(SOCKET(UInt32(bitPattern: fd)), SOMAXCONN) == 0 else {
+            let message = errnoText()
+            closeSocket(fd)
+            _ = path.withCString { _unlink($0) }
+            throw Failure.system("listen(\(path)) failed: \(message)")
+        }
+        return fd
+    }
+
+    public static func connected(path: String) -> Int32? {
+        guard var addr = address(for: path) else { return nil }
+        let fd = streamSocket()
+        guard fd >= 0 else { return nil }
+        let result = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard result == 0 else {
+            closeSocket(fd)
+            return nil
+        }
+        return fd
+    }
+
+    public static func closeSocket(_ fd: Int32) {
+        _ = closesocket(SOCKET(UInt32(bitPattern: fd)))
+    }
+
+    private static func streamSocket() -> Int32 {
+        guard started else { return -1 }
+        let s = socket(AF_UNIX, streamType, 0)
+        return s == INVALID_SOCKET ? -1 : Int32(bitPattern: UInt32(truncatingIfNeeded: s))
+    }
+
+    private static func errnoText() -> String { "WSA error \(WSAGetLastError())" }
+}
+#else
 #if canImport(Musl)
 import Musl
 #endif
@@ -125,3 +227,4 @@ public enum UnixSocket {
 
     private static func errnoText() -> String { String(cString: strerror(errno)) }
 }
+#endif

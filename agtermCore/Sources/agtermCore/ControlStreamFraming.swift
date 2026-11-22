@@ -1,4 +1,7 @@
 import Foundation
+#if os(Windows)
+import WinSDK
+#endif
 #if canImport(os)
 import os
 
@@ -57,10 +60,17 @@ public final class ControlStreamOwner: @unchecked Sendable {
         var noSigPipe: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
         #endif
+        #if os(Windows)
+        var none = DWORD(0)
+        var bound = DWORD(limits.writeTimeoutSeconds * 1000)
+        withUnsafeBytes(of: &none) { _ = setsockopt(SOCKET(UInt32(bitPattern: fd)), SOL_SOCKET, SO_RCVTIMEO, $0.baseAddress?.assumingMemoryBound(to: CChar.self), Int32($0.count)) }
+        withUnsafeBytes(of: &bound) { _ = setsockopt(SOCKET(UInt32(bitPattern: fd)), SOL_SOCKET, SO_SNDTIMEO, $0.baseAddress?.assumingMemoryBound(to: CChar.self), Int32($0.count)) }
+        #else
         var none = timeval(tv_sec: 0, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &none, socklen_t(MemoryLayout<timeval>.size))
         var bound = timeval(tv_sec: limits.writeTimeoutSeconds, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &bound, socklen_t(MemoryLayout<timeval>.size))
+        #endif
 
         let writerDone = DispatchSemaphore(value: 0)
         let writer = Thread { [self] in
@@ -138,7 +148,13 @@ public final class ControlStreamOwner: @unchecked Sendable {
         var buffer = Data()
         var chunk = [UInt8](repeating: 0, count: 16 * 1024)
         while true {
+            #if os(Windows)
+            let count = chunk.withUnsafeMutableBytes {
+                Int(recv(SOCKET(UInt32(bitPattern: fd)), $0.baseAddress?.assumingMemoryBound(to: CChar.self), Int32($0.count), 0))
+            }
+            #else
             let count = read(fd, &chunk, chunk.count)
+            #endif
             if count < 0, errno == EINTR { continue }
             guard count > 0 else { return }
             buffer.append(contentsOf: chunk[0..<count])
