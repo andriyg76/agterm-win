@@ -320,6 +320,11 @@ MainActor.assumeIsolated {
         windowClass.lpfnWndProc = windowProcedure
         windowClass.hInstance = instance
         windowClass.hCursor = LoadCursorW(nil, UnsafePointer<WCHAR>(bitPattern: 32512)) // IDC_ARROW
+        // icon group 1 of Resources/agterm.res, linked into the exe
+        let icon = UnsafePointer<WCHAR>(bitPattern: 1)
+        windowClass.hIcon = LoadIconW(instance, icon)
+        windowClass.hIconSm = LoadImageW(instance, icon, UINT(IMAGE_ICON), GetSystemMetrics(SM_CXSMICON),
+                                         GetSystemMetrics(SM_CYSMICON), 0)?.assumingMemoryBound(to: HICON__.self)
         windowClass.lpszClassName = name.baseAddress
         RegisterClassExW(&windowClass)
     }

@@ -4,6 +4,8 @@ import PackageDescription
 
 // scripts/fetch-webview2.ps1 unpacks the WebView2 SDK NuGet package here; it is not committed
 let webView2 = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path + "/vendor/webview2/build/native"
+// scripts/make-icon.sh writes the icon resource from agterm's app icon; it is committed
+let iconResource = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path + "/Resources/agterm.res"
 
 let package = Package(
     name: "agterm-win",
@@ -32,7 +34,7 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 .linkedLibrary("user32"),
-                .unsafeFlags(["-Xlinker", "/SUBSYSTEM:WINDOWS", "-Xlinker", "/ENTRY:mainCRTStartup"]),
+                .unsafeFlags(["-Xlinker", "/SUBSYSTEM:WINDOWS", "-Xlinker", "/ENTRY:mainCRTStartup", "-Xlinker", iconResource]),
             ]
         ),
     ],
