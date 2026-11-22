@@ -40,6 +40,8 @@ final class NativeShell {
     // the server's sessions before New Session on Server, so the one it adds is selected when the catalog shows it
     private var sessionsBeforeCreate: Set<Foundation.UUID>?
     private var running: Foundation.UUID?
+    // what the remote terminal was last given, so a session that ends or comes back is shown again
+    private var runningLaunch: SessionSidebar.Launch?
     // the tree's tags index these; 0 is a workspace row
     private var tagged: [Foundation.UUID] = []
     private var dimmed: [UInt8] = []
@@ -364,6 +366,28 @@ final class NativeShell {
         }
     }
 
+    /// canRestart is whether `id` is a session whose program ended: a local one, or a server one while it is connected.
+    private func canRestart(_ id: Foundation.UUID?) -> Bool {
+        guard let id else { return false }
+        if let local = locals.first(where: { $0.id == id }) { return local.exited }
+        return remote.connected && remote.session(id)?.ended == true
+    }
+
+    private func restartSelected() {
+        guard canRestart(selected), let id = selected else { return }
+        if let index = locals.firstIndex(where: { $0.id == id }) {
+            locals[index].exited = false
+            locals[index].terminal.start(locals[index].commandLine, directory: ProcessInfo.processInfo.environment["USERPROFILE"])
+            rebuild()
+            focus()
+            return
+        }
+        Task { @MainActor in
+            let response = await remote.perform(.restart(id, pane: .left, command: nil))
+            log("native shell: restart on \(serverLabel): \(response.ok ? "ok" : response.error ?? "failed")")
+        }
+    }
+
     private var canCloseSelected: Bool {
         locals.contains { $0.id == selected } || (remote.connected && selected.flatMap(remote.session) != nil)
     }
@@ -391,6 +415,7 @@ final class NativeShell {
         case .newSession: if profiles.indices.contains(defaultProfile) { newSession(profiles[defaultProfile]) }
         case .newServerSession: newServerSession()
         case .renameSession: startRename()
+        case .restartSession: restartSelected()
         case .closeSession: closeSelected()
         case .nextSession, .previousSession:
             if let next = SessionSidebar.neighbor(of: selected, in: tagged, forward: command == .nextSession) {
@@ -504,10 +529,13 @@ final class NativeShell {
         if let tree, let item = items[id] { nt_tree_select(tree, item) }
         let shown = visibleTerminal
         for terminal in terminalsShown { terminal.setVisible(terminal === shown) }
-        guard !locals.contains(where: { $0.id == id }), let session = remote.session(id), id != running else { return }
+        guard !locals.contains(where: { $0.id == id }), let session = remote.session(id) else { return }
+        let launch = SessionSidebar.launch(for: session, hostLabel: serverLabel)
+        guard id != running || launch != runningLaunch else { return }
         running = id
+        runningLaunch = launch
         remote.store.selectedSessionID = id
-        switch SessionSidebar.launch(for: session, hostLabel: "WSL \(remote.host.distribution)") {
+        switch launch {
         case .command(let command):
             log("native shell: showing \(session.displayName) [\(id)]")
             remoteTerminal.start(command)
@@ -544,7 +572,7 @@ final class NativeShell {
         var button = RECT()
         GetWindowRect(menuButton, &button)
         let entries = NativeMenu.window(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
-                                        canCloseSession: canCloseSelected, sessionCount: tagged.count, canRenameSession: canRename(selected), hasSelection: visibleTerminal.hasSelection,
+                                        canCloseSession: canCloseSelected, sessionCount: tagged.count, canRenameSession: canRename(selected), canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
                                         canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
         run(showMenu(entries, owner: window, at: POINT(x: button.left, y: button.bottom)))
     }
@@ -558,7 +586,7 @@ final class NativeShell {
         if x != -1 || y != -1 { point = POINT(x: x, y: y) }
         run(showMenu(NativeMenu.sessions(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
                                          canCloseSession: canCloseSelected, sessionCount: tagged.count,
-                                         canRenameSession: canRename(selected)),
+                                         canRenameSession: canRename(selected), canRestartSession: canRestart(selected)),
                      owner: window, at: point))
     }
 

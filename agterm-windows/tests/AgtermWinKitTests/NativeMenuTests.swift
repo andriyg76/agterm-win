@@ -101,4 +101,13 @@ struct NativeMenuTests {
         #expect(NativeMenu.defaultProfile(named: "Gone", in: profiles) == 0)
         #expect(NativeMenu.defaultProfile(named: nil, in: profiles) == 0)
     }
+
+    @Test func restartIsEnabledByTheCaller() {
+        let menu = { (restart: Bool) in
+            NativeMenu.window(profiles: self.profiles, canCloseSession: true, sessionCount: 1, canRestartSession: restart, hasSelection: false,
+                              canPaste: false).first { $0.pick == .command(.restartSession) }
+        }
+        #expect(menu(false)?.enabled == false)
+        #expect(menu(true)?.enabled == true && menu(true)?.shortcut == "Ctrl+Shift+R")
+    }
 }
