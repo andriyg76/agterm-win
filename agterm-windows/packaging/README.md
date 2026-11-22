@@ -1,7 +1,8 @@
 # agterm-win packaging
 
-A `v<AGTERM_VERSION>.<n>` tag runs `.github/workflows/windows-release.yml`, which builds the installer with
-`scripts\release.ps1`, has SignPath sign it, and publishes the release. `scripts\release.ps1 -Version <version>
+Running `.github/workflows/windows-release.yml` on `windows-port` (Actions ▸ windows-release ▸ Run workflow, or
+`gh workflow run windows-release.yml --ref windows-port`) tags the next `v<AGTERM_VERSION>.<n>`, builds the installer
+with `scripts\release.ps1`, has SignPath sign it, and publishes the release. `scripts\release.ps1 -Version <version>
 [-Publish]` does the same locally; its header lists the tools and the signing variables.
 
 - **GitHub / winget**: `-Publish` uploads the installer and its `.sha256` to this fork's release `v<version>`.
@@ -30,7 +31,7 @@ only when it is missing, and `--install-server` downloads agterm-server from Git
 
 ### Setting SignPath up
 
-1. Publish one unsigned release first (push a tag with no SignPath variables set): SignPath signs only projects
+1. Publish one unsigned release first (run the workflow with no SignPath variables set): SignPath signs only projects
    already released in the form to be signed. Link this section from the repository's home page and its releases.
 2. Apply at https://signpath.org/apply. Ask there whether the Swift runtime and MSVC runtime DLLs the installer
    carries count as system libraries; the WebView2 loader is linked statically and its bootstrapper downloaded.
