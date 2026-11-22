@@ -313,7 +313,7 @@ final class NativeTerminal {
         case .fontBigger, .fontSmaller, .fontReset:
             let next = NativeMenu.points(after: command, from: points)
             if let onFontSize { onFontSize(next) } else { setFontSize(next) }
-        case .newSession, .closeSession, .nextSession, .previousSession, .find, .quit:
+        case .newSession, .newServerSession, .closeSession, .nextSession, .previousSession, .find, .quit:
             if let onWindowCommand { onWindowCommand(command) } else if command == .quit { DestroyWindow(window) }
         }
     }
@@ -364,6 +364,7 @@ final class NativeTerminal {
             if letter("A") { return .selectAll }
             if letter("K") { return .clearScrollback }
             if onWindowCommand != nil, letter("T") { return .newSession }
+            if onWindowCommand != nil, letter("N") { return .newServerSession }
             if onWindowCommand != nil, letter("W") { return .closeSession }
             if onWindowCommand != nil, letter("F") { return .find }
         }

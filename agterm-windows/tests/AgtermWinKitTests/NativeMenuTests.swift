@@ -64,4 +64,19 @@ struct NativeMenuTests {
         #expect(NativeMenu.quitQuestion(runningLocalSessions: 1) == "Quit agterm? A local session is still running and will end.")
         #expect(NativeMenu.quitQuestion(runningLocalSessions: 3)?.contains("3 local sessions") == true)
     }
+
+    @Test func newSessionOffersTheServerWhileConnected() {
+        let connected = NativeMenu.sessions(profiles: profiles, server: "WSL Ubuntu", serverConnected: true, canCloseSession: false,
+                                            sessionCount: 1)[0].children
+        #expect(connected.last?.title == "WSL Ubuntu (agterm-server)")
+        #expect(connected.last?.pick == .command(.newServerSession) && connected.last?.enabled == true)
+        let offline = NativeMenu.sessions(profiles: profiles, server: "WSL Ubuntu", serverConnected: false, canCloseSession: false,
+                                          sessionCount: 1)[0].children
+        #expect(offline.last?.enabled == false)
+        #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: false, sessionCount: 1)[0].children.count == profiles.count)
+    }
+
+    @Test func closingAServerSessionNamesWhatEnds() {
+        #expect(NativeMenu.closeQuestion(session: "api", server: "WSL Ubuntu") == "Close api on WSL Ubuntu? Its programs on the server end.")
+    }
 }

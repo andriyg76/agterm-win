@@ -36,6 +36,8 @@ final class NativeShell {
     private var locals: [LocalSession] = []
     private var profiles = LaunchProfiles.available(wslDistributions: [], powerShell7: NativeShell.powerShell7())
     private var selected: Foundation.UUID?
+    // the server's sessions before New Session on Server, so the one it adds is selected when the catalog shows it
+    private var sessionsBeforeCreate: Set<Foundation.UUID>?
     private var running: Foundation.UUID?
     // the tree's tags index these; 0 is a workspace row
     private var tagged: [Foundation.UUID] = []
@@ -260,7 +262,42 @@ final class NativeShell {
         rebuild()
     }
 
+    private var serverLabel: String { "WSL \(remote.host.distribution)" }
+
+    private func newServerSession() {
+        guard remote.connected, let workspace = remote.store.currentWorkspaceID else { return }
+        sessionsBeforeCreate = Set(remote.store.workspaces.flatMap(\.sessions).map(\.id))
+        Task { @MainActor in
+            let response = await remote.perform(.newSession(workspace: workspace))
+            log("native shell: new session on \(serverLabel): \(response.ok ? "ok" : response.error ?? "failed")")
+            if !response.ok {
+                sessionsBeforeCreate = nil
+                MessageBoxW(window, Array("New session on \(serverLabel) failed: \(response.error ?? "")".utf16) + [0],
+                            Array("agterm".utf16) + [0], UINT(MB_ICONERROR))
+            }
+        }
+    }
+
+    private func closeServerSession(_ id: Foundation.UUID) {
+        guard let session = remote.session(id) else { return }
+        let question = NativeMenu.closeQuestion(session: session.displayName, server: serverLabel)
+        guard session.ended || MessageBoxW(window, Array(question.utf16) + [0], Array("agterm".utf16) + [0],
+                                           UINT(MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)) == IDOK else { return }
+        Task { @MainActor in
+            let response = await remote.perform(.closeSession(id, undoable: true))
+            log("native shell: close \(session.displayName) on \(serverLabel): \(response.ok ? "ok" : response.error ?? "failed")")
+        }
+    }
+
+    private var canCloseSelected: Bool {
+        locals.contains { $0.id == selected } || (remote.connected && selected.flatMap(remote.session) != nil)
+    }
+
     private func closeSelected() {
+        if let selected, remote.session(selected) != nil {
+            closeServerSession(selected)
+            return
+        }
         guard let index = locals.firstIndex(where: { $0.id == selected }) else { return }
         let closing = locals.remove(at: index)
         DestroyWindow(closing.terminal.window)
@@ -277,6 +314,7 @@ final class NativeShell {
         log("native shell: \(command)")
         switch command {
         case .newSession: if let profile = profiles.first { newSession(profile) }
+        case .newServerSession: newServerSession()
         case .closeSession: closeSelected()
         case .nextSession, .previousSession:
             if let next = SessionSidebar.neighbor(of: selected, in: tagged, forward: command == .nextSession) {
@@ -328,8 +366,13 @@ final class NativeShell {
     private func catalogChanged() {
         rebuild()
         layout()
-        guard !locals.contains(where: { $0.id == selected }) else { return }
         let workspaces = remote.store.workspaces
+        if let before = sessionsBeforeCreate, let created = workspaces.flatMap(\.sessions).first(where: { !before.contains($0.id) }) {
+            sessionsBeforeCreate = nil
+            select(created.id)
+            return
+        }
+        guard !locals.contains(where: { $0.id == selected }) else { return }
         let next = SessionSidebar.selection(current: selected, in: workspaces)
         log("native shell: \(workspaces.lazy.flatMap(\.sessions).count) session(s), selecting \(next?.uuidString ?? "none")")
         if let next { select(next) } else if let local = locals.last { select(local.id) } else { selected = nil }
@@ -424,8 +467,8 @@ final class NativeShell {
     fileprivate func windowMenu() {
         var button = RECT()
         GetWindowRect(menuButton, &button)
-        let entries = NativeMenu.window(profiles: profiles, canCloseSession: locals.contains { $0.id == selected },
-                                        sessionCount: tagged.count, hasSelection: visibleTerminal.hasSelection,
+        let entries = NativeMenu.window(profiles: profiles, server: serverLabel, serverConnected: remote.connected,
+                                        canCloseSession: canCloseSelected, sessionCount: tagged.count, hasSelection: visibleTerminal.hasSelection,
                                         canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
         run(showMenu(entries, owner: window, at: POINT(x: button.left, y: button.bottom)))
     }
@@ -437,8 +480,8 @@ final class NativeShell {
         let tag = nt_tree_item_at(tree, &point.x, &point.y)
         if tag > 0, Int(tag) <= tagged.count { select(tagged[Int(tag) - 1]) }
         if x != -1 || y != -1 { point = POINT(x: x, y: y) }
-        run(showMenu(NativeMenu.sessions(profiles: profiles, canCloseSession: locals.contains { $0.id == selected },
-                                         sessionCount: tagged.count),
+        run(showMenu(NativeMenu.sessions(profiles: profiles, server: serverLabel, serverConnected: remote.connected,
+                                         canCloseSession: canCloseSelected, sessionCount: tagged.count),
                      owner: window, at: point))
     }
 
