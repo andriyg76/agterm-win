@@ -202,8 +202,11 @@ final class App {
         publishTree()
         stop()
         post(["t": "reset"])
-        guard let command = session.initialCommand else {
-            write("\u{1b}[2m\(session.ended ? "session ended" : "no pane to attach")\u{1b}[0m\r\n")
+        // agtermCore's placeholder for an ended or held pane is a POSIX line, with no /bin/sh to run it here
+        let placeholder = session.remoteHost.map(RemoteSession.endedCommand(host:))
+        guard let command = session.initialCommand, command != placeholder else {
+            let notice = session.initialCommand == nil ? "no pane to attach" : "Ended on WSL \(remote?.host.distribution ?? "")"
+            write("\u{1b}[2m\(notice)\u{1b}[0m\r\n")
             return
         }
         log("showing \(session.displayName) [\(id)]")
