@@ -49,6 +49,10 @@ void nt_dark_title_bar(void *window);
 // nt_show_title puts the program's title on the terminal's top-level window.
 void nt_show_title(nt_terminal *terminal);
 void nt_select_all(nt_terminal *terminal);
+// Search reads lines by buffer index, 0 the oldest scrollback line, and selects a match, scrolling it into view.
+int32_t nt_line_count(nt_terminal *terminal);
+int32_t nt_line_runes(nt_terminal *terminal, int32_t line, uint32_t *runes, int32_t capacity);
+void nt_select_cells(nt_terminal *terminal, int32_t line, int32_t column, int32_t cells);
 // nt_row_runes writes the row under a client pixel, one rune a cell (0 blank, UINT32_MAX a wide character's second
 // cell), and that pixel's 0-based column; it returns the row's cell count.
 int32_t nt_row_runes(nt_terminal *terminal, int32_t x, int32_t y, uint32_t *runes, int32_t capacity, int32_t *column);
@@ -71,6 +75,12 @@ int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y);
 // nt_tree_custom_draw answers a tree's NM_CUSTOMDRAW (-1 for any other WM_NOTIFY): dark selection, and items whose
 // tag's `dimmed` byte is set drawn grey.
 intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count);
+// The find bar: an edit control posting NT_FIND_NEXT (wParam 1 with Shift) on Enter and NT_FIND_CLOSE on Escape to
+// its parent; its text changes arrive as the parent's EN_CHANGE.
+#define NT_FIND_NEXT 0x8014
+#define NT_FIND_CLOSE 0x8015
+void *nt_find_bar_create(void *parent, uint32_t dpi);
+void nt_find_bar_set_dpi(void *bar, uint32_t dpi);
 // nt_track_menu shows a popup menu at a screen point and returns the picked command id, 0 when dismissed.
 int32_t nt_track_menu(void *menu, void *owner, int32_t x, int32_t y);
 

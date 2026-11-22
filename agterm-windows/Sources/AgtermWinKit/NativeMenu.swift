@@ -2,7 +2,7 @@
 /// window's own commands. Every command is also a shortcut, so a menu never holds the only way to do something.
 public enum NativeMenu {
     public enum Command: Int, CaseIterable, Sendable {
-        case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, closeSession, nextSession, previousSession, quit
+        case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, closeSession, nextSession, previousSession, find, quit
 
         public var title: String {
             switch self {
@@ -17,6 +17,7 @@ public enum NativeMenu {
             case .closeSession: "Close Session"
             case .nextSession: "Next Session"
             case .previousSession: "Previous Session"
+            case .find: "Find…"
             case .quit: "Quit"
             }
         }
@@ -34,6 +35,7 @@ public enum NativeMenu {
             case .closeSession: "Ctrl+Shift+W"
             case .nextSession: "Ctrl+Tab"
             case .previousSession: "Ctrl+Shift+Tab"
+            case .find: "Ctrl+Shift+F"
             case .quit: "Alt+F4"
             }
         }
@@ -96,10 +98,10 @@ public enum NativeMenu {
                 .command(.nextSession, enabled: sessionCount > 1), .command(.previousSession, enabled: sessionCount > 1)]
     }
 
-    /// window is the ☰ menu: the sidebar's menu, the terminal's, and Quit.
+    /// window is the ☰ menu: the sidebar's menu, Find, the terminal's menu, and Quit.
     public static func window(profiles: [LaunchProfile], canCloseSession: Bool, sessionCount: Int, hasSelection: Bool,
                               canPaste: Bool) -> [Entry] {
-        sessions(profiles: profiles, canCloseSession: canCloseSession, sessionCount: sessionCount) + [.separator]
+        sessions(profiles: profiles, canCloseSession: canCloseSession, sessionCount: sessionCount) + [.separator, .command(.find)]
             + terminal(hasSelection: hasSelection, canPaste: canPaste) + [.separator, .command(.quit)]
     }
 

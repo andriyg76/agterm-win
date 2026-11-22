@@ -22,15 +22,25 @@ extern "C" void *nt_tree_create(void *parent, uint32_t dpi) {
     return tree;
 }
 
-extern "C" void nt_tree_set_dpi(void *tree, uint32_t dpi) {
-    auto window = static_cast<HWND>(tree);
+namespace {
+
+void setFont(HWND window, uint32_t dpi) {
     HFONT font = CreateFontW(-MulDiv(10, static_cast<int>(dpi), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                              OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     auto previous = reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0));
     SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
     if (previous) DeleteObject(previous);
+}
+
+}  // namespace
+
+extern "C" void nt_tree_set_dpi(void *tree, uint32_t dpi) {
+    auto window = static_cast<HWND>(tree);
+    setFont(window, dpi);
     TreeView_SetItemHeight(window, MulDiv(24, static_cast<int>(dpi), 96));
 }
+
+extern "C" void nt_find_bar_set_dpi(void *bar, uint32_t dpi) { setFont(static_cast<HWND>(bar), dpi); }
 
 extern "C" void nt_tree_clear(void *tree) { TreeView_DeleteAllItems(static_cast<HWND>(tree)); }
 
@@ -100,4 +110,30 @@ extern "C" int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y) {
         if (!item.hItem || !(hit.flags & TVHT_ONITEM)) return 0;
     }
     return SendMessageW(window, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&item)) ? static_cast<int64_t>(item.lParam) : 0;
+}
+
+namespace {
+
+LRESULT CALLBACK findBarProcedure(HWND edit, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) {
+    if (message == WM_KEYDOWN && (wParam == VK_RETURN || wParam == VK_ESCAPE)) {
+        bool shift = GetKeyState(VK_SHIFT) < 0;
+        PostMessageW(GetParent(edit), wParam == VK_RETURN ? NT_FIND_NEXT : NT_FIND_CLOSE, shift, 0);
+        return 0;
+    }
+    // the edit control beeps on the WM_CHAR of Enter and Escape
+    if (message == WM_CHAR && (wParam == '\r' || wParam == 27)) return 0;
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(edit, findBarProcedure, 1);
+    return DefSubclassProc(edit, message, wParam, lParam);
+}
+
+}  // namespace
+
+extern "C" void *nt_find_bar_create(void *parent, uint32_t dpi) {
+    HWND edit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_BORDER | ES_AUTOHSCROLL, 0, 0, 100, 24, static_cast<HWND>(parent),
+                                nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!edit) return nullptr;
+    SetWindowSubclass(edit, findBarProcedure, 1, 0);
+    SendMessageW(edit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Find"));
+    setFont(edit, dpi);
+    return edit;
 }

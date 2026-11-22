@@ -658,6 +658,36 @@ extern "C" int32_t nt_row_runes(nt_terminal *terminal, int32_t x, int32_t y, uin
     return count;
 }
 
+extern "C" int32_t nt_line_count(nt_terminal *terminal) {
+    Info state = terminal->info();
+    return static_cast<int32_t>(state.historyCount + state.rows);
+}
+
+extern "C" int32_t nt_line_runes(nt_terminal *terminal, int32_t line, uint32_t *runes, int32_t capacity) {
+    Info state = terminal->info();
+    std::vector<Cell> cells;
+    terminal->rowCells(state, line, cells);
+    int32_t count = static_cast<int32_t>(cells.size());
+    for (int32_t i = 0; i < std::min(count, capacity); i++) {
+        runes[i] = cells[i].width == 0 ? UINT32_MAX : static_cast<uint32_t>(std::max(cells[i].rune, 0));
+    }
+    return count;
+}
+
+extern "C" void nt_select_cells(nt_terminal *terminal, int32_t line, int32_t column, int32_t cells) {
+    Info state = terminal->info();
+    terminal->selectionMode = 0;
+    terminal->anchor = {line, column};
+    terminal->head = {line, column + std::max(cells, 1) - 1};
+    terminal->selecting = false;
+    terminal->hasSelection = true;
+    int64_t history = state.historyCount, top = history - terminal->scroll;
+    if (!state.alternateScreen && (line < top || line >= top + state.rows)) {
+        terminal->scroll = static_cast<int32_t>(std::clamp<int64_t>(history - (line - state.rows / 2), 0, history));
+    }
+    InvalidateRect(terminal->window, nullptr, FALSE);
+}
+
 extern "C" void nt_select_all(nt_terminal *terminal) {
     Info state = terminal->info();
     terminal->selectionMode = 0;

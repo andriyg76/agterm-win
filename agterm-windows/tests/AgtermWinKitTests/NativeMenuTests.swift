@@ -31,6 +31,7 @@ struct NativeMenuTests {
         #expect(Array(window.prefix(sessions.count)) == sessions)
         #expect(sessions.first { $0.pick == .command(.previousSession) }?.enabled == true)
         #expect(!sessions.contains { $0.pick == .command(.copy) })
+        #expect(window.contains { $0.pick == .command(.find) })
     }
 
     @Test func windowMenuContainsTheTerminalMenu() {

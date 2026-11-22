@@ -28,6 +28,8 @@ final class NativeShell {
     private var tree: UnsafeMutableRawPointer?
     private var notice: HWND?
     private var menuButton: HWND?
+    private var findBar: HWND?
+    private var findFailed = false
     private var menuFont: HFONT?
     private var remoteTerminal: NativeTerminal!
     private var locals: [LocalSession] = []
@@ -84,6 +86,7 @@ final class NativeShell {
         tree = nt_tree_create(UnsafeMutableRawPointer(window), dpi)
         notice = CreateWindowExW(0, Array("STATIC".utf16) + [0], nil, DWORD(WS_CHILD) | DWORD(SS_LEFT), 0, 0, 10, 10, window, nil,
                                  instance, nil)
+        findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
         remoteTerminal = makeTerminal()
         restorePlacement()
         layout()
@@ -146,6 +149,42 @@ final class NativeShell {
         saveSettings()
     }
 
+    // MARK: find
+
+    private func showFindBar() {
+        SetWindowPos(findBar, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW))
+        SetFocus(findBar)
+        SendMessageW(findBar, UINT(EM_SETSEL), 0, -1)
+    }
+
+    private var findText: String {
+        let length = GetWindowTextLengthW(findBar)
+        var text = [UInt16](repeating: 0, count: Int(length) + 1)
+        GetWindowTextW(findBar, &text, length + 1)
+        return String(decodingCString: text, as: UTF16.self)
+    }
+
+    fileprivate func findChanged() { search(backward: true, restart: true) }
+
+    fileprivate func findNext(newer: Bool) { search(backward: !newer, restart: false) }
+
+    private func search(backward: Bool, restart: Bool) {
+        let needle = findText
+        findFailed = !needle.isEmpty && !visibleTerminal.find(needle, backward: backward, restart: restart)
+        InvalidateRect(findBar, nil, true)
+    }
+
+    fileprivate func closeFindBar() {
+        ShowWindow(findBar, SW_HIDE)
+        focus()
+    }
+
+    fileprivate func editColors(_ context: HDC?) -> LRESULT {
+        SetTextColor(context, findFailed ? 0x6B6BF0 : 0xE0E0E0)
+        SetBkColor(context, 0x262525)
+        return LRESULT(Int(bitPattern: darkBrush))
+    }
+
     // MARK: launch profiles
 
     private static func powerShell7() -> String? {
@@ -203,6 +242,7 @@ final class NativeShell {
     }
 
     private func windowCommand(_ command: NativeMenu.Command) {
+        log("native shell: \(command)")
         switch command {
         case .newSession: if let profile = profiles.first { newSession(profile) }
         case .closeSession: closeSelected()
@@ -211,6 +251,7 @@ final class NativeShell {
                 select(next)
                 focus()
             }
+        case .find: showFindBar()
         case .quit: DestroyWindow(window)
         default: visibleTerminal.perform(command)
         }
@@ -248,6 +289,8 @@ final class NativeShell {
         for terminal in terminalsShown {
             terminal.move(x: width, y: 0, width: max(client.right - width, 1), height: height)
         }
+        let findWidth = min(scaled(280), max(client.right - width - scaled(24), scaled(80)))
+        MoveWindow(findBar, client.right - findWidth - scaled(16), scaled(8), findWidth, scaled(28), true)
     }
 
     private func catalogChanged() {
@@ -325,6 +368,7 @@ final class NativeShell {
     fileprivate func dpiChanged(_ dpi: UInt32, suggested: RECT) {
         self.dpi = dpi
         if let tree { nt_tree_set_dpi(tree, dpi) }
+        if let findBar { nt_find_bar_set_dpi(UnsafeMutableRawPointer(findBar), dpi) }
         updateMenuFont()
         terminalsShown.forEach { $0.setDPI(dpi) }
         SetWindowPos(window, nil, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top,
@@ -363,6 +407,7 @@ final class NativeShell {
     }
 
     private func run(_ pick: NativeMenu.Pick?) {
+        log("native shell: menu picked \(pick.map { "\($0)" } ?? "nothing")")
         switch pick {
         case .command(let command)?: windowCommand(command)
         case .profile(let index)? where profiles.indices.contains(index): newSession(profiles[index])
@@ -401,7 +446,16 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             return 0
         case UINT(WM_COMMAND):
             if Int(wParam & 0xFFFF) == menuButtonID { shell.windowMenu() }
+            if wParam >> 16 & 0xFFFF == WPARAM(EN_CHANGE) { shell.findChanged() }
             return 0
+        case UINT(NT_FIND_NEXT):
+            shell.findNext(newer: wParam != 0)
+            return 0
+        case UINT(NT_FIND_CLOSE):
+            shell.closeFindBar()
+            return 0
+        case UINT(WM_CTLCOLOREDIT):
+            return shell.editColors(HDC(bitPattern: UInt(wParam)))
         case UINT(WM_DRAWITEM):
             if let item = UnsafePointer<DRAWITEMSTRUCT>(bitPattern: UInt(lParam)), Int(item.pointee.CtlID) == menuButtonID {
                 shell.drawMenuButton(item.pointee)

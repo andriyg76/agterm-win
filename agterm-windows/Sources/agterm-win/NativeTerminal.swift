@@ -26,6 +26,7 @@ final class NativeTerminal {
     private var lastMotionCell = (column: Int32(0), row: Int32(0))
     // a generation per started program, so output or an exit still queued from the previous one is dropped
     private var generation = 0
+    private var lastMatch: ScrollbackSearch.Match?
     private let pendingLock = NSLock()
     nonisolated(unsafe) private var pending = Data()
     nonisolated(unsafe) private var acceptedGeneration = 0
@@ -251,6 +252,22 @@ final class NativeTerminal {
         }
     }
 
+    /// find selects the next match of `needle` older than the last one (newer when not `backward`), starting over from
+    /// the newest line when `restart`; false when there is none.
+    func find(_ needle: String, backward: Bool, restart: Bool) -> Bool {
+        guard let terminal else { return false }
+        if restart { lastMatch = nil }
+        let found = ScrollbackSearch.find(needle, lineCount: Int(nt_line_count(terminal)), line: { line in
+            let count = nt_line_runes(terminal, Int32(line), nil, 0)
+            var runes = [UInt32](repeating: 0, count: Int(count))
+            nt_line_runes(terminal, Int32(line), &runes, count)
+            return runes
+        }, after: lastMatch, backward: backward)
+        lastMatch = found
+        if let found { nt_select_cells(terminal, Int32(found.line), Int32(found.column), Int32(found.cells)) } else { nt_select_clear(terminal) }
+        return found != nil
+    }
+
     /// link is the web address under a client pixel; Ctrl+click opens it, over a program that takes the mouse too.
     private func link(x: Int32, y: Int32) -> String? {
         guard let terminal else { return nil }
@@ -293,7 +310,7 @@ final class NativeTerminal {
         case .fontBigger, .fontSmaller, .fontReset:
             let next = NativeMenu.points(after: command, from: points)
             if let onFontSize { onFontSize(next) } else { setFontSize(next) }
-        case .newSession, .closeSession, .nextSession, .previousSession, .quit:
+        case .newSession, .closeSession, .nextSession, .previousSession, .find, .quit:
             if let onWindowCommand { onWindowCommand(command) } else if command == .quit { DestroyWindow(window) }
         }
     }
@@ -345,6 +362,7 @@ final class NativeTerminal {
             if letter("K") { return .clearScrollback }
             if onWindowCommand != nil, letter("T") { return .newSession }
             if onWindowCommand != nil, letter("W") { return .closeSession }
+            if onWindowCommand != nil, letter("F") { return .find }
         }
         if onWindowCommand != nil, key == VK_TAB, modifiers == .control || modifiers == [.shift, .control] {
             return modifiers.contains(.shift) ? .previousSession : .nextSession
