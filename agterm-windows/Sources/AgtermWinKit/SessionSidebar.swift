@@ -47,9 +47,10 @@ public enum SessionSidebar {
     }
 
     /// localTitle is a local session's sidebar label: ● while it wants attention (a bell or notification since it was
-    /// last shown), and marked once its program exits.
-    public nonisolated static func localTitle(_ name: String, exited: Bool, attention: Bool) -> String {
-        (attention ? "● " : "") + name + (exited ? " (exited)" : "")
+    /// last shown), with how many notifications when `unseen` counts them, and marked once its program exits.
+    public nonisolated static func localTitle(_ name: String, exited: Bool, attention: Bool, unseen: Int = 0) -> String {
+        let marker = unseen > 0 ? "● \(NotificationRules.countLabel(unseen)) " : attention ? "● " : ""
+        return marker + name + (exited ? " (exited)" : "")
     }
 
     /// selection keeps `current` while the catalog still has it, else falls to the first live session, else the first

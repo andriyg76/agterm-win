@@ -52,8 +52,12 @@ void nt_reset(nt_terminal *terminal);
 void nt_dark_title_bar(void *window);
 // nt_show_title puts the program's title on the terminal's top-level window.
 void nt_show_title(nt_terminal *terminal);
-// nt_take_attention is 1 once after the program rang the bell or posted a notification (OSC 9, 777).
+// nt_take_attention is 1 once after the program rang the bell.
 int32_t nt_take_attention(nt_terminal *terminal);
+// nt_take_notification is 1 while an OSC 9 or 777 notification waits, the last one's title and body lengths in the
+// length outputs; buffers that hold both take it, and the next call is 0 until another arrives.
+int32_t nt_take_notification(nt_terminal *terminal, uint16_t *title, int32_t title_capacity, int32_t *title_length,
+                             uint16_t *body, int32_t body_capacity, int32_t *body_length);
 // nt_take_naming is 1 once after the program's title (OSC 0/2) or working directory (OSC 7, 9;9, 1337) changed;
 // nt_title and nt_pwd return their length in UTF-16 units and write them when `capacity` holds them.
 int32_t nt_take_naming(nt_terminal *terminal);
@@ -80,6 +84,16 @@ void nt_set_theme(nt_terminal *terminal, uint32_t foreground, uint32_t backgroun
 // nt_monospace_fonts writes the installed monospaced families, each ended by a newline, when `capacity` holds them all;
 // it returns their length in UTF-16 units.
 int32_t nt_monospace_fonts(uint16_t *out, int32_t capacity);
+
+// Windows toasts. nt_is_packaged is 1 in an MSIX, whose identity they use; otherwise nt_toast_init registers `app_id`
+// under HKCU with `display_name` and the `icon` PNG and takes it as the process's AppUserModelID. A clicked toast posts
+// `message` to `window` with its group in lParam, a heap string freed with nt_toast_free.
+int32_t nt_is_packaged(void);
+int32_t nt_toast_init(void *window, uint32_t message, const uint16_t *app_id, const uint16_t *display_name, const uint16_t *icon);
+// nt_toast_show shows toast XML; a later toast with the same tag and group replaces it.
+int32_t nt_toast_show(const uint16_t *xml, const uint16_t *tag, const uint16_t *group);
+void nt_toast_remove_group(const uint16_t *group);
+void nt_toast_free(void *text);
 
 // The sidebar: a dark Win32 tree whose items carry a caller's tag.
 void *nt_tree_create(void *parent, uint32_t dpi);

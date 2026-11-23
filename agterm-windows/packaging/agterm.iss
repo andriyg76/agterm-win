@@ -58,7 +58,8 @@ Source: "{#Stage}\zmx\{#ZmxRev}\*"; DestDir: "{app}\zmx\{#ZmxRev}"; Flags: onlyi
 Source: "{#Stage}\zmx\current"; DestDir: "{app}\zmx"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\agterm"; Filename: "{app}\agterm-win.exe"
+; the AppUserModelID agterm-win sets on itself, so a pinned shortcut and the running window are one taskbar button
+Name: "{autoprograms}\agterm"; Filename: "{app}\agterm-win.exe"; AppUserModelID: "andriyg76.agterm-win"
 
 [Run]
 Filename: "{app}\agterm-win.exe"; Description: "Launch agterm"; Flags: nowait postinstall skipifsilent

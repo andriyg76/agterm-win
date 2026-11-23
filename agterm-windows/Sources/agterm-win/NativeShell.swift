@@ -24,7 +24,10 @@ final class NativeShell {
         let commandLine: String
         let terminal: NativeTerminal
         var exited = false
+        /// attention is a bell since the session was last in view.
         var attention = false
+        /// unseen counts notifications since the session was last in view.
+        var unseen = 0
 
         var name: String {
             SessionNaming.displayName(customName: customName, title: programTitle, directory: directory, fallback: fallback)
@@ -107,6 +110,7 @@ final class NativeShell {
         findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
         remoteTerminal = makeTerminal()
         control = ControlSocket.start(path: socketPath, host: self, version: version)
+        startToasts()
         Keys.onReload = { [unowned self] in WinKeyHook.update(window: self.window) }
         WinKeyHook.update(window: window)
         DispatchQueue.main.async { Keys.report(window) }
@@ -164,7 +168,8 @@ final class NativeShell {
     }
 
     // what the terminals draw with now: the saved appearance, or Settings' preview while it is open
-    private lazy var shown = SettingsWindow.Values(appearance: settings.appearance, points: settings.fontPoints)
+    private lazy var shown = SettingsWindow.Values(appearance: settings.appearance, points: settings.fontPoints,
+                                                    notifications: settings.notifications)
 
     /// applyAppearance draws every terminal with `values`, without saving them.
     private func applyAppearance(_ values: SettingsWindow.Values) {
@@ -178,14 +183,17 @@ final class NativeShell {
     }
 
     private func openSettings() {
-        SettingsWindow.show(owner: window, values: .init(appearance: settings.appearance, points: settings.fontPoints),
+        SettingsWindow.show(owner: window, values: .init(appearance: settings.appearance, points: settings.fontPoints,
+                                                         notifications: settings.notifications),
                             themes: TerminalAppearance.themes.catalog.names, fonts: TerminalAppearance.monospaceFonts,
                             preview: { [unowned self] in applyAppearance($0) },
                             finish: { [unowned self] kept in
                                 guard let kept else { return }
                                 settings.appearance = kept.appearance
                                 settings.fontPoints = kept.points
+                                settings.notifications = kept.notifications
                                 saveSettings()
+                                rebuild()
                             })
     }
 
@@ -370,6 +378,7 @@ final class NativeShell {
         let id = session.id
         session.terminal.onExit = { [unowned self] in localExited(id) }
         session.terminal.onAttention = { [unowned self] in localAttention(id) }
+        session.terminal.onNotification = { [unowned self] in deliver(id, title: $0, body: $1, source: .terminal) }
         session.terminal.onNaming = { [unowned self] in localNaming(id) }
         locals.append(session)
         layout()
@@ -400,15 +409,75 @@ final class NativeShell {
     /// while the window is in the background.
     private func localAttention(_ id: Foundation.UUID) {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
-        let inView = selected == id && GetForegroundWindow() == window
-        if !inView {
-            var flash = FLASHWINFO(cbSize: UINT(MemoryLayout<FLASHWINFO>.size), hwnd: window, dwFlags: DWORD(FLASHW_TRAY | FLASHW_TIMERNOFG),
-                                   uCount: 0, dwTimeout: 0)
-            FlashWindowEx(&flash)
-        }
+        flashTaskbar()
         guard selected != id, !locals[index].attention else { return }
         locals[index].attention = true
         rebuild()
+    }
+
+    // MARK: notifications
+
+    /// deliver shows a notification for session `id` under NotificationRules: the unseen count while the session is out
+    /// of view, the taskbar flash while agterm is behind, and a banner when Settings allow one. It returns why no banner
+    /// was shown, for `notify`'s reply.
+    @discardableResult
+    private func deliver(_ id: Foundation.UUID, title: String, body: String, source: NotificationRules.Source) -> String? {
+        let inFront = GetForegroundWindow() == window
+        guard NotificationRules.delivers(source, sessionInView: selected == id, windowInFront: inFront) else {
+            log("notification: dropped for \(id), the session is in view")
+            return nil
+        }
+        if selected != id || !inFront, let index = locals.firstIndex(where: { $0.id == id }) {
+            locals[index].unseen += 1
+            rebuild()
+        }
+        flashTaskbar()
+        guard settings.notifications.banners else {
+            log("notification: banners are off; \(title): \(body)")
+            return ControlNotify.bannersOffNote
+        }
+        let xml = NotificationRules.toast(title: title, body: body, session: name(of: id) ?? "agterm", sound: settings.notifications.sound)
+        let shown = toastsReady && nt_toast_show(Array(xml.utf16) + [0], Array(NotificationRules.tag(source).utf16) + [0],
+                                                Array(id.uuidString.utf16) + [0]) != 0
+        log("notification: \(shown ? "shown" : "not shown") for \(id): \(title): \(body)")
+        return nil
+    }
+
+    /// flashTaskbar flashes the taskbar button as Settings say while agterm is behind another window.
+    private func flashTaskbar() {
+        guard GetForegroundWindow() != window else { return }
+        let flags: DWORD, count: UINT
+        switch settings.notifications.flash {
+        case .off: return
+        case .once: (flags, count) = (DWORD(FLASHW_TRAY), 3)
+        case .untilFocused: (flags, count) = (DWORD(FLASHW_TRAY | FLASHW_TIMERNOFG), 0)
+        }
+        var flash = FLASHWINFO(cbSize: UINT(MemoryLayout<FLASHWINFO>.size), hwnd: window, dwFlags: flags, uCount: count, dwTimeout: 0)
+        FlashWindowEx(&flash)
+    }
+
+    private var toastsReady = false
+
+    private func startToasts() {
+        let icon = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).deletingLastPathComponent()
+            .appendingPathComponent("agterm.png")
+        let iconPath = FileManager.default.fileExists(atPath: icon.path) ? icon.path : ""
+        toastsReady = nt_toast_init(UnsafeMutableRawPointer(window), Self.toastMessage, Array(Self.appUserModelID.utf16) + [0],
+                                    Array("agterm".utf16) + [0], Array(iconPath.utf16) + [0]) != 0
+        log("notification: banners \(toastsReady ? "ready" : "unavailable")\(nt_is_packaged() != 0 ? " (packaged)" : "")")
+    }
+
+    // agterm-win's identity outside the Store, under which Windows lists its notifications
+    static let appUserModelID = "andriyg76.agterm-win"
+    fileprivate static let toastMessage = UINT(WM_APP + 22)
+
+    /// reveal answers a clicked banner: agterm comes to the front with the session selected.
+    fileprivate func reveal(_ id: Foundation.UUID) {
+        guard tagged.contains(id) else { return }
+        if IsIconic(window) { ShowWindow(window, SW_RESTORE) }
+        SetForegroundWindow(window)
+        select(id)
+        focus()
     }
 
     private var defaultProfile: Int { NativeMenu.defaultProfile(named: settings.defaultProfile, in: profiles) }
@@ -620,7 +689,8 @@ final class NativeShell {
         var sidebar = SessionSidebar.items(remote.store.workspaces)
         if !locals.isEmpty {
             let children = locals.map {
-                SessionSidebar.Item(id: $0.id, title: SessionSidebar.localTitle($0.name, exited: $0.exited, attention: $0.attention),
+                SessionSidebar.Item(id: $0.id, title: SessionSidebar.localTitle($0.name, exited: $0.exited, attention: $0.attention || $0.unseen > 0,
+                                                                         unseen: settings.notifications.unseenCount ? $0.unseen : 0),
                                     isWorkspace: false, ended: $0.exited, children: [])
             }
             sidebar.insert(SessionSidebar.Item(id: localWorkspaceID, title: "Local", isWorkspace: true, ended: false, children: children),
@@ -658,10 +728,13 @@ final class NativeShell {
 
     private func select(_ id: Foundation.UUID) {
         selected = id
-        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].attention {
+        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].attention || locals[index].unseen > 0 {
             locals[index].attention = false
+            locals[index].unseen = 0
             rebuild()
         }
+        // banners already shown for the session say nothing new once it is in view
+        if toastsReady { nt_toast_remove_group(Array(id.uuidString.utf16) + [0]) }
         if let tree, let item = items[id] { nt_tree_select(tree, item) }
         let shown = visibleTerminal
         for terminal in terminalsShown { terminal.setVisible(terminal === shown) }
@@ -819,6 +892,13 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
                 shell.systemAppearanceChanged()
             }
             return DefWindowProcW(window, message, wParam, lParam)
+        case NativeShell.toastMessage:
+            if let text = UnsafeMutablePointer<UInt16>(bitPattern: Int(lParam)) {
+                let group = String(decodingCString: text, as: UTF16.self)
+                nt_toast_free(text)
+                if let id = Foundation.UUID(uuidString: group) { shell.reveal(id) }
+            }
+            return 0
         case WinKeyHook.commandMessage:
             if let command = NativeMenu.Command(rawValue: Int(wParam)) { shell.windowCommand(command) }
             return 0
@@ -838,7 +918,7 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
 extension NativeShell: NativeControlHost {
     var localSessions: [NativeControl.Local] {
         locals.map {
-            NativeControl.Local(id: $0.id, name: $0.name, commandLine: $0.commandLine, exited: $0.exited, attention: $0.attention,
+            NativeControl.Local(id: $0.id, name: $0.name, commandLine: $0.commandLine, exited: $0.exited, attention: $0.attention, unseen: $0.unseen,
                                 cwd: $0.directory ?? "", title: $0.programTitle)
         }
     }
@@ -910,9 +990,8 @@ extension NativeShell: NativeControlHost {
 
     func screen(of id: Foundation.UUID) -> (lines: [String], rows: Int)? { terminal(of: id)?.screen }
 
-    func notify(_ id: Foundation.UUID, title: String, body: String) {
-        log("native shell: notify \(title): \(body)")
-        localAttention(id)
+    func notify(_ id: Foundation.UUID, title: String, body: String) -> String? {
+        deliver(id, title: title, body: body, source: .control)
     }
 
     var fontPoints: Float { settings.fontPoints }
@@ -928,7 +1007,7 @@ extension NativeShell: NativeControlHost {
     func setAppearance(_ appearance: Appearance) {
         settings.appearance = appearance
         saveSettings()
-        applyAppearance(.init(appearance: appearance, points: shown.points))
+        applyAppearance(.init(appearance: appearance, points: shown.points, notifications: settings.notifications))
     }
 
     func reloadKeymap() -> Int { Keys.reload(owner: window, quiet: true) }

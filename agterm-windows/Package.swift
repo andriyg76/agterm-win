@@ -18,6 +18,7 @@ let package = Package(
             cxxSettings: [.unsafeFlags(["-I", ghosttyVT + "/include"])],
             linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("dwmapi"), .linkedLibrary("user32"),
                              .linkedLibrary("comctl32"), .linkedLibrary("uxtheme"), .linkedLibrary("gdi32"), .linkedLibrary("bcrypt"),
+                             .linkedLibrary("runtimeobject"), .linkedLibrary("advapi32"), .linkedLibrary("shell32"),
                              .unsafeFlags(["-L", ghosttyVT + "/lib", "-lghostty-vt"])]
         ),
         // the Win32-free logic the native window runs, so `swift test` covers it on any host

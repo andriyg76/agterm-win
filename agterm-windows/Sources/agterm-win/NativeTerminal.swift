@@ -33,8 +33,10 @@ final class NativeTerminal {
     static var fontFamily: String?
     /// onExit runs when the started program exits.
     var onExit: (() -> Void)?
-    /// onAttention runs when the program rings the bell or posts a notification.
+    /// onAttention runs when the program rings the bell.
     var onAttention: (() -> Void)?
+    /// onNotification runs with the title and body of an OSC 9 or 777 notification.
+    var onNotification: ((String, String) -> Void)?
     /// onNaming runs when the program's title or reported working directory changes.
     var onNaming: (() -> Void)?
     fileprivate let autoscrollTimer: UINT_PTR = 1
@@ -174,6 +176,7 @@ final class NativeTerminal {
             }, Unmanaged.passUnretained(self).toOpaque())
         }
         if nt_take_attention(terminal) != 0 { onAttention?() }
+        if let notification = takeNotification() { onNotification?(notification.title, notification.body) }
         if nt_take_naming(terminal) != 0 { onNaming?() }
     }
 
@@ -542,6 +545,16 @@ final class NativeTerminal {
         guard console != nil else { return false }
         send(TerminalInput.paste(text, bracketed: false))
         return true
+    }
+
+    private func takeNotification() -> (title: String, body: String)? {
+        guard let terminal else { return nil }
+        var titleLength: Int32 = 0, bodyLength: Int32 = 0
+        guard nt_take_notification(terminal, nil, 0, &titleLength, nil, 0, &bodyLength) != 0 else { return nil }
+        var title = [UInt16](repeating: 0, count: Int(titleLength)), body = [UInt16](repeating: 0, count: Int(bodyLength))
+        var tookTitle: Int32 = 0, tookBody: Int32 = 0
+        guard nt_take_notification(terminal, &title, titleLength, &tookTitle, &body, bodyLength, &tookBody) != 0 else { return nil }
+        return (String(decoding: title, as: UTF16.self), String(decoding: body, as: UTF16.self))
     }
 
     /// title is the program's OSC 0/2 title, empty when it set none.

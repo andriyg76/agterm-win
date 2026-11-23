@@ -26,15 +26,16 @@ agterm-win does not see, log or forward their traffic.
 
 ## What is stored on your computer
 
-All of it is under `%LOCALAPPDATA%\agterm-win`, or the folder `AGTERM_WIN_STATE_DIR` names:
+The files are under `%LOCALAPPDATA%\agterm-win`, or the folder `AGTERM_WIN_STATE_DIR` names, beside one registry key:
 
 | File | What it holds |
 |---|---|
-| `native.json` | Window settings: font size, window position and size, the default launch profile, and the local sessions open at quit. Each session keeps its name, the command line it started with and the folder it was last in, so it can start there again. |
+| `native.json` | Settings: theme, font and size, notification choices, window position and size, the default launch profile, and the local sessions open at quit. Each session keeps its name, the command line it started with and the folder it was last in, so it can start there again. |
 | `config\keymap.conf` | Your key bindings, written only when you choose Edit Keymap. |
 | `windows\wsl-<distribution>.json` | How agterm-win last showed an agterm-server's sessions, so the sidebar fills at once on the next start. |
 | `agterm-win.log` | A diagnostic log: start and stop, sessions opened and closed, the commands that started them, the title and text of notifications posted to a session, errors. It does not record what you type or what programs print. |
 | `crash.log` | Written only when agterm-win crashes: the error and where it happened. |
+| `HKCU\Software\Classes\AppUserModelId\andriyg76.agterm-win` (registry, installs outside the Store) | The name and icon Windows shows on agterm-win's notifications. |
 | `agterm.sock` | The local control socket `agtermctl` talks to. It sits in your profile's local app data, which Windows opens only to your account and administrators, and it carries nothing off the machine. |
 
 Terminal contents and scrollback stay in memory: they are not written to disk and are gone when a session
@@ -48,7 +49,8 @@ out.
 
 ## Removing your data
 
-Close agterm-win and delete `%LOCALAPPDATA%\agterm-win`. Uninstalling, including from the Store, may leave that
+Close agterm-win and delete `%LOCALAPPDATA%\agterm-win`, and on an install outside the Store the
+`HKCU\Software\Classes\AppUserModelId\andriyg76.agterm-win` registry key. Uninstalling, including from the Store, may leave that
 folder in place, so delete it yourself if you want nothing left behind. agterm-server's data in WSL is removed
 with `~/.local/state/agterm` there, or with the distribution.
 

@@ -54,7 +54,11 @@ private final class FakeHost: NativeControlHost {
     }
 
     func screen(of id: UUID) -> (lines: [String], rows: Int)? { screens[id] }
-    func notify(_ id: UUID, title: String, body: String) { notified.append(id) }
+    var bannersOff = false
+    func notify(_ id: UUID, title: String, body: String) -> String? {
+        notified.append(id)
+        return bannersOff ? ControlNotify.bannersOffNote : nil
+    }
     func setFontPoints(_ points: Float) { fontPoints = points }
     var keymap = WindowsKeymap(text: "map ctrl+alt+t new_session").control
     var reloads = 0
@@ -206,6 +210,8 @@ struct NativeControlTests {
         host.selectedSession = host.add("a")
         #expect(await handle(ControlRequest(cmd: .notify, args: ControlArgs(title: "t")), host).error == "notify requires a body")
         #expect(await handle(ControlRequest(cmd: .notify, args: ControlArgs(title: "t", body: "done")), host).ok && host.notified.count == 1)
+        host.bannersOff = true
+        #expect(await handle(ControlRequest(cmd: .notify, args: ControlArgs(body: "done")), host).result?.text == ControlNotify.bannersOffNote)
     }
 
     @Test func versionAndUnsupportedCommands() async {

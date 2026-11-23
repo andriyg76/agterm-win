@@ -3,13 +3,15 @@ import Foundation
 import WinSDK
 
 /// SettingsWindow is agterm-win's Settings: its Appearance group picks the theme, the dark-mode theme that follows
-/// Windows' app mode, and the font. Every change previews on the terminals at once; OK keeps it, Cancel and closing
-/// put back what was there when the window opened, as the macOS theme picker previews, commits and cancels.
+/// Windows' app mode, and the font; its Notifications group what a notification does. An appearance change previews
+/// on the terminals at once; OK keeps every change, Cancel and closing put back what was there when the window
+/// opened, as the macOS theme picker previews, commits and cancels.
 @MainActor
 final class SettingsWindow {
     struct Values: Equatable {
         var appearance: Appearance
         var points: Float
+        var notifications: NotificationSettings
     }
 
     private(set) static var current: SettingsWindow?
@@ -28,7 +30,7 @@ final class SettingsWindow {
                        getPosition = UINT(WM_USER + 114)
 
     private enum Control: Int32 {
-        case theme = 101, follows, darkTheme, fontFamily, size, sizeArrows
+        case theme = 101, follows, darkTheme, fontFamily, size, sizeArrows, banners, sound, unseenCount, flash
     }
 
     /// show opens Settings over `owner`, or brings an open one to the front. `finish` gets the kept values, nil for a
@@ -71,7 +73,7 @@ final class SettingsWindow {
         }
         let dpi = owner.map { Int32(GetDpiForWindow($0)) } ?? 96
         let scaled = { (value: Int32) in MulDiv(value, dpi, 96) }
-        var frame = RECT(left: 0, top: 0, right: scaled(520), bottom: scaled(500))
+        var frame = RECT(left: 0, top: 0, right: scaled(520), bottom: scaled(650))
         let style = DWORD(WS_OVERLAPPED) | DWORD(WS_CAPTION) | DWORD(WS_SYSMENU)
         AdjustWindowRectExForDpi(&frame, style, false, 0, UINT(dpi))
         var ownerFrame = RECT()
@@ -114,8 +116,16 @@ final class SettingsWindow {
                          id: Control.sizeArrows.rawValue)
         SendMessageW(arrows, Self.setBuddy, WPARAM(UInt(bitPattern: Int(bitPattern: size))), 0)
         SendMessageW(arrows, Self.setRange, WPARAM(Int(NativeMenu.pointRange.lowerBound)), LPARAM(Int(NativeMenu.pointRange.upperBound)))
-        _ = add("BUTTON", "OK", Int32(BS_DEFPUSHBUTTON) | tab, 316, 460, 92, 28, id: Int32(IDOK))
-        _ = add("BUTTON", "Cancel", Int32(BS_PUSHBUTTON) | tab, 416, 460, 92, 28, id: Int32(IDCANCEL))
+        _ = add("BUTTON", "Notifications", Int32(BS_GROUPBOX), 12, 456, 496, 140)
+        let checkbox = Int32(BS_AUTOCHECKBOX) | tab
+        let banners = add("BUTTON", "Show Windows notifications", checkbox, 28, 480, 230, 22, id: Control.banners.rawValue)
+        let sound = add("BUTTON", "Play the notification sound", checkbox, 28, 506, 230, 22, id: Control.sound.rawValue)
+        let unseen = add("BUTTON", "Count notifications beside a session's \u{25CF}", checkbox, 28, 532, 464, 22,
+                         id: Control.unseenCount.rawValue)
+        _ = add("STATIC", "Flash the taskbar button", 0, 272, 480, 220, 18)
+        let flash = add("COMBOBOX", "", Int32(CBS_DROPDOWNLIST) | tab, 272, 500, 220, 200, id: Control.flash.rawValue)
+        _ = add("BUTTON", "OK", Int32(BS_DEFPUSHBUTTON) | tab, 316, 610, 92, 28, id: Int32(IDOK))
+        _ = add("BUTTON", "Cancel", Int32(BS_PUSHBUTTON) | tab, 416, 610, 92, 28, id: Int32(IDCANCEL))
 
         let rows = ["Default"] + themes
         for list in [themeList, darkList] { rows.forEach { addString($0, to: list, message: LB_ADDSTRING) } }
@@ -127,6 +137,13 @@ final class SettingsWindow {
         let fontIndex = original.appearance.fontFamily.flatMap { fonts.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
         SendMessageW(fontBox, UINT(CB_SETCURSEL), WPARAM(fontIndex), 0)
         SendMessageW(arrows, Self.setPosition, 0, LPARAM(Int(original.points.rounded())))
+        let notifications = original.notifications
+        for (control, on) in [(banners, notifications.banners), (sound, notifications.sound), (unseen, notifications.unseenCount)] {
+            SendMessageW(control, UINT(BM_SETCHECK), WPARAM(on ? BST_CHECKED : BST_UNCHECKED), 0)
+        }
+        EnableWindow(sound, notifications.banners ? true : false)
+        TaskbarFlash.allCases.forEach { addString($0.title, to: flash, message: CB_ADDSTRING) }
+        SendMessageW(flash, UINT(CB_SETCURSEL), WPARAM(TaskbarFlash.allCases.firstIndex(of: notifications.flash) ?? 0), 0)
         loading = false
         ShowWindow(window, SW_SHOW)
         SetFocus(themeList)
@@ -155,13 +172,21 @@ final class SettingsWindow {
         let points = Float(Int32(truncatingIfNeeded: SendMessageW(item(.sizeArrows), Self.getPosition, 0, 0)))
         let appearance = Appearance(theme: theme(themeRow), darkTheme: follows ? theme(darkRow) : nil, followsSystem: follows,
                                     fontFamily: fontRow > 0 && fontRow <= fonts.count ? fonts[fontRow - 1] : nil)
-        return Values(appearance: appearance, points: min(max(points, NativeMenu.pointRange.lowerBound), NativeMenu.pointRange.upperBound))
+        let checked = { (control: Control) in SendMessageW(self.item(control), UINT(BM_GETCHECK), 0, 0) == LRESULT(BST_CHECKED) }
+        let flashRow = Int(SendMessageW(item(.flash), UINT(CB_GETCURSEL), 0, 0))
+        let notifications = NotificationSettings(banners: checked(.banners), sound: checked(.sound),
+                                                 flash: TaskbarFlash.allCases.indices.contains(flashRow) ? TaskbarFlash.allCases[flashRow] : .untilFocused,
+                                                 unseenCount: checked(.unseenCount))
+        return Values(appearance: appearance, points: min(max(points, NativeMenu.pointRange.lowerBound), NativeMenu.pointRange.upperBound),
+                      notifications: notifications)
     }
 
     fileprivate func command(_ id: Int32, notification: Int32) {
         switch id {
         case Int32(IDOK): close(keeping: values)
         case Int32(IDCANCEL): close(keeping: nil)
+        case Control.banners.rawValue where notification == BN_CLICKED:
+            EnableWindow(item(.sound), SendMessageW(item(.banners), UINT(BM_GETCHECK), 0, 0) == LRESULT(BST_CHECKED) ? true : false)
         case Control.follows.rawValue where notification == BN_CLICKED:
             EnableWindow(item(.darkTheme), SendMessageW(item(.follows), UINT(BM_GETCHECK), 0, 0) == LRESULT(BST_CHECKED) ? true : false)
             changed()

@@ -21,7 +21,8 @@ public protocol NativeControlHost: AnyObject {
     /// screen is the session's lines, oldest first, and how many of the last ones are on screen; nil when the session
     /// has no terminal here.
     func screen(of id: UUID) -> (lines: [String], rows: Int)?
-    func notify(_ id: UUID, title: String, body: String)
+    /// notify shows a `notify` for the session and returns why no banner was shown, nil when one was.
+    func notify(_ id: UUID, title: String, body: String) -> String?
     var fontPoints: Float { get }
     func setFontPoints(_ points: Float)
     var keymap: ControlKeymap { get }
@@ -44,15 +45,18 @@ public enum NativeControl {
         public let commandLine: String
         public let exited: Bool
         public let attention: Bool
+        public let unseen: Int
         public let cwd: String
         public let title: String?
 
-        public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, cwd: String = "", title: String? = nil) {
+        public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, unseen: Int = 0, cwd: String = "",
+                    title: String? = nil) {
             self.id = id
             self.name = name
             self.commandLine = commandLine
             self.exited = exited
             self.attention = attention
+            self.unseen = unseen
             self.cwd = cwd
             self.title = title
         }
@@ -104,8 +108,8 @@ public enum NativeControl {
         case .notify:
             guard let body = request.args?.body, !body.isEmpty else { return failure("notify requires a body") }
             return await withSession(request.target, host: host) { id in
-                host.notify(id, title: request.args?.title ?? "agterm", body: body)
-                return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+                let note = host.notify(id, title: request.args?.title ?? "", body: body)
+                return ControlResponse(ok: true, result: ControlResult(id: id.uuidString, text: note))
             }
         case .fontInc, .fontDec, .fontReset:
             let command: NativeMenu.Command = request.cmd == .fontInc ? .fontBigger : request.cmd == .fontDec ? .fontSmaller : .fontReset
@@ -203,7 +207,7 @@ public enum NativeControl {
         let locals = host.localSessions.map { local in
             ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: local.id == selected, split: false,
                                backedByZmx: nil, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
-                               unseen: local.attention ? 1 : nil, fontSize: Double(host.fontPoints))
+                               unseen: local.unseen > 0 ? local.unseen : local.attention ? 1 : nil, fontSize: Double(host.fontPoints))
         }
         let local = locals.isEmpty ? [] : [ControlWorkspaceNode(id: localWorkspace.uuidString, name: "Local",
                                                                 active: locals.contains { $0.active }, sessions: locals)]

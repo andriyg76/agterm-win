@@ -30,12 +30,23 @@ The native Windows server port waits until the client reaches parity with the WS
 - Check on Windows: Win+T with `map cmd+t new_session`, the Start menu staying closed, a hook-hostile security
   product, and a non-US layout's OEM keys.
 
-## 3. Notifications
+## 3. Notifications — local sessions done, not yet verified on Windows
 
-- Windows toast through `ToastNotificationManager` with an AppUserModelID: MSIX has one; the Inno installer adds
-  a Start Menu shortcut carrying it.
-- Pass the OSC 9/777 title and body from the shim's desktop-notification callback (today only `attention` is set).
-- Deliver under `TerminalNotification.shouldDeliver`; a click selects the session; `agtermctl notify` posts the same.
+- OSC 9/777 carries its title and body out of the shim (`nt_take_notification`); the bell stays a ● marker and a
+  flash, not a notification, as on macOS.
+- NotificationRules: a terminal notification from the session in view with agterm in front is dropped
+  (`TerminalNotification.shouldDeliver`); `notify` never is. Terminal and `notify` banners replace only their own
+  last one (tag), grouped by session.
+- Banners are Windows toasts through the WinRT ABI (`NativeToast.cpp`). An MSIX uses its identity; any other
+  install registers `andriyg76.agterm-win` under `HKCU\Software\Classes\AppUserModelId` with the staged
+  `agterm.png` and sets it as the process AppUserModelID; the Inno shortcut carries the same ID.
+- Clicking a banner brings agterm forward with the session selected; selecting a session clears its ● count and
+  removes its banners from Action Center.
+- Settings ▸ Notifications: banners, sound, the count beside ●, taskbar flash (off / once / until in front,
+  default until in front, the behavior before this setting).
+- `notify` replies with `ControlNotify.bannersOffNote` while banners are off; `tree` reports `unseen`.
+- Remote: sessions on agterm-server only notify through the server's presentation stream, which agterm-win does
+  not open yet; see the open question in the PR.
 
 ## 4. Settings — Appearance done locally, not yet verified on Windows
 

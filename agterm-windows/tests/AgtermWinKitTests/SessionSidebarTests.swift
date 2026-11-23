@@ -64,5 +64,7 @@ struct SessionSidebarTests {
         #expect(SessionSidebar.localTitle("PowerShell", exited: false, attention: false) == "PowerShell")
         #expect(SessionSidebar.localTitle("PowerShell", exited: false, attention: true) == "● PowerShell")
         #expect(SessionSidebar.localTitle("cmd", exited: true, attention: true) == "● cmd (exited)")
+        #expect(SessionSidebar.localTitle("cmd", exited: false, attention: true, unseen: 3) == "● 3 cmd")
+        #expect(SessionSidebar.localTitle("cmd", exited: false, attention: true, unseen: 120) == "● 99+ cmd")
     }
 }

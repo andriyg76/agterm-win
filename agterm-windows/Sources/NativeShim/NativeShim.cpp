@@ -265,7 +265,9 @@ struct nt_terminal {
     uint32_t columns = 80, rows = 24;
     int32_t scroll = 0;
     bool focused = true;
-    bool attention = false;  // a bell or notification since nt_take_attention
+    bool attention = false;  // a bell since nt_take_attention
+    bool notified = false;   // an OSC 9 or 777 notification since nt_take_notification, the last one's text below
+    Text notificationTitle, notificationBody;
     bool naming = false;     // the title or the working directory changed since nt_take_naming
     uint32_t selectionColor = 0x264F78;
     bool selecting = false, hasSelection = false;
@@ -627,8 +629,12 @@ void bell(GhosttyTerminal, void *userdata) {
     static_cast<nt_terminal *>(userdata)->attention = true;
 }
 
-void desktopNotification(GhosttyTerminal, void *userdata, const GhosttyTerminalDesktopNotification *) {
-    static_cast<nt_terminal *>(userdata)->attention = true;
+void desktopNotification(GhosttyTerminal, void *userdata, const GhosttyTerminalDesktopNotification *notification) {
+    auto terminal = static_cast<nt_terminal *>(userdata);
+    terminal->notified = true;
+    // borrowed for the callback only
+    widen(terminal->notificationTitle, notification->title.ptr, static_cast<uint32_t>(notification->title.len));
+    widen(terminal->notificationBody, notification->body.ptr, static_cast<uint32_t>(notification->body.len));
 }
 
 bool terminalSize(GhosttyTerminal, void *userdata, GhosttySizeReportSize *size) {
@@ -1094,6 +1100,16 @@ extern "C" int32_t nt_monospace_fonts(uint16_t *out, int32_t capacity) {
     int32_t count = static_cast<int32_t>(names.size());
     if (out && capacity >= count && count > 0) memcpy(out, names.data(), names.size() * sizeof(wchar_t));
     return count;
+}
+
+extern "C" int32_t nt_take_notification(nt_terminal *terminal, uint16_t *title, int32_t title_capacity, int32_t *title_length,
+                                        uint16_t *body, int32_t body_capacity, int32_t *body_length) {
+    *title_length = give(terminal->notificationTitle, title, title_capacity);
+    *body_length = give(terminal->notificationBody, body, body_capacity);
+    if (!title || !body || title_capacity < *title_length || body_capacity < *body_length) return terminal->notified;
+    bool notified = terminal->notified;
+    terminal->notified = false;
+    return notified;
 }
 
 extern "C" int32_t nt_take_naming(nt_terminal *terminal) {
