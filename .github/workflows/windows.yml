@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 # windows-2022 keeps Visual Studio 2022 (MSVC 14.4x), the toolchain the Swift 6.4.3 clang supports and the dev
-# machine builds with; windows-2025 ships MSVC 14.5x, whose STL refuses that clang. windows-11-arm has only Visual
-# Studio 2026, so scripts/use-msvc.ps1 adds MSVC 14.43 there
+# machine builds with; windows-2025 ships MSVC 14.5x, whose STL refuses that clang. NativeShim uses no STL, so
+# windows-11-arm's Visual Studio 2026 serves arm64 as it is
 env:
   SWIFT_VERSION: swift-6.4.3-release
   SWIFT_BUILD: 6.4.3-RELEASE
@@ -67,8 +67,6 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
-      - if: matrix.arch == 'arm64'
-        run: ./scripts/use-msvc.ps1 -Toolset 14.43 -Component Microsoft.VisualStudio.Component.VC.14.43.17.13.ARM64 -Arch arm64
       - uses: actions/cache@v6
         with:
           # not .build: its debug link comes back from the cache unreadable, and stage.ps1 copies through it
