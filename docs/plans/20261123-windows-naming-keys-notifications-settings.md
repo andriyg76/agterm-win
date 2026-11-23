@@ -51,3 +51,17 @@ The native Windows server port waits until the client reaches parity with the WS
 - Not yet: the sidebar and window chrome keep their dark colors; selection-foreground is not applied; a Settings
   window open during `theme.set` keeps showing its own values.
 - Next pages: Notifications, then General (WSL distribution, session restore).
+
+## Later: font ligatures
+
+Deferred 2026-11-23. The renderer maps one codepoint to one glyph (`GetGlyphIndices`, `NativeShim.cpp`), so
+`=>`, `!=`, `->` never join; macOS has them through ghostty (`calt`/`liga` on, `font-feature` to turn off).
+
+- Shape runs of same-style cells with `IDWriteTextAnalyzer::GetGlyphs` and pin each cluster to the cells it
+  covers.
+- Break a ligature the cursor or a selection edge falls inside, as ghostty does.
+- "Font ligatures" in Settings ▸ Appearance, on by default, saved in `native.json`.
+- Shape only changed rows and cache the result; per-frame shaping costs the paint.
+
+The Font list holds only fonts DirectWrite flags monospaced; a monospaced font missing the flag needs a typed
+name, if one turns up.
