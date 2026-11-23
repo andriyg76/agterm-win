@@ -124,6 +124,21 @@ void nt_find_bar_set_dpi(void *bar, uint32_t dpi);
 // nt_track_menu shows a popup menu at a screen point and returns the picked command id, 0 when dismissed.
 int32_t nt_track_menu(void *menu, void *owner, int32_t x, int32_t y);
 
+// The window's own title bar. A button's `kind` is 0 an action icon, 1 a caption button, 2 close; `state` is 0 at
+// rest, 1 hovered, 2 pressed; `glyph` is a Segoe MDL2 Assets code point.
+typedef struct {
+    int32_t left, right;
+    uint16_t glyph;
+    int32_t kind, state;
+} nt_title_button;
+// nt_title_bar_paint answers the window's WM_PAINT: the bar across the top `height` pixels, the background below it.
+void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, const uint16_t *title, int32_t title_left,
+                        int32_t title_right, const nt_title_button *buttons, int32_t count, int32_t active);
+// A tooltip over rectangles of `parent`'s client; nt_tooltip_set with an empty text removes the tool `id`.
+void *nt_tooltip_create(void *parent);
+void nt_tooltip_set(void *tip, void *parent, uintptr_t id, int32_t left, int32_t top, int32_t right, int32_t bottom,
+                    const uint16_t *text);
+
 #ifdef __cplusplus
 }
 #endif
