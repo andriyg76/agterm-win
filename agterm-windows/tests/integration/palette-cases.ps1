@@ -96,6 +96,7 @@ $shellCases["palettes"] = {
     }
     if (-not [AgtermInput]::Front($window)) { return @("the window could not be brought to the front, so no key reaches it") }
 
+    Note "Ctrl+P"
     $palette = Open-Palette $window $false
     if (-not $palette) { return @("Ctrl+P opened no palette") }
     $rows = Get-Rows $palette
@@ -109,6 +110,7 @@ $shellCases["palettes"] = {
     if (-not (Wait-Until { (Get-Active $state).name -eq "gamma-db" } 5)) { $failures += "Enter selected '$((Get-Active $state).name)', not gamma-db" }
 
     $palette = Open-Palette $window $false
+    Note "arrows and Ctrl+J/K"
     if (-not $palette) { return $failures + @("Ctrl+P did not open the palette again") }
     Send-Key $palette.Edit 0x28
     if (-not (Wait-Until { [AgtermInput]::Highlight($palette.List) -eq 1 } 2)) { $failures += "Down left the highlight on $([AgtermInput]::Highlight($palette.List))" }
@@ -135,6 +137,7 @@ $shellCases["palettes"] = {
         if (-not (Wait-Until { -not (Get-Palette $window) } 5)) { $failures += "a click on the terminal left the palette open" }
     } else { $failures += "Ctrl+P did not open the palette for the click away" }
 
+    Note "Ctrl+Shift+P"
     $palette = Open-Palette $window $true
     if (-not $palette) { return $failures + @("Ctrl+Shift+P opened no palette") }
     $rows = Get-Rows $palette

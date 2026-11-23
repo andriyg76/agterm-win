@@ -181,6 +181,7 @@ $shellCases["title-bar"] = {
     $failures = @()
     $bar = Get-Bar $window
 
+    Note "hit tests"
     $rect = New-Object AgtermWin32+Rect
     [AgtermWin32]::GetWindowRect($window, [ref]$rect) | Out-Null
     $origin = Get-ScreenPoint $window 0 0
@@ -197,6 +198,7 @@ $shellCases["title-bar"] = {
     if (($hit = Get-Hit $window $dragX 1) -ne $hitTop) { $failures += "the hit test on the top edge is $hit, not $hitTop" }
     if (($hit = Get-Hit $window $dragX ($bar.Height + 20)) -ne $hitClient) { $failures += "the hit test under the bar is $hit, not $hitClient" }
 
+    Note "title follows the session"
     $named = Invoke-Ctl $state @("session", "new", "--name", "title-check", "--command", "powershell.exe -NoLogo -NoProfile")
     if (-not $named.ok) { return $failures + @("session new failed: $($named | ConvertTo-Json -Compress)") }
     if (-not (Wait-Until { [AgtermWin32]::TextOf($window) -eq "title-check" })) {
@@ -205,6 +207,7 @@ $shellCases["title-bar"] = {
     Invoke-Ctl $state @("session", "rename", "--target", $named.result.id, "renamed") | Out-Null
     if (-not (Wait-Until { [AgtermWin32]::TextOf($window) -eq "renamed" })) { $failures += "a rename left the title '$([AgtermWin32]::TextOf($window))'" }
 
+    Note "painted bar"
     Start-Sleep -Milliseconds 500
     $shot = Get-Shot $window
     try {
@@ -223,6 +226,7 @@ $shellCases["title-bar"] = {
         Save-Bitmap $shot.Bitmap (Join-Path $Shell.Dir "title-bar.png")
     }
 
+    Note "+"
     $before = (Get-SessionNodes $state).Count
     Send-Click $window (Get-Centre $bar "new session") $bar.Middle
     $added = Wait-Until { $nodes = Get-SessionNodes $state; if ($nodes.Count -eq $before + 1) { $nodes } }
@@ -231,10 +235,12 @@ $shellCases["title-bar"] = {
         $failures += "after + the title is '$([AgtermWin32]::TextOf($window))', not the new session's name"
     }
 
+    Note "find"
     Send-Click $window (Get-Centre $bar "find") $bar.Middle
     if (-not (Wait-Until { [AgtermWin32]::VisibleChildren($window, "Edit").Count -gt 0 } 5)) { $failures += "Find did not show the find bar" }
     Save-Snapshot $Shell "find"
 
+    Note "maximize"
     Send-FrameClick $window $hitMaximize (Get-Centre $bar "maximize") $bar.Middle
     if (-not (Wait-Until { [AgtermWin32]::IsZoomed($window) } 5)) { $failures += "maximize did not maximize" }
     else {
@@ -250,12 +256,14 @@ $shellCases["title-bar"] = {
         if (-not (Wait-Until { -not [AgtermWin32]::IsZoomed($window) } 5)) { $failures += "restore did not restore" }
     }
 
+    Note "minimize"
     Send-FrameClick $window $hitMinimize (Get-Centre $bar "minimize") $bar.Middle
     if (-not (Wait-Until { [AgtermWin32]::IsIconic($window) } 5)) { $failures += "minimize did not minimize" }
     [AgtermWin32]::ShowWindow($window, 9) | Out-Null
     Wait-Until { -not [AgtermWin32]::IsIconic($window) } 5 | Out-Null
 
     # sessions still run, so close asks first
+    Note "close"
     Send-FrameClick $window $hitClose (Get-Centre $bar "close") $bar.Middle
     if (-not (Wait-Until { [AgtermWin32]::Visible($Shell.Process.Id, "#32770").Count -gt 0 } 5)) {
         $failures += "close with running sessions did not ask before quitting"
@@ -285,6 +293,7 @@ $shellCases["title-bar-menus"] = {
     $failures = @()
     $bar = Get-Bar $window
 
+    Note "☰ menu"
     Send-Click $window (Get-Centre $bar "menu") $bar.Middle
     $menu = Wait-Until { [AgtermWin32]::Visible($processId, "#32768") | Select-Object -First 1 } 5
     if (-not $menu) { $failures += "☰ opened no menu" }
@@ -302,6 +311,7 @@ $shellCases["title-bar-menus"] = {
         if (-not (Wait-Until { [AgtermWin32]::Visible($processId, "#32768").Count -eq 0 } 5)) { return $failures + @("Escape did not close ☰'s menu") }
     }
 
+    Note "system menu"
     $drag = Get-ScreenPoint $window ([int](($bar.Title[0] + $bar.Title[1]) / 2)) $bar.Middle
     [AgtermWin32]::PostMessageW($window, 0x007B, $window, [AgtermWin32]::At($drag.X, $drag.Y)) | Out-Null
     $system = Wait-Until { [AgtermWin32]::Visible($processId, "#32768") | Select-Object -First 1 } 5
@@ -314,6 +324,7 @@ $shellCases["title-bar-menus"] = {
         if (-not (Wait-Until { [AgtermWin32]::Visible($processId, "#32768").Count -eq 0 } 5)) { return $failures + @("Escape did not close the system menu") }
     }
 
+    Note "right click on +"
     $plus = Get-ScreenPoint $window (Get-Centre $bar "new session") $bar.Middle
     [AgtermWin32]::PostMessageW($window, 0x007B, $window, [AgtermWin32]::At($plus.X, $plus.Y)) | Out-Null
     Start-Sleep -Milliseconds 1500
