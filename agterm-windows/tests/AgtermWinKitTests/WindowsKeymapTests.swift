@@ -70,6 +70,9 @@ struct WindowsKeymapTests {
         #expect(press(&keymap, "t", control: true, shift: true) == .command(.newSession))
         #expect(keymap.shortcuts[.nextSession] == "Ctrl+Tab" && keymap.shortcuts[.fontBigger] == "Ctrl+=")
         #expect(keymap.shortcuts[.renameSession] == "F2" && keymap.diagnostics.isEmpty)
+        #expect(press(&keymap, "p", control: true) == .command(.sessionPalette))
+        #expect(press(&keymap, "p", control: true, shift: true) == .command(.commandPalette))
+        #expect(keymap.shortcuts[.sessionPalette] == "Ctrl+P" && keymap.shortcuts[.commandPalette] == "Ctrl+Shift+P")
     }
 
     @Test func movingAnActionFreesItsDefault() {

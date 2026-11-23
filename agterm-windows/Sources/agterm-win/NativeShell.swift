@@ -42,6 +42,11 @@ final class NativeShell {
     private var findBar: HWND?
     private var findFailed = false
     private var tooltip: UnsafeMutableRawPointer?
+    private var palette: UnsafeMutableRawPointer?
+    // the open palette, what it lists, and the rows its query leaves, which Enter's index refers to
+    private var paletteMode: Palette.Mode?
+    private var paletteRows: [Palette.Row] = []
+    private var paletteShown: [Palette.Row] = []
     // the title bar's button under the mouse, and the one a press started on, which acts if the release is on it too
     private var hovered: TitleBar.Button?
     private var pressed: TitleBar.Button?
@@ -104,6 +109,7 @@ final class NativeShell {
         nt_dark_title_bar(UnsafeMutableRawPointer(window))
         dpi = GetDpiForWindow(window)
         tooltip = nt_tooltip_create(UnsafeMutableRawPointer(window))
+        palette = nt_palette_create(UnsafeMutableRawPointer(window), dpi)
         tree = nt_tree_create(UnsafeMutableRawPointer(window), dpi)
         notice = CreateWindowExW(0, Array("STATIC".utf16) + [0], nil, DWORD(WS_CHILD) | DWORD(SS_LEFT), 0, 0, 10, 10, window, nil,
                                  instance, nil)
@@ -644,6 +650,8 @@ final class NativeShell {
                 focus()
             }
         case .find: showFindBar()
+        case .sessionPalette: openPalette(.sessions)
+        case .commandPalette: openPalette(.commands)
         case .quit: if confirmQuit() { DestroyWindow(window) }
         case .settings: openSettings()
         case .editKeymap: Keys.edit(owner: window)
@@ -681,6 +689,7 @@ final class NativeShell {
         MoveWindow(findBar, client.right - findWidth - scaled(16), top + scaled(8), findWidth, scaled(28), true)
         updateTips()
         invalidateTitleBar()
+        if paletteMode != nil { placePalette() }
     }
 
     private func catalogChanged() {
@@ -781,6 +790,7 @@ final class NativeShell {
         self.dpi = dpi
         if let tree { nt_tree_set_dpi(tree, dpi) }
         if let findBar { nt_find_bar_set_dpi(UnsafeMutableRawPointer(findBar), dpi) }
+        if let palette { nt_palette_set_dpi(palette, dpi) }
         terminalsShown.forEach { $0.setDPI(dpi) }
         SetWindowPos(window, nil, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top,
                      UINT(SWP_NOZORDER | SWP_NOACTIVATE))
@@ -799,10 +809,15 @@ final class NativeShell {
     private func windowMenu() {
         var corner = POINT(x: titleBar.span(of: .menu).left, y: titleBar.height)
         ClientToScreen(window, &corner)
-        let entries = NativeMenu.window(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
-                                        canCloseSession: canCloseSelected, sessionCount: tagged.count, canRenameSession: canRename(selected), canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
-                                        canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), shortcuts: Keys.keymap.shortcuts)
-        run(showMenu(entries, owner: window, at: corner))
+        run(showMenu(windowEntries, owner: window, at: corner))
+    }
+
+    /// windowEntries is the ☰ menu as it stands now, which the command palette lists too.
+    private var windowEntries: [NativeMenu.Entry] {
+        NativeMenu.window(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
+                          canCloseSession: canCloseSelected, sessionCount: tagged.count, canRenameSession: canRename(selected),
+                          canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
+                          canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), shortcuts: Keys.keymap.shortcuts)
     }
 
     /// treeMenu is the sidebar's menu, for the session under the right click, which it selects first.
@@ -819,8 +834,11 @@ final class NativeShell {
                      owner: window, at: point))
     }
 
+    /// run does what a menu or palette picked. The terminal takes focus first, so Find, Rename and the palettes keep
+    /// the focus they move to their own field.
     private func run(_ pick: NativeMenu.Pick?) {
         log("native shell: menu picked \(pick.map { "\($0)" } ?? "nothing")")
+        focus()
         switch pick {
         case .command(let command)?: windowCommand(command)
         case .profile(let index)? where profiles.indices.contains(index): newSession(profiles[index])
@@ -829,7 +847,104 @@ final class NativeShell {
             saveSettings()
         default: break
         }
-        focus()
+    }
+
+    // MARK: palettes
+
+    private func openPalette(_ mode: Palette.Mode) {
+        guard let palette else { return }
+        paletteMode = mode
+        paletteRows = rows(for: mode)
+        let cue = Array(mode.cue.utf16) + [0]
+        let (left, top, width) = paletteFrame
+        nt_palette_open(palette, cue, left, top, width)
+        paletteQueryChanged()
+        log("native shell: \(mode) palette, \(paletteRows.count) row(s)")
+    }
+
+    private func rows(for mode: Palette.Mode) -> [Palette.Row] {
+        switch mode {
+        case .sessions:
+            let counting = settings.notifications.unseenCount
+            let localRows = locals.map {
+                Palette.Local(id: $0.id, name: $0.name, exited: $0.exited, attention: $0.attention || $0.unseen > 0,
+                              unseen: counting ? $0.unseen : 0)
+            }
+            return Palette.sessionRows(locals: localRows, server: remote.store.workspaces, serverLabel: serverLabel,
+                                       unseen: counting ? serverUnseen : [:])
+        case .commands:
+            return Palette.commandRows(windowEntries)
+        }
+    }
+
+    /// paletteFrame centres the palette over the terminal, under the title bar.
+    private var paletteFrame: (Int32, Int32, Int32) {
+        var client = RECT()
+        GetClientRect(window, &client)
+        let area = max(client.right - sidebarWidth, 1)
+        let width = max(min(scaled(640), area - scaled(32)), min(area, scaled(240)))
+        return (sidebarWidth + (area - width) / 2, titleBar.height + scaled(8), width)
+    }
+
+    private func placePalette() {
+        guard let palette else { return }
+        let (left, top, width) = paletteFrame
+        nt_palette_place(palette, left, top, width)
+    }
+
+    fileprivate func paletteQueryChanged() {
+        guard let palette, paletteMode != nil else { return }
+        var text = [UInt16](repeating: 0, count: 512)
+        let length = nt_palette_query(palette, &text, Int32(text.count))
+        paletteShown = Palette.filter(paletteRows, query: String(decoding: text.prefix(Int(max(length, 0))), as: UTF16.self))
+        let lines = paletteShown.map { (Array($0.title.utf16) + [0], Array($0.subtitle.utf16) + [0], Array($0.detail.utf16) + [0], $0.enabled) }
+        withPaletteRows(lines) { nt_palette_set_rows(palette, $0, Int32(lines.count), 0) }
+    }
+
+    /// withPaletteRows lends the shim pointers into `lines`, valid for the call only.
+    private func withPaletteRows(_ lines: [([UInt16], [UInt16], [UInt16], Bool)], _ body: (UnsafePointer<nt_palette_row>?) -> Void) {
+        var rows: [nt_palette_row] = []
+        func lend(_ index: Int) {
+            guard index < lines.count else { return rows.withUnsafeBufferPointer { body($0.baseAddress) } }
+            lines[index].0.withUnsafeBufferPointer { title in
+                lines[index].1.withUnsafeBufferPointer { subtitle in
+                    lines[index].2.withUnsafeBufferPointer { detail in
+                        rows.append(nt_palette_row(title: title.baseAddress, subtitle: subtitle.baseAddress, detail: detail.baseAddress,
+                                                   enabled: lines[index].3 ? 1 : 0))
+                        lend(index + 1)
+                    }
+                }
+            }
+        }
+        lend(0)
+    }
+
+    /// paletteRun runs the highlighted row if it can still act: a row is checked again against the window as it is
+    /// now, and an inert one leaves the palette open, as on a Mac.
+    fileprivate func paletteRun(_ index: Int) {
+        guard let mode = paletteMode, paletteShown.indices.contains(index) else { return }
+        let row = paletteShown[index]
+        guard let live = rows(for: mode).first(where: { $0.target == row.target }), live.enabled else {
+            log("native shell: palette row \(row.title) cannot run now")
+            return
+        }
+        closePalette(refocus: false)
+        switch row.target {
+        case .session(let id):
+            select(id)
+            focus()
+        case .pick(let pick):
+            run(pick)
+        }
+    }
+
+    fileprivate func closePalette(refocus: Bool) {
+        guard paletteMode != nil else { return }
+        paletteMode = nil
+        paletteRows = []
+        paletteShown = []
+        if let palette { nt_palette_close(palette) }
+        if refocus { focus() }
     }
 
     // MARK: title bar
@@ -1109,6 +1224,15 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             return shell.frameUp(wParam) ? 0 : DefWindowProcW(window, message, wParam, lParam)
         case UINT(WM_COMMAND):
             if wParam >> 16 & 0xFFFF == WPARAM(EN_CHANGE) { shell.findChanged() }
+            return 0
+        case UINT(NT_PALETTE_QUERY):
+            shell.paletteQueryChanged()
+            return 0
+        case UINT(NT_PALETTE_RUN):
+            shell.paletteRun(Int(Int32(truncatingIfNeeded: wParam)))
+            return 0
+        case UINT(NT_PALETTE_CLOSE):
+            shell.closePalette(refocus: wParam == 0)
             return 0
         case UINT(NT_FIND_NEXT):
             shell.findNext(newer: wParam != 0)

@@ -117,12 +117,34 @@ int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y);
 intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count);
 // The find bar: an edit control posting NT_FIND_NEXT (wParam 1 with Shift) on Enter and NT_FIND_CLOSE on Escape to
 // its parent; its text changes arrive as the parent's EN_CHANGE.
-#define NT_FIND_NEXT 0x8014
-#define NT_FIND_CLOSE 0x8015
+// The shim's messages sit at WM_APP + 0x100 and up; the Swift side numbers its own WM_APP + n below that.
+#define NT_FIND_NEXT 0x8100
+#define NT_FIND_CLOSE 0x8101
 void *nt_find_bar_create(void *parent, uint32_t dpi);
 void nt_find_bar_set_dpi(void *bar, uint32_t dpi);
 // nt_track_menu shows a popup menu at a screen point and returns the picked command id, 0 when dismissed.
 int32_t nt_track_menu(void *menu, void *owner, int32_t x, int32_t y);
+
+// The palettes: the find bar's field over a list, posting NT_PALETTE_QUERY to its parent when the query changes,
+// NT_PALETTE_RUN with the highlighted row (-1 none) on Enter or a click, and NT_PALETTE_CLOSE on Esc (wParam 0) or when
+// focus leaves it (1). The arrows, Page Up/Down and Ctrl+J/K move the highlight without the parent.
+#define NT_PALETTE_QUERY 0x8102
+#define NT_PALETTE_RUN 0x8103
+#define NT_PALETTE_CLOSE 0x8104
+typedef struct {
+    const uint16_t *title, *subtitle, *detail;
+    int32_t enabled;
+} nt_palette_row;
+void *nt_palette_create(void *parent, uint32_t dpi);
+void nt_palette_set_dpi(void *palette, uint32_t dpi);
+// nt_palette_open clears the field, shows the panel at `left`, `top` (parent client pixels) and focuses it.
+void nt_palette_open(void *palette, const uint16_t *cue, int32_t left, int32_t top, int32_t width);
+void nt_palette_place(void *palette, int32_t left, int32_t top, int32_t width);
+// nt_palette_set_rows replaces the list, highlighting `selection`; the panel's height follows, up to ten rows.
+void nt_palette_set_rows(void *palette, const nt_palette_row *rows, int32_t count, int32_t selection);
+int32_t nt_palette_query(void *palette, uint16_t *out, int32_t capacity);
+void nt_palette_close(void *palette);
+int32_t nt_palette_visible(void *palette);
 
 // The window's own title bar. A button's `kind` is 0 an action icon, 1 a caption button, 2 close; `state` is 0 at
 // rest, 1 hovered, 2 pressed; `glyph` is a Segoe MDL2 Assets code point.
