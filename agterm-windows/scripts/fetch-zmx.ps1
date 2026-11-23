@@ -1,35 +1,33 @@
-# Builds the vendored zmx Windows port into vendor/zmx (zmx.exe and its LICENSE), which --local panes attach through.
-# zmx and its complete Zig dependency closure are committed under third-party, so this build performs no network access.
-# Zig 0.17 comes from AGTERM_ZMX_ZIG, else from PATH.
+# Downloads the pinned zmx Windows port for -Arch into vendor\zmx (zmx.exe and its LICENSE), which --local panes
+# attach through. zmx-win's windows-release workflow builds it on GitHub runners and publishes release win-<rev12>;
+# the sha256 pinned here, not the release's own zmx.sha256, is what the download must match. The port carries
+# agterm's zmx patches as commits, so nothing is applied over the pin.
+param([ValidateSet("x64", "arm64")][string]$Arch = "x64")
 $ErrorActionPreference = "Stop"
-$rev = "be6bd9b7025fa7dfb4a37855c302ad2b7014933a"
-$zig = if ($env:AGTERM_ZMX_ZIG) { $env:AGTERM_ZMX_ZIG } else { (Get-Command zig -ErrorAction Stop).Source }
-$zigVersion = (& $zig version).Trim()
-if (-not $zigVersion.StartsWith("0.17.")) { throw "zmx needs Zig 0.17, $zig is $zigVersion" }
+$rev = "014fa587f1a1e5c6f151999421a3252d213cc4dc"
+$sha256 = @{
+    x64   = "cc023db72677aa7ef42100774aff32476e94a6fa40c9e7c9763f03acbf859bc1"
+    arm64 = "a345b2b44dc139983468fa7513e5dd8a758456320858b861b945fc38083eb209"
+}[$Arch]
+$release = "https://github.com/andriyg76/zmx-win/releases/download/win-$($rev.Substring(0, 12))"
 
 $root = Split-Path -Parent $PSScriptRoot
 $target = Join-Path $root "vendor\zmx"
 $stamp = Join-Path $target ".version"
-$want = "$rev $zigVersion"
+$want = "$rev $Arch $sha256"
 if ((Test-Path $stamp) -and ((Get-Content $stamp) -eq $want) -and (Test-Path (Join-Path $target "zmx.exe"))) { exit 0 }
 
-$source = Join-Path $root "third-party\zmx"
-if (-not (Test-Path (Join-Path $source "build.zig")) -or -not (Test-Path (Join-Path $root "third-party\zmx-deps\ghostty"))) {
-    throw "vendored zmx sources are incomplete under third-party"
-}
-Push-Location $source
-try {
-    # agterm panes export ZMX_NO_DETACH_KEY, and an upstream test that unsets it aborts Zig 0.17's test runner
-    Remove-Item Env:ZMX_NO_DETACH_KEY -ErrorAction SilentlyContinue
-    & $zig build -Doptimize=ReleaseSafe
-    if ($LASTEXITCODE -ne 0) { throw "building zmx failed" }
-    & $zig build test
-    if ($LASTEXITCODE -ne 0) { throw "zmx tests failed" }
-} finally {
-    Pop-Location
-}
+$download = Join-Path $env:TEMP "agterm-zmx-$($rev.Substring(0, 12))-$Arch"
+if (Test-Path $download) { Remove-Item -Recurse -Force $download }
+New-Item -ItemType Directory $download | Out-Null
+$exe = Join-Path $download "zmx.exe"
+Invoke-WebRequest -UseBasicParsing "$release/zmx-$Arch.exe" -OutFile $exe
+Invoke-WebRequest -UseBasicParsing "$release/LICENSE" -OutFile (Join-Path $download "LICENSE")
+$actual = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLowerInvariant()
+if ($actual -ne $sha256) { throw "zmx-$Arch.exe from $release is $actual, not the pinned $sha256" }
 
 if (Test-Path $target) { Remove-Item -Recurse -Force $target }
 New-Item -ItemType Directory -Force $target | Out-Null
-Copy-Item (Join-Path $source "zig-out\bin\zmx.exe"), (Join-Path $source "LICENSE") $target
+Copy-Item $exe, (Join-Path $download "LICENSE") $target
 Set-Content $stamp $want
+Remove-Item -Recurse -Force $download
