@@ -67,6 +67,9 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
+          # a restored Zig cache can hold a build runner without what it reads, failing a fresh libghostty-vt build with
+          # "configuration failed: FileNotFound"; the vendor cache below already keeps the built library
+          use-cache: false
       - uses: actions/cache@v6
         with:
           # not .build: its debug link comes back from the cache unreadable, and stage.ps1 copies through it
