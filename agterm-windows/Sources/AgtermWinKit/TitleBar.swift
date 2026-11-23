@@ -43,6 +43,11 @@ public struct TitleBar: Equatable, Sendable {
         public let left: Int32
         public let right: Int32
 
+        public init(left: Int32, right: Int32) {
+            self.left = left
+            self.right = right
+        }
+
         public var isEmpty: Bool { right <= left }
     }
 
