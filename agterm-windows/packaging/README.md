@@ -14,7 +14,7 @@ with `scripts\release.ps1`, has SignPath sign it, and publishes the release. `sc
   Partner Center; the Store signs it. Its identity comes from the repository variables `MSIX_IDENTITY_NAME`,
   `MSIX_PUBLISHER` and `MSIX_PUBLISHER_DISPLAY_NAME`, as Partner Center's Product identity page shows them.
   The package needs Windows 10 1903, turns AppData and registry write virtualization off (`unvirtualizedResources`) so
-  shells write where they would outside it, and puts `agtermctl` on PATH as an execution alias.
+  shells write where they would outside it, and puts `agtermctl` on PATH as its one execution alias; `agterm-win` starts from the Start menu.
   A Store update ends the package's processes, local zmx sessions included; WSL sessions live in the distribution.
 
 Linux agterm-server tarballs are not packaged: `--install-server` downloads the one matching `AGTERM_VERSION` from
