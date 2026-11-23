@@ -34,6 +34,8 @@ UninstallDisplayIcon={app}\agterm-win.exe
 CloseApplications=yes
 CloseApplicationsFilter=agterm-win.exe
 RestartApplications=no
+; agtermctl is on the user PATH, so open shells hear about it
+ChangesEnvironment=yes
 #ifdef Sign
 SignTool=agterm
 SignedUninstaller=yes
@@ -85,6 +87,37 @@ begin
   end;
 end;
 
+// {app} goes on the user PATH so agtermctl runs from any shell, not only agterm's own sessions
+function PathHas(Path, Dir: String): Boolean;
+begin
+  Result := Pos(';' + Uppercase(Dir) + ';', ';' + Uppercase(Path) + ';') > 0;
+end;
+
+procedure AddToUserPath(Dir: String);
+var
+  Path: String;
+begin
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', Path) then Path := '';
+  if PathHas(Path, Dir) then Exit;
+  if (Path <> '') and (Path[Length(Path)] <> ';') then Path := Path + ';';
+  RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Path + Dir);
+end;
+
+procedure RemoveFromUserPath(Dir: String);
+var
+  Path: String;
+begin
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', Path) or not PathHas(Path, Dir) then Exit;
+  Path := ';' + Path + ';';
+  StringChangeEx(Path, ';' + Dir + ';', ';', True);
+  RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Copy(Path, 2, Length(Path) - 2));
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then RemoveFromUserPath(ExpandConstant('{app}'));
+end;
+
 // earlier zmx revisions go once no daemon runs them; a folder a daemon still holds stays for the next upgrade
 procedure CurStepChanged(CurStep: TSetupStep);
 var
@@ -92,6 +125,7 @@ var
   Root: String;
 begin
   if CurStep <> ssPostInstall then Exit;
+  AddToUserPath(ExpandConstant('{app}'));
   Root := ExpandConstant('{app}\zmx\');
   if FindFirst(Root + '*', Found) then
   try

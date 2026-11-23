@@ -75,6 +75,9 @@ Push-Location $root
 try {
     swift build -c release
     if ($LASTEXITCODE) { throw "swift build failed" }
+    # agtermctl is agtermCore's product, which a root build does not build
+    swift build -c release --product agtermctl
+    if ($LASTEXITCODE) { throw "swift build --product agtermctl failed" }
 } finally {
     Pop-Location
 }
