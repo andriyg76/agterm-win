@@ -1,0 +1,20 @@
+.{
+    .name = .zmx,
+    .version = "1.0.1",
+    .fingerprint = 0x28aad87005052b4e, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        .ghostty = .{
+            .path = "../zmx-deps/ghostty",
+        },
+        .translate_c = .{
+            .path = "../zmx-deps/translate-c",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "examples",
+    },
+}
