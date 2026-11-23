@@ -55,6 +55,18 @@ jobs:
         env:
           AGTERM_ALLOW_UNSIGNED: "1"
         run: ./scripts/release.ps1 -Version ${{ steps.version.outputs.version }}
+      # the Store signs it, so it is an artifact for Partner Center rather than a release asset
+      - name: MSIX
+        env:
+          AGTERM_MSIX_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          AGTERM_MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          AGTERM_MSIX_PUBLISHER_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
+        run: ./scripts/msix.ps1 -Version ${{ steps.version.outputs.version }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: msix
+          path: agterm-windows/build/release/agterm-win-*-x64.msix
+          if-no-files-found: error
       - id: upload
         uses: actions/upload-artifact@v7
         with:
