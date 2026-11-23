@@ -103,8 +103,6 @@ final class NativeShell {
         self.window = window
         nt_dark_title_bar(UnsafeMutableRawPointer(window))
         dpi = GetDpiForWindow(window)
-        // WM_NCCALCSIZE gives the caption to the client from here on
-        SetWindowPos(window, nil, 0, 0, 0, 0, UINT(SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE))
         tooltip = nt_tooltip_create(UnsafeMutableRawPointer(window))
         tree = nt_tree_create(UnsafeMutableRawPointer(window), dpi)
         notice = CreateWindowExW(0, Array("STATIC".utf16) + [0], nil, DWORD(WS_CHILD) | DWORD(SS_LEFT), 0, 0, 10, 10, window, nil,
@@ -123,6 +121,9 @@ final class NativeShell {
         }
         WinKeyHook.update(window: window)
         DispatchQueue.main.async { Keys.report(window) }
+        // WM_NCCALCSIZE gives the caption to the client from here on; the taller client's WM_SIZE lays out every child,
+        // so they all exist by now
+        SetWindowPos(window, nil, 0, 0, 0, 0, UINT(SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE))
         restorePlacement()
         layout()
         restoreLocals()
