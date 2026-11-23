@@ -56,6 +56,13 @@ private final class FakeHost: NativeControlHost {
     func screen(of id: UUID) -> (lines: [String], rows: Int)? { screens[id] }
     func notify(_ id: UUID, title: String, body: String) { notified.append(id) }
     func setFontPoints(_ points: Float) { fontPoints = points }
+    var keymap = WindowsKeymap(text: "map ctrl+alt+t new_session").control
+    var reloads = 0
+
+    func reloadKeymap() -> Int {
+        reloads += 1
+        return 2
+    }
 }
 
 @MainActor
@@ -99,6 +106,30 @@ struct NativeControlTests {
         #expect(host.renamed.map(\.1) == ["build"])
         let missing = await handle(ControlRequest(cmd: .sessionClose, target: "ffffffff"), host)
         #expect(!missing.ok && missing.error == "no such session: ffffffff" && host.closed.isEmpty)
+    }
+
+    @Test func keymapListAndReloadReachTheHost() async {
+        let host = FakeHost()
+        let list = await handle(ControlRequest(cmd: .keymapList), host)
+        #expect(list.result?.keymap?.actions.first { $0.action == "new_session" }?.chord == "ctrl+opt+t")
+        let reload = await handle(ControlRequest(cmd: .keymapReload), host)
+        #expect(reload.result?.count == 2 && host.reloads == 1)
+    }
+
+    @Test func aBlankRenameReachesTheHostToRestoreTheAutomaticName() async {
+        let host = FakeHost()
+        host.selectedSession = host.add("a")
+        #expect(await handle(ControlRequest(cmd: .sessionRename, args: ControlArgs(name: "")), host).ok)
+        #expect(host.renamed.map(\.1) == [""])
+        #expect(await handle(ControlRequest(cmd: .sessionRename), host).error == "session.rename requires a name")
+    }
+
+    @Test func treeReportsALocalSessionsDirectoryAndTitle() async {
+        let host = FakeHost()
+        host.localSessions = [NativeControl.Local(id: UUID(), name: "agterm", commandLine: "pwsh.exe", exited: false, attention: false,
+                                                  cwd: #"C:\dev\agterm"#, title: "vim")]
+        let session = try! #require(await handle(ControlRequest(cmd: .tree), host).result?.tree?.workspaces.first?.sessions.first)
+        #expect(session.cwd == #"C:\dev\agterm"# && session.title == "vim")
     }
 
     @Test func newSessionStartsLocallyUnlessTheWorkspaceIsTheServers() async {

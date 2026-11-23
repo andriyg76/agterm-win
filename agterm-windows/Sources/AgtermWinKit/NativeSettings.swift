@@ -20,14 +20,19 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         }
     }
 
-    /// LocalSession is a local session to start again at the next launch: its name and what it ran.
+    /// LocalSession is a local session to start again at the next launch: the name it falls back to, the user's own
+    /// name, what it ran, and the folder it was last in, where it starts again.
     public struct LocalSession: Codable, Equatable, Sendable {
         public var title: String
+        public var customName: String?
         public var commandLine: String
+        public var directory: String?
 
-        public init(title: String, commandLine: String) {
+        public init(title: String, customName: String? = nil, commandLine: String, directory: String? = nil) {
             self.title = title
+            self.customName = customName
             self.commandLine = commandLine
+            self.directory = directory
         }
     }
 

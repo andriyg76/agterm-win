@@ -24,6 +24,9 @@ public protocol NativeControlHost: AnyObject {
     func notify(_ id: UUID, title: String, body: String)
     var fontPoints: Float { get }
     func setFontPoints(_ points: Float)
+    var keymap: ControlKeymap { get }
+    /// reloadKeymap reads keymap.conf again and returns how many problems it found.
+    func reloadKeymap() -> Int
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -36,13 +39,17 @@ public enum NativeControl {
         public let commandLine: String
         public let exited: Bool
         public let attention: Bool
+        public let cwd: String
+        public let title: String?
 
-        public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool) {
+        public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, cwd: String = "", title: String? = nil) {
             self.id = id
             self.name = name
             self.commandLine = commandLine
             self.exited = exited
             self.attention = attention
+            self.cwd = cwd
+            self.title = title
         }
     }
 
@@ -61,7 +68,8 @@ public enum NativeControl {
         case .sessionClose, .sessionTerminate:
             return await withSession(request.target, host: host) { await host.closeSession($0) }
         case .sessionRename:
-            guard let name = request.args?.name, !name.isEmpty else { return failure("session.rename requires a name") }
+            // a blank name restores the automatic one, as on a Mac
+            guard let name = request.args?.name else { return failure("session.rename requires a name") }
             return await withSession(request.target, host: host) { await host.renameSession($0, to: name) }
         case .sessionRestart:
             return await withSession(request.target, host: host) { await host.restartSession($0) }
@@ -99,6 +107,10 @@ public enum NativeControl {
             let points = NativeMenu.points(after: command, from: host.fontPoints)
             host.setFontPoints(points)
             return ControlResponse(ok: true, result: ControlResult(text: String(format: "%g", points)))
+        case .keymapList:
+            return ControlResponse(ok: true, result: ControlResult(keymap: host.keymap))
+        case .keymapReload:
+            return ControlResponse(ok: true, result: ControlResult(count: host.reloadKeymap()))
         default:
             return failure("\(request.cmd.rawValue) is not supported on Windows")
         }
@@ -166,7 +178,7 @@ public enum NativeControl {
     public static func tree(_ host: NativeControlHost) -> ControlTree {
         let selected = host.selectedSession
         let locals = host.localSessions.map { local in
-            ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: "", active: local.id == selected, split: false,
+            ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: local.id == selected, split: false,
                                backedByZmx: nil, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
                                unseen: local.attention ? 1 : nil, fontSize: Double(host.fontPoints))
         }

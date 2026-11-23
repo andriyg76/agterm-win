@@ -15,11 +15,20 @@ private let localWorkspaceID = Foundation.UUID()
 final class NativeShell {
     private struct LocalSession {
         let id = Foundation.UUID()
-        var title: String
+        /// fallback names the session until its program reports a title or a folder: its profile's name.
+        let fallback: String
+        var customName: String?
+        var programTitle: String?
+        /// directory is the folder the shell last reported, decoded.
+        var directory: String?
         let commandLine: String
         let terminal: NativeTerminal
         var exited = false
         var attention = false
+
+        var name: String {
+            SessionNaming.displayName(customName: customName, title: programTitle, directory: directory, fallback: fallback)
+        }
     }
 
     private let remote: RemoteWindow
@@ -97,6 +106,9 @@ final class NativeShell {
         findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
         remoteTerminal = makeTerminal()
         control = ControlSocket.start(path: socketPath, host: self, version: version)
+        Keys.onReload = { [unowned self] in WinKeyHook.update(window: self.window) }
+        WinKeyHook.update(window: window)
+        DispatchQueue.main.async { Keys.report(window) }
         restorePlacement()
         layout()
         restoreLocals()
@@ -195,7 +207,9 @@ final class NativeShell {
             settings.maximized = placement.showCmd == UINT(SW_SHOWMAXIMIZED)
         }
         let running = locals.filter { !$0.exited }
-        settings.localSessions = running.map { .init(title: $0.title, commandLine: $0.commandLine) }
+        settings.localSessions = running.map {
+            .init(title: $0.fallback, customName: $0.customName, commandLine: $0.commandLine, directory: $0.directory)
+        }
         settings.selectedLocal = running.firstIndex { $0.id == selected }
         saveSettings()
     }
@@ -268,15 +282,22 @@ final class NativeShell {
     }
 
     private func newSession(_ profile: LaunchProfile) {
-        let siblings = locals.filter { $0.title.hasPrefix(profile.name) }.count
-        startLocal(title: siblings == 0 ? profile.name : "\(profile.name) \(siblings + 1)", commandLine: profile.commandLine)
+        startLocal(fallback: fallbackName(for: profile), commandLine: profile.commandLine)
+    }
+
+    private func fallbackName(for profile: LaunchProfile) -> String {
+        let siblings = locals.filter { $0.fallback.hasPrefix(profile.name) }.count
+        return siblings == 0 ? profile.name : "\(profile.name) \(siblings + 1)"
     }
 
     /// restoreLocals starts again the local sessions open at the last quit, fresh programs under their names.
     private func restoreLocals() {
         let saved = settings.localSessions
         guard !saved.isEmpty else { return }
-        for session in saved { startLocal(title: session.title, commandLine: session.commandLine, selecting: false) }
+        for session in saved {
+            startLocal(fallback: session.title, customName: session.customName, commandLine: session.commandLine,
+                       directory: session.directory, selecting: false)
+        }
         log("native shell: restored \(saved.count) local session(s)")
         if let index = settings.selectedLocal { select(locals[index].id) }
     }
@@ -298,20 +319,27 @@ final class NativeShell {
         return environment
     }
 
+    /// launch starts the session's program in the folder it was last in while that still exists, else the profile.
     private func launch(_ session: LocalSession) {
-        session.terminal.start(session.commandLine, directory: ProcessInfo.processInfo.environment["USERPROFILE"],
+        var isFolder: ObjCBool = false
+        let last = session.directory.flatMap { FileManager.default.fileExists(atPath: $0, isDirectory: &isFolder) && isFolder.boolValue ? $0 : nil }
+        session.terminal.start(ShellIntegration.commandLine(session.commandLine),
+                               directory: last ?? ProcessInfo.processInfo.environment["USERPROFILE"],
                                environment: sessionEnvironment(session.id))
     }
 
     @discardableResult
-    private func startLocal(title: String, commandLine: String, selecting: Bool = true) -> Foundation.UUID {
-        let session = LocalSession(title: title, commandLine: commandLine, terminal: makeTerminal())
+    private func startLocal(fallback: String, customName: String? = nil, commandLine: String, directory: String? = nil,
+                            selecting: Bool = true) -> Foundation.UUID {
+        let session = LocalSession(fallback: fallback, customName: customName, directory: directory, commandLine: commandLine,
+                                   terminal: makeTerminal())
         let id = session.id
         session.terminal.onExit = { [unowned self] in localExited(id) }
         session.terminal.onAttention = { [unowned self] in localAttention(id) }
+        session.terminal.onNaming = { [unowned self] in localNaming(id) }
         locals.append(session)
         layout()
-        log("native shell: new \(title) session [\(id)]")
+        log("native shell: new \(session.name) session [\(id)]")
         launch(session)
         rebuild()
         if selecting { select(id) }
@@ -322,6 +350,16 @@ final class NativeShell {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         locals[index].exited = true
         rebuild()
+    }
+
+    /// localNaming takes the title and folder the session's program reported; the sidebar changes only when its name does.
+    private func localNaming(_ id: Foundation.UUID) {
+        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
+        let before = locals[index].name
+        let terminal = locals[index].terminal
+        locals[index].programTitle = SessionNaming.programTitle(terminal.title)
+        if let directory = SessionNaming.directory(fromReported: terminal.reportedDirectory) { locals[index].directory = directory }
+        if locals[index].name != before { rebuild() }
     }
 
     /// localAttention marks a session that rang or notified while it was not in view, and flashes the taskbar button
@@ -375,7 +413,7 @@ final class NativeShell {
     }
 
     private func name(of id: Foundation.UUID) -> String? {
-        locals.first { $0.id == id }?.title ?? remote.session(id)?.displayName
+        locals.first { $0.id == id }?.name ?? remote.session(id)?.displayName
     }
 
     private func startRename() {
@@ -383,8 +421,8 @@ final class NativeShell {
         nt_tree_edit(tree, item)
     }
 
-    /// labelEdit answers the tree's in-place rename: it starts from the plain name, and a non-empty result renames
-    /// the local session here or the server's session there.
+    /// labelEdit answers the tree's in-place rename: it starts from the plain name, and the result renames the local
+    /// session here or the server's session there; an empty one restores the automatic name.
     fileprivate func labelEdit(_ notification: LPARAM) -> LRESULT? {
         var tag: Int64 = 0
         var text = [UInt16](repeating: 0, count: 512)
@@ -398,7 +436,7 @@ final class NativeShell {
             return 0
         case 2:
             let name = String(decodingCString: text, as: UTF16.self)
-            if let id, !name.isEmpty { rename(id, to: name) }
+            if let id { rename(id, to: name) }
             focus()
             return 0
         default:
@@ -409,7 +447,7 @@ final class NativeShell {
 
     private func rename(_ id: Foundation.UUID, to name: String) {
         if let index = locals.firstIndex(where: { $0.id == id }) {
-            locals[index].title = name
+            locals[index].customName = SessionNaming.customName(name)
             rebuild()
             return
         }
@@ -485,6 +523,8 @@ final class NativeShell {
             }
         case .find: showFindBar()
         case .quit: if confirmQuit() { DestroyWindow(window) }
+        case .editKeymap: Keys.edit(owner: window)
+        case .reloadKeymap: Keys.reload(owner: window)
         default: visibleTerminal.perform(command)
         }
     }
@@ -545,7 +585,7 @@ final class NativeShell {
         var sidebar = SessionSidebar.items(remote.store.workspaces)
         if !locals.isEmpty {
             let children = locals.map {
-                SessionSidebar.Item(id: $0.id, title: SessionSidebar.localTitle($0.title, exited: $0.exited, attention: $0.attention),
+                SessionSidebar.Item(id: $0.id, title: SessionSidebar.localTitle($0.name, exited: $0.exited, attention: $0.attention),
                                     isWorkspace: false, ended: $0.exited, children: [])
             }
             sidebar.insert(SessionSidebar.Item(id: localWorkspaceID, title: "Local", isWorkspace: true, ended: false, children: children),
@@ -637,7 +677,7 @@ final class NativeShell {
         GetWindowRect(menuButton, &button)
         let entries = NativeMenu.window(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
                                         canCloseSession: canCloseSelected, sessionCount: tagged.count, canRenameSession: canRename(selected), canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
-                                        canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
+                                        canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), shortcuts: Keys.keymap.shortcuts)
         run(showMenu(entries, owner: window, at: POINT(x: button.left, y: button.bottom)))
     }
 
@@ -650,7 +690,8 @@ final class NativeShell {
         if x != -1 || y != -1 { point = POINT(x: x, y: y) }
         run(showMenu(NativeMenu.sessions(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
                                          canCloseSession: canCloseSelected, sessionCount: tagged.count,
-                                         canRenameSession: canRename(selected), canRestartSession: canRestart(selected)),
+                                         canRenameSession: canRename(selected), canRestartSession: canRestart(selected),
+                                         shortcuts: Keys.keymap.shortcuts),
                      owner: window, at: point))
     }
 
@@ -694,9 +735,14 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             if let result = shell.customDraw(lParam) { return result }
             if let result = shell.labelEdit(lParam) { return result }
             if let key = UnsafePointer<NMTVKEYDOWN>(bitPattern: Int(lParam)), key.pointee.hdr.code == UINT(TVN_KEYDOWN),
-               key.pointee.wVKey == WORD(VK_F2) {
-                shell.windowCommand(.renameSession)
-                return 1
+               let chord = Keys.chord(virtualKey: Int32(key.pointee.wVKey)) {
+                switch Keys.keymap.press(chord) {
+                case .command(let command):
+                    shell.windowCommand(command)
+                    return 1
+                case .consumed: return 1
+                case .pass: break
+                }
             }
             var tag: Int64 = 0
             if nt_tree_selection_changed(Int(lParam), &tag) != 0 { shell.userSelected(tag) }
@@ -733,7 +779,11 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
         case UINT(WM_CLOSE):
             if shell.confirmQuit() { DestroyWindow(window) }
             return 0
+        case WinKeyHook.commandMessage:
+            if let command = NativeMenu.Command(rawValue: Int(wParam)) { shell.windowCommand(command) }
+            return 0
         case UINT(WM_DESTROY):
+            WinKeyHook.remove()
             shell.closing()
             PostQuitMessage(0)
             return 0
@@ -747,7 +797,10 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
 
 extension NativeShell: NativeControlHost {
     var localSessions: [NativeControl.Local] {
-        locals.map { NativeControl.Local(id: $0.id, name: $0.title, commandLine: $0.commandLine, exited: $0.exited, attention: $0.attention) }
+        locals.map {
+            NativeControl.Local(id: $0.id, name: $0.name, commandLine: $0.commandLine, exited: $0.exited, attention: $0.attention,
+                                cwd: $0.directory ?? "", title: $0.programTitle)
+        }
     }
 
     var selectedSession: Foundation.UUID? { selected }
@@ -759,12 +812,13 @@ extension NativeShell: NativeControlHost {
     func isServerSession(_ id: Foundation.UUID) -> Bool { remote.session(id) != nil }
 
     func newLocalSession(name: String?, command: String?, select: Bool) -> Foundation.UUID? {
-        if let command { return startLocal(title: name ?? "Session \(locals.count + 1)", commandLine: command, selecting: select) }
+        let customName = name.flatMap(SessionNaming.customName)
+        if let command {
+            return startLocal(fallback: "Session \(locals.count + 1)", customName: customName, commandLine: command, selecting: select)
+        }
         guard profiles.indices.contains(defaultProfile) else { return nil }
         let profile = profiles[defaultProfile]
-        let siblings = locals.filter { $0.title.hasPrefix(profile.name) }.count
-        return startLocal(title: name ?? (siblings == 0 ? profile.name : "\(profile.name) \(siblings + 1)"), commandLine: profile.commandLine,
-                          selecting: select)
+        return startLocal(fallback: fallbackName(for: profile), customName: customName, commandLine: profile.commandLine, selecting: select)
     }
 
     func newServerSession() async -> ControlResponse {
@@ -787,7 +841,7 @@ extension NativeShell: NativeControlHost {
 
     func renameSession(_ id: Foundation.UUID, to name: String) async -> ControlResponse {
         if let index = locals.firstIndex(where: { $0.id == id }) {
-            locals[index].title = name
+            locals[index].customName = SessionNaming.customName(name)
             rebuild()
             return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
         }
@@ -822,6 +876,10 @@ extension NativeShell: NativeControlHost {
     }
 
     var fontPoints: Float { settings.fontPoints }
+
+    var keymap: ControlKeymap { Keys.keymap.control }
+
+    func reloadKeymap() -> Int { Keys.reload(owner: window, quiet: true) }
 
     func setFontPoints(_ points: Float) { setFontSize(points) }
 }

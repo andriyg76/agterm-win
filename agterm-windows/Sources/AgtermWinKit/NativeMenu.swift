@@ -2,7 +2,8 @@
 /// window's own commands. Every command is also a shortcut, so a menu never holds the only way to do something.
 public enum NativeMenu {
     public enum Command: Int, CaseIterable, Sendable {
-        case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, newServerSession, renameSession, restartSession, closeSession, nextSession, previousSession, find, quit
+        case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, newServerSession, renameSession, restartSession, closeSession, nextSession, previousSession, find, quit,
+             editKeymap, reloadKeymap
 
         public var title: String {
             switch self {
@@ -22,9 +23,12 @@ public enum NativeMenu {
             case .previousSession: "Previous Session"
             case .find: "Find…"
             case .quit: "Quit"
+            case .editKeymap: "Edit Keymap…"
+            case .reloadKeymap: "Reload Keymap"
             }
         }
 
+        /// shortcut is the shipped chord's label; the keymap's own come in as `Shortcuts`.
         public var shortcut: String {
             switch self {
             case .copy: "Ctrl+Shift+C"
@@ -43,6 +47,7 @@ public enum NativeMenu {
             case .previousSession: "Ctrl+Shift+Tab"
             case .find: "Ctrl+Shift+F"
             case .quit: "Alt+F4"
+            case .editKeymap, .reloadKeymap: ""
             }
         }
     }
@@ -89,14 +94,20 @@ public enum NativeMenu {
 
         static let separator = Entry(title: "", shortcut: "", pick: nil, enabled: false, children: [])
 
-        static func command(_ command: Command, enabled: Bool = true) -> Entry {
-            Entry(title: command.title, shortcut: command.shortcut, pick: .command(command), enabled: enabled, children: [])
+        static func command(_ command: Command, enabled: Bool = true, _ shortcuts: Shortcuts = [:]) -> Entry {
+            Entry(title: command.title, shortcut: shortcuts[command] ?? command.shortcut, pick: .command(command), enabled: enabled,
+                  children: [])
         }
     }
 
-    public static func terminal(hasSelection: Bool, canPaste: Bool) -> [Entry] {
+    /// Shortcuts are the labels the keymap gives commands, "" for one it left unbound; a missing command shows its
+    /// shipped `shortcut`.
+    public typealias Shortcuts = [Command: String]
+
+    public static func terminal(hasSelection: Bool, canPaste: Bool, shortcuts: Shortcuts = [:]) -> [Entry] {
         [.command(.copy, enabled: hasSelection), .command(.paste, enabled: canPaste), .command(.selectAll),
-         .command(.clearScrollback), .separator, .command(.fontBigger), .command(.fontSmaller), .command(.fontReset)]
+         .command(.clearScrollback), .separator, .command(.fontBigger, shortcuts), .command(.fontSmaller, shortcuts),
+         .command(.fontReset, shortcuts)]
     }
 
     /// defaultProfile is the index of the profile named `name`, the one New Session's shortcut starts; the first profile
@@ -109,32 +120,34 @@ public enum NativeMenu {
     /// the agterm-server named `server`, enabled while it is connected; Default Profile picks that default.
     public static func sessions(profiles: [LaunchProfile], defaultProfile: Int = 0, server: String? = nil, serverConnected: Bool = false,
                                 canCloseSession: Bool, sessionCount: Int, canRenameSession: Bool = false,
-                                canRestartSession: Bool = false) -> [Entry] {
+                                canRestartSession: Bool = false, shortcuts: Shortcuts = [:]) -> [Entry] {
+        let newSessionShortcut = shortcuts[.newSession] ?? Command.newSession.shortcut
         var launches = profiles.enumerated().map { index, profile in
-            Entry(title: profile.name, shortcut: index == defaultProfile ? Command.newSession.shortcut : "", pick: .profile(index),
+            Entry(title: profile.name, shortcut: index == defaultProfile ? newSessionShortcut : "", pick: .profile(index),
                   enabled: true, children: [])
         }
         let defaults = profiles.enumerated().map { index, profile in
             Entry(title: profile.name, shortcut: "", pick: .defaultProfile(index), enabled: true, children: [], checked: index == defaultProfile)
         }
         if let server {
-            launches += [.separator, Entry(title: "\(server) (agterm-server)", shortcut: Command.newServerSession.shortcut,
+            launches += [.separator, Entry(title: "\(server) (agterm-server)", shortcut: shortcuts[.newServerSession] ?? Command.newServerSession.shortcut,
                                            pick: .command(.newServerSession), enabled: serverConnected, children: [])]
         }
         return [Entry(title: Command.newSession.title, shortcut: "", pick: nil, enabled: !launches.isEmpty, children: launches),
                 Entry(title: "Default Profile", shortcut: "", pick: nil, enabled: !defaults.isEmpty, children: defaults),
-                .command(.renameSession, enabled: canRenameSession), .command(.restartSession, enabled: canRestartSession),
-                .command(.closeSession, enabled: canCloseSession),
-                .command(.nextSession, enabled: sessionCount > 1), .command(.previousSession, enabled: sessionCount > 1)]
+                .command(.renameSession, enabled: canRenameSession, shortcuts), .command(.restartSession, enabled: canRestartSession),
+                .command(.closeSession, enabled: canCloseSession, shortcuts),
+                .command(.nextSession, enabled: sessionCount > 1, shortcuts), .command(.previousSession, enabled: sessionCount > 1, shortcuts)]
     }
 
-    /// window is the ☰ menu: the sidebar's menu, Find, the terminal's menu, and Quit.
+    /// window is the ☰ menu: the sidebar's menu, Find, the terminal's menu, the keymap's commands, and Quit.
     public static func window(profiles: [LaunchProfile], defaultProfile: Int = 0, server: String? = nil, serverConnected: Bool = false,
                               canCloseSession: Bool, sessionCount: Int, canRenameSession: Bool = false,
-                              canRestartSession: Bool = false, hasSelection: Bool, canPaste: Bool) -> [Entry] {
+                              canRestartSession: Bool = false, hasSelection: Bool, canPaste: Bool, shortcuts: Shortcuts = [:]) -> [Entry] {
         sessions(profiles: profiles, defaultProfile: defaultProfile, server: server, serverConnected: serverConnected, canCloseSession: canCloseSession,
-                 sessionCount: sessionCount, canRenameSession: canRenameSession, canRestartSession: canRestartSession) + [.separator, .command(.find)]
-            + terminal(hasSelection: hasSelection, canPaste: canPaste) + [.separator, .command(.quit)]
+                 sessionCount: sessionCount, canRenameSession: canRenameSession, canRestartSession: canRestartSession, shortcuts: shortcuts)
+            + [.separator, .command(.find, shortcuts)] + terminal(hasSelection: hasSelection, canPaste: canPaste, shortcuts: shortcuts)
+            + [.separator, .command(.editKeymap), .command(.reloadKeymap), .separator, .command(.quit)]
     }
 
     /// closeQuestion is what closing an agterm-server session asks: it ends that session's programs on the server.

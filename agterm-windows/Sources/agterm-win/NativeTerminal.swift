@@ -32,6 +32,8 @@ final class NativeTerminal {
     var onExit: (() -> Void)?
     /// onAttention runs when the program rings the bell or posts a notification.
     var onAttention: (() -> Void)?
+    /// onNaming runs when the program's title or reported working directory changes.
+    var onNaming: (() -> Void)?
     fileprivate let autoscrollTimer: UINT_PTR = 1
     // dropped files are typed as Linux paths into a program wsl.exe started
     private var runsInWSL = false
@@ -148,6 +150,7 @@ final class NativeTerminal {
             }, Unmanaged.passUnretained(self).toOpaque())
         }
         if nt_take_attention(terminal) != 0 { onAttention?() }
+        if nt_take_naming(terminal) != 0 { onNaming?() }
     }
 
     fileprivate func exited(_ code: DWORD, generation: Int) {
@@ -306,7 +309,7 @@ final class NativeTerminal {
     /// contextMenu is the terminal's menu; a program that takes the mouse gets right clicks, and Shift+right opens it.
     fileprivate func contextMenu(at point: POINT) {
         let entries = NativeMenu.terminal(hasSelection: terminal.map { nt_has_selection($0) != 0 } ?? false,
-                                          canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
+                                          canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), shortcuts: Keys.keymap.shortcuts)
         if case .command(let command)? = showMenu(entries, owner: window, at: point) { perform(command) }
     }
 
@@ -320,7 +323,8 @@ final class NativeTerminal {
         case .fontBigger, .fontSmaller, .fontReset:
             let next = NativeMenu.points(after: command, from: points)
             if let onFontSize { onFontSize(next) } else { setFontSize(next) }
-        case .newSession, .newServerSession, .renameSession, .restartSession, .closeSession, .nextSession, .previousSession, .find, .quit:
+        case .newSession, .newServerSession, .renameSession, .restartSession, .closeSession, .nextSession, .previousSession, .find, .quit,
+             .editKeymap, .reloadKeymap:
             if let onWindowCommand { onWindowCommand(command) } else if command == .quit { DestroyWindow(window) }
         }
     }
@@ -399,40 +403,43 @@ final class NativeTerminal {
         SetClipboardData(UINT(CF_UNICODETEXT), memory)
     }
 
-    /// shortcut is the menu command a key chord runs; Ctrl+C copies only while there is a selection.
-    private func shortcut(_ key: Int32, _ modifiers: TerminalInput.Modifiers) -> NativeMenu.Command? {
+    private enum Shortcut {
+        case command(NativeMenu.Command)
+        /// consumed is a key the keymap took without a command: a leader, or the key that abandoned one.
+        case consumed
+    }
+
+    /// shortcut is what a key chord does: the fixed editing chords (WindowsKeymap.reserved; Ctrl+C copies only
+    /// while there is a selection), then the keymap. A window command does nothing in a window without a sidebar.
+    private func shortcut(_ key: Int32, _ modifiers: TerminalInput.Modifiers) -> Shortcut? {
         let letter = { (character: Character) in key == Int32(character.asciiValue!) }
         if modifiers == [.shift, .control] {
-            if letter("C") { return .copy }
-            if letter("V") { return .paste }
-            if letter("A") { return .selectAll }
-            if letter("K") { return .clearScrollback }
-            if onWindowCommand != nil, letter("T") { return .newSession }
-            if onWindowCommand != nil, letter("N") { return .newServerSession }
-            if onWindowCommand != nil, letter("R") { return .restartSession }
-            if onWindowCommand != nil, letter("W") { return .closeSession }
-            if onWindowCommand != nil, letter("F") { return .find }
+            if letter("C") { return .command(.copy) }
+            if letter("V") { return .command(.paste) }
+            if letter("A") { return .command(.selectAll) }
+            if letter("K") { return .command(.clearScrollback) }
+            if onWindowCommand != nil, letter("R") { return .command(.restartSession) }
         }
-        if onWindowCommand != nil, key == VK_TAB, modifiers == .control || modifiers == [.shift, .control] {
-            return modifiers.contains(.shift) ? .previousSession : .nextSession
+        if modifiers == .control, letter("C"), hasSelection { return .command(.copy) }
+        guard let chord = Keys.chord(virtualKey: key) else { return nil }
+        switch Keys.keymap.press(chord) {
+        case .command(let command):
+            let fontCommand = [.fontBigger, .fontSmaller, .fontReset].contains(command)
+            return onWindowCommand != nil || fontCommand ? .command(command) : nil
+        case .consumed: return .consumed
+        case .pass: return nil
         }
-        if onWindowCommand != nil, key == VK_F2, modifiers.isEmpty { return .renameSession }
-        guard modifiers == .control else { return nil }
-        if letter("C"), terminal.map({ nt_has_selection($0) != 0 }) == true { return .copy }
-        if key == VK_OEM_PLUS { return .fontBigger }
-        if key == VK_OEM_MINUS { return .fontSmaller }
-        if letter("0") { return .fontReset }
-        return nil
     }
 
     /// key sends what a non-character key types; false leaves the key to Windows (Alt+F4, Alt+Space).
     fileprivate func key(_ key: Int32) -> Bool {
         let modifiers = modifiers
-        if let command = shortcut(key, modifiers) {
+        if let shortcut = shortcut(key, modifiers) {
             // TranslateMessage already queued the chord's WM_CHAR (^C, ^V, ^_), which must not type
             var queued = MSG()
             while PeekMessageW(&queued, window, UINT(WM_CHAR), UINT(WM_CHAR), UINT(PM_REMOVE)) {}
-            perform(command)
+            while PeekMessageW(&queued, window, UINT(WM_SYSCHAR), UINT(WM_SYSCHAR), UINT(PM_REMOVE)) {}
+            if case .command(let command) = shortcut { perform(command) }
             return true
         }
         if key == VK_APPS {
@@ -510,6 +517,20 @@ final class NativeTerminal {
         guard console != nil else { return false }
         send(TerminalInput.paste(text, bracketed: false))
         return true
+    }
+
+    /// title is the program's OSC 0/2 title, empty when it set none.
+    var title: String { shimText(nt_title) }
+
+    /// reportedDirectory is what the shell last reported as its working directory, raw (see SessionNaming).
+    var reportedDirectory: String { shimText(nt_pwd) }
+
+    private func shimText(_ read: (OpaquePointer?, UnsafeMutablePointer<UInt16>?, Int32) -> Int32) -> String {
+        guard let terminal else { return "" }
+        let length = read(terminal, nil, 0)
+        var units = [UInt16](repeating: 0, count: Int(length))
+        _ = read(terminal, &units, length)
+        return String(decoding: units, as: UTF16.self)
     }
 
     /// screen is every line of the scrollback and screen, oldest first, and how many of the last ones are the screen.

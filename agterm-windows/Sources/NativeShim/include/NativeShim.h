@@ -54,6 +54,11 @@ void nt_dark_title_bar(void *window);
 void nt_show_title(nt_terminal *terminal);
 // nt_take_attention is 1 once after the program rang the bell or posted a notification (OSC 9, 777).
 int32_t nt_take_attention(nt_terminal *terminal);
+// nt_take_naming is 1 once after the program's title (OSC 0/2) or working directory (OSC 7, 9;9, 1337) changed;
+// nt_title and nt_pwd return their length in UTF-16 units and write them when `capacity` holds them.
+int32_t nt_take_naming(nt_terminal *terminal);
+int32_t nt_title(nt_terminal *terminal, uint16_t *out, int32_t capacity);
+int32_t nt_pwd(nt_terminal *terminal, uint16_t *out, int32_t capacity);
 void nt_select_all(nt_terminal *terminal);
 // Search reads lines by buffer index, 0 the oldest scrollback line, and selects a match, scrolling it into view.
 int32_t nt_line_count(nt_terminal *terminal);
