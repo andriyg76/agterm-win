@@ -4,6 +4,54 @@
 
 $ctl = Join-Path (Split-Path $exe) "agtermctl.exe"
 
+# Snapshots go beside a case's results, which CI uploads as the integration-results artifact; one that fails only logs.
+Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class AgtermSnapshot {
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+}
+'@
+[AgtermSnapshot]::SetProcessDPIAware() | Out-Null
+
+function Save-Bitmap([System.Drawing.Bitmap]$Bitmap, [string]$Path) {
+    try { $Bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png) } finally { $Bitmap.Dispose() }
+}
+
+# Save-Snapshot draws the window itself, PW_RENDERFULLCONTENT taking Direct2D's content even where something covers it.
+function Save-Snapshot($Shell, [string]$Label) {
+    try {
+        $Shell.Process.Refresh()
+        $window = $Shell.Process.MainWindowHandle
+        if ($window -eq [IntPtr]::Zero) { return }
+        $rect = New-Object AgtermSnapshot+Rect
+        [AgtermSnapshot]::GetWindowRect($window, [ref]$rect) | Out-Null
+        $bitmap = New-Object System.Drawing.Bitmap ([Math]::Max(1, $rect.Right - $rect.Left)), ([Math]::Max(1, $rect.Bottom - $rect.Top))
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $dc = $graphics.GetHdc()
+        [AgtermSnapshot]::PrintWindow($window, $dc, 2) | Out-Null
+        $graphics.ReleaseHdc($dc)
+        $graphics.Dispose()
+        Save-Bitmap $bitmap (Join-Path $Shell.Dir "$Label.png")
+    } catch { Write-Host "snapshot $Label failed: $_" }
+}
+
+# Save-ScreenSnapshot takes the whole desktop, for what lies outside the window, a notification's banner.
+function Save-ScreenSnapshot($Shell, [string]$Label) {
+    try {
+        $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size)
+        $graphics.Dispose()
+        Save-Bitmap $bitmap (Join-Path $Shell.Dir "$Label.png")
+    } catch { Write-Host "screen snapshot $Label failed: $_" }
+}
+
 function Invoke-Ctl([string]$State, [string[]]$Arguments) {
     $env:AGTERM_STATE_DIR = $State
     try { $out = (& $ctl @Arguments --json 2>&1 | Out-String).Trim() } finally { Remove-Item Env:AGTERM_STATE_DIR }
@@ -66,6 +114,7 @@ $shellCases = [ordered]@{
         $node = Wait-Until { $n = Get-Node $state $id; if ($n.name -eq "Windows") { $n } }
         if (-not $node) { $failures += "name after cd is '$((Get-Node $state $id).name)', not 'Windows'" }
         elseif ($node.cwd -ne "C:\Windows") { $failures += "cwd is '$($node.cwd)'" }
+        Save-Snapshot $Shell "after-cd"
         Invoke-Ctl $state @("session", "rename", "--target", $id, "logs") | Out-Null
         if ((Get-Node $state $id).name -ne "logs") { $failures += "rename to 'logs' did not stick" }
         Invoke-Ctl $state @("session", "rename", "--target", $id, " ") | Out-Null
@@ -86,6 +135,10 @@ $shellCases = [ordered]@{
         if (-not (Wait-Until { (Get-Node $state $background).unseen -eq 1 })) {
             $failures += "unseen after notify is '$((Get-Node $state $background).unseen)', not 1"
         }
+        # a banner slides in over a second or so
+        Start-Sleep -Seconds 2
+        Save-ScreenSnapshot $Shell "notify-banner"
+        Save-Snapshot $Shell "notify-count"
         if (Wait-Prompt $state $background) {
             Invoke-Ctl $state @("session", "type", "--target", $background, ('[Console]::Write("$([char]27)]9;osc-note$([char]7)")' + "`r")) | Out-Null
             if (-not (Wait-Until { (Get-Node $state $background).unseen -eq 2 })) {
@@ -117,6 +170,12 @@ $shellCases = [ordered]@{
         if (-not ($list.result.themes -contains "Dracula")) { $failures += "theme list lacks Dracula: $($list | ConvertTo-Json -Compress)" }
         $set = Invoke-Ctl $state @("theme", "set", "Dracula")
         if ($set.result.theme -ne "Dracula") { $failures += "theme set replied $($set | ConvertTo-Json -Compress)" }
+        $id = New-PowerShellSession $state
+        if ($id -and (Wait-Prompt $state $id)) {
+            Invoke-Ctl $state @("session", "type", "--target", $id, ('Write-Host "palette" -NoNewline; 0..15 | % { Write-Host " $_ " -BackgroundColor ([ConsoleColor]$_) -NoNewline }; ""' + "`r")) | Out-Null
+            Start-Sleep -Seconds 1
+        }
+        Save-Snapshot $Shell "dracula"
         $saved = Get-Content (Join-Path $state "native.json") -Raw | ConvertFrom-Json
         if ($saved.appearance.theme -ne "Dracula") { $failures += "native.json keeps theme '$($saved.appearance.theme)'" }
         $missing = Invoke-Ctl $state @("theme", "set", "No Such Theme")
@@ -158,6 +217,7 @@ function Invoke-ShellCase([string]$Name) {
     try {
         $failures = if ($shell.Ready) { @(& $shellCases[$Name] $shell) } else { @("the control socket did not answer within 30 s") }
     } finally {
+        Save-Snapshot $shell "final"
         Stop-Shell $shell
     }
     $crash = Join-Path $shell.State "crash.log"
