@@ -68,6 +68,7 @@ jobs:
       - run: swift build --product agtermctl
       - run: swift test --skip-build
       - run: ./scripts/stage.ps1 -Output "$env:RUNNER_TEMP\agterm-win"
+      - run: ./scripts/msix.ps1 -Version "$(Get-Content AGTERM_VERSION -TotalCount 1).0" -Stage "$env:RUNNER_TEMP\agterm-win" -Output "$env:RUNNER_TEMP\msix"
       - run: ./tests/integration/run.ps1 -App "$env:RUNNER_TEMP\agterm-win" -Results "$env:RUNNER_TEMP\results"
       - if: always()
         uses: actions/upload-artifact@v7

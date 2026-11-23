@@ -31,9 +31,12 @@ func log(_ message: String) {
     }
 }
 
+// the module's own path: launched through an MSIX App Execution Alias, argv[0] is the alias in WindowsApps
+private let executableFolder = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).deletingLastPathComponent()
+
 /// bundled is `name` beside agterm-win.exe, as stage.ps1 lays a package out, else `source` in the source tree.
 private func bundled(_ name: String, source: String) -> URL {
-    let beside = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent(name)
+    let beside = executableFolder.appendingPathComponent(name)
     if FileManager.default.fileExists(atPath: beside.path) { return beside }
     return URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent(source)
@@ -41,7 +44,7 @@ private func bundled(_ name: String, source: String) -> URL {
 
 /// localZmx is the zmx.exe stage.ps1 put in zmx\<rev>, the folder zmx\current names, else the source tree's.
 private func localZmx() -> String {
-    let packaged = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("zmx")
+    let packaged = executableFolder.appendingPathComponent("zmx")
     if let current = try? String(contentsOf: packaged.appendingPathComponent("current"), encoding: .utf8),
        let rev = current.split(whereSeparator: \.isNewline).first {
         return packaged.appendingPathComponent(String(rev)).appendingPathComponent("zmx.exe").path

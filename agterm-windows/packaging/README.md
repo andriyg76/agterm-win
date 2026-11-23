@@ -10,9 +10,12 @@ with `scripts\release.ps1`, has SignPath sign it, and publishes the release. `sc
   that release into `build\package-managers\<version>`. The winget folder goes to a `microsoft/winget-pkgs` PR as
   `manifests/a/andriyg76/agterm-win/<version>`; the `.nupkg` is pushed with `choco push` and the account's API key.
   Both identifiers are `agterm-win`, leaving `agterm` to upstream.
-- **Microsoft Store**: in Partner Center, an EXE app whose package URL is that release asset (versioned, HTTPS),
-  silent switches `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`. The Store requires a signed installer and does not
-  update the app; winget or the next installer does.
+- **Microsoft Store**: an MSIX from `scripts\msix.ps1`, which `windows-release.yml` uploads as the `msix` artifact for
+  Partner Center; the Store signs it. Its identity comes from the repository variables `MSIX_IDENTITY_NAME`,
+  `MSIX_PUBLISHER` and `MSIX_PUBLISHER_DISPLAY_NAME`, as Partner Center's Product identity page shows them.
+  The package needs Windows 10 1903, turns AppData and registry write virtualization off (`unvirtualizedResources`) so
+  shells write where they would outside it, and puts `agtermctl` on PATH as an execution alias.
+  A Store update ends the package's processes, local zmx sessions included; WSL sessions live in the distribution.
 
 Linux agterm-server tarballs are not packaged: `--install-server` downloads the one matching `AGTERM_VERSION` from
 upstream agterm's release and checks it against `agterm-server.sha256`, which `release.ps1` also checks against the
