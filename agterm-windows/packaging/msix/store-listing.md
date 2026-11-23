@@ -1,6 +1,6 @@
 # Microsoft Store listing (en-US)
 
-Paste into Partner Center ▸ Store listings ▸ English. Keep it to what the shipped build does.
+Paste into Partner Center ▸ Store listings ▸ English. This listing covers agterm-win 0.44.1.4 (MSIX version 0.44.1004.0).
 
 ## Short description
 
@@ -10,10 +10,10 @@ agtermctl.
 
 ## Description
 
-agterm-win is the Windows port of agterm: a simply good terminal with a full control API.
+agterm is a native Windows terminal with a full control API.
 
 Running several shells, servers and coding agents at once means many long-lived sessions, and a row of tabs
-loses track of them quickly. agterm-win keeps them in a sidebar instead, each with a name that follows what it
+loses track of them quickly. agterm keeps them in a sidebar instead, each with a name that follows what it
 is doing, so the one that needs you is easy to find.
 
 Local sessions
@@ -22,12 +22,12 @@ names itself after its program's title or the folder it is in, or keeps a name y
 quit start again next time, in the folder they were last in.
 
 Sessions that keep running in WSL
-agterm-win connects to agterm-server inside a WSL distribution and shows its workspaces and sessions in the same
-sidebar. Those shells keep running when agterm-win closes, and come back with their screen when it opens again.
+agterm connects to agterm-server inside a WSL distribution and shows its workspaces and sessions in the same
+sidebar. Those shells keep running when agterm closes, and come back with their screen when it opens again.
 One command installs the server, checked against a hash built into the app.
 
 Built for scripts and agents
-The bundled agtermctl drives agterm-win over a local socket: list sessions, start, rename, restart or close
+The bundled agtermctl controls agterm over a local socket: list sessions, start, rename, restart or close
 them, type into one, read its screen back, post a notification to it, change the font size, and read or reload
 the keymap. A script or a coding agent can set up and watch its own sessions without you.
 
@@ -41,10 +41,11 @@ A capable everyday terminal
   and Win-key chords included.
 
 Private by design
-No account, no telemetry, no analytics. agterm-win goes online only when you ask it to install agterm-server.
+No account, no telemetry, no analytics. agterm goes online only when you ask it to install agterm-server.
 
 ## What's new in this version
 
+- Native ARM64 support for Windows on Arm, alongside x64.
 - Sessions name themselves after their program's title or current folder, and restore in that folder.
 - Shortcuts come from keymap.conf, with Edit Keymap and Reload Keymap in the menu.
 
@@ -56,6 +57,7 @@ Sessions reopen at the next launch in the folder they were last in
 Long-lived WSL sessions through agterm-server that survive closing the app
 agtermctl command-line control: create, rename, type into and read sessions
 Native Direct2D rendering on Ghostty's terminal engine
+Native x64 and ARM64 builds
 Scrollback search, word and line selection, bracketed paste
 Clickable web links and drag-and-drop file paths
 Attention marker and taskbar flash for background sessions
