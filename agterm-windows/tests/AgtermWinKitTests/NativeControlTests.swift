@@ -118,7 +118,7 @@ struct NativeControlTests {
 
     @Test func aBlankRenameReachesTheHostToRestoreTheAutomaticName() async {
         let host = FakeHost()
-        _ = host.add("a")
+        host.selectedSession = host.add("a")
         #expect(await handle(ControlRequest(cmd: .sessionRename, args: ControlArgs(name: "")), host).ok)
         #expect(host.renamed.map(\.1) == [""])
         #expect(await handle(ControlRequest(cmd: .sessionRename), host).error == "session.rename requires a name")
