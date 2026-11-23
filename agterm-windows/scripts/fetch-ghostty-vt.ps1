@@ -47,7 +47,8 @@ $dependencies = Join-Path $work "libghostty-vt-$version-deps"
 if (Test-Path $target) { Remove-Item -Recurse -Force $target }
 Push-Location $source
 try {
-    & zig build --prefix $target --system $dependencies -Dtarget=$(@{ x64 = "x86_64"; arm64 = "aarch64" }[$Arch])-windows-gnu -Doptimize=ReleaseFast -Dcpu=baseline
+    $triple = "$(@{ x64 = "x86_64"; arm64 = "aarch64" }[$Arch])-windows-gnu"
+    & zig build --prefix $target --system $dependencies "-Dtarget=$triple" -Doptimize=ReleaseFast -Dcpu=baseline
     if ($LASTEXITCODE) { throw "building libghostty-vt failed" }
 } finally {
     Pop-Location
