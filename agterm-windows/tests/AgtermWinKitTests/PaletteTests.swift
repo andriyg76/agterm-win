@@ -25,7 +25,8 @@ struct PaletteTests {
     @Test func aCompanionFollowsItsParentAsParentAndChild() {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let parent = session("zeta"), other = session("alpha")
+        // a store opens companions only for local sessions; a server's arrive already linked in its catalog
+        let parent = Session(initialCwd: "/home/u", customName: "zeta"), other = Session(initialCwd: "/home/u", customName: "alpha")
         let store = AppStore(workspaces: [Workspace(name: "dev", sessions: [parent, other])], persistence: PersistenceStore(directory: directory),
                              paneFinalizer: nil, headless: true)
         guard case .success = store.addCompanion(to: parent.id, options: CompanionOptions(name: "logs", select: false)) else {
