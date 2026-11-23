@@ -40,6 +40,12 @@ struct SessionSidebarTests {
         #expect(items[1].children.map(\.title) == ["held"])
     }
 
+    @Test func aServerSessionShowsItsUnseenNotifications() {
+        let api = session("api"), web = session("web")
+        let items = SessionSidebar.items([Workspace(name: "", sessions: [api, web], isRoot: true)], unseen: [web.id: 2])
+        #expect(items.map(\.title) == ["api", "● 2 web"])
+    }
+
     @Test func launchRunsTheAttachCommand() {
         #expect(SessionSidebar.launch(for: session("a", command: "wsl.exe -e zmx attach a"), hostLabel: "WSL Ubuntu")
             == .command("wsl.exe -e zmx attach a"))
@@ -64,5 +70,7 @@ struct SessionSidebarTests {
         #expect(SessionSidebar.localTitle("PowerShell", exited: false, attention: false) == "PowerShell")
         #expect(SessionSidebar.localTitle("PowerShell", exited: false, attention: true) == "● PowerShell")
         #expect(SessionSidebar.localTitle("cmd", exited: true, attention: true) == "● cmd (exited)")
+        #expect(SessionSidebar.localTitle("cmd", exited: false, attention: true, unseen: 3) == "● 3 cmd")
+        #expect(SessionSidebar.localTitle("cmd", exited: false, attention: true, unseen: 120) == "● 99+ cmd")
     }
 }

@@ -13,6 +13,11 @@ final class RemoteWindow: RemoteCatalogEffects {
     private let transport: WSLTransport
     /// changed runs whenever what the sidebar shows may have moved.
     var changed: () -> Void = {}
+    /// onNotification runs with a notification a server session posted, from its program or a `notify` there.
+    var onNotification: (UUID, PresentationNotify) -> Void = { _, _ in }
+    // a presentation stream per server session, as a Mac's remote window keeps them
+    private var presenters: [UUID: RemotePresentationClient] = [:]
+    private var ticking: Task<Void, Never>?
 
     init(host: WSLHost, stateDirectory: URL) {
         self.host = host
@@ -61,9 +66,66 @@ final class RemoteWindow: RemoteCatalogEffects {
         }
     }
 
-    func catalogRowAdded(_ session: Session) { changed() }
-    func catalogRowRemoved(_: UUID) { changed() }
-    func catalogRowEnded(_: UUID) { changed() }
+    func catalogRowAdded(_ session: Session) {
+        startPresentation(session)
+        changed()
+    }
+
+    func catalogRowRemoved(_ id: UUID) {
+        stopPresentation(id)
+        changed()
+    }
+
+    func catalogRowEnded(_ id: UUID) {
+        stopPresentation(id)
+        changed()
+    }
+
+    // MARK: presentation
+
+    /// startPresentation opens `session`'s `zmx present` stream, which the server sends its notifications to. It stays a
+    /// mirror: agterm-win shows no asks, picks, overlays or pages yet, and the server keeps them for a viewer that does,
+    /// as it does while no Mac shows the session. Once agterm-win shows them it presents, as a Mac does.
+    private func startPresentation(_ session: Session) {
+        let id = session.id
+        guard presenters[id] == nil, session.content == .terminal, let binding = session.remotePresentation?.binding else { return }
+        let argv: [String]
+        do {
+            argv = try RemoteSession.presentCommand(host: "wsl", session: binding.remoteSessionID)
+        } catch {
+            log("presentation for \(id): \(error)")
+            return
+        }
+        let effects = RemotePresentationEffects(
+            status: { _ in }, snapshotStatus: { _ in }, hud: { _ in },
+            notify: { [weak self] in self?.onNotification(id, $0) },
+            connection: { log("presentation for \(id): \($0)") },
+            warn: { log("presentation for \(id): \($0)") })
+        let client = RemotePresentationClient(argv: argv, presentationVersion: binding.presentationVersion, transport: transport,
+                                              effects: effects, presents: false)
+        presenters[id] = client
+        client.start()
+        startTicking()
+    }
+
+    private func stopPresentation(_ id: UUID) {
+        presenters.removeValue(forKey: id)?.stop()
+    }
+
+    /// startTicking drives the streams' retries and liveness once a second while any is open.
+    private func startTicking() {
+        guard ticking == nil else { return }
+        ticking = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, !self.presenters.isEmpty else {
+                    self?.ticking = nil
+                    return
+                }
+                for client in self.presenters.values { client.tick() }
+            }
+        }
+    }
     func catalogPaneNeedsAttach(_ identity: UUID, session: UUID) {
         log("pane \(identity) of \(session) needs an attach")
     }

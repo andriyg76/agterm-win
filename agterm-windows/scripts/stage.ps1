@@ -22,6 +22,10 @@ if (Test-Path $Output) { Remove-Item -Recurse -Force $Output }
 New-Item -ItemType Directory $Output | Out-Null
 Copy-Item (Join-Path $build "agterm-win.exe"), (Join-Path $build "agtermctl.exe") $Output
 Copy-Item (Join-Path $root "AGTERM_VERSION"), (Join-Path $root "vendor\server\agterm-server.sha256") $Output
+# the bundled terminal themes, agterm's macOS names from iTerm2-Color-Schemes at the commit ghostty's themes pin, with its LICENSE
+Copy-Item -Recurse (Join-Path $root "Resources\themes") (Join-Path $Output "themes")
+# the icon an installation outside the Store registers for its notifications
+Copy-Item (Join-Path $root "Resources\agterm.png") $Output
 # zmx goes to zmx\<rev>, named by zmx\current: an upgrade adds a folder beside the one a running daemon holds open
 $zmx = Join-Path $root "vendor\zmx"
 if (Test-Path (Join-Path $zmx "zmx.exe")) {

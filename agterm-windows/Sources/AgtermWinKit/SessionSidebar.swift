@@ -26,30 +26,34 @@ public enum SessionSidebar {
         case notice(String)
     }
 
-    public static func items(_ workspaces: [Workspace]) -> [Item] {
+    /// items lays out the server's tree; `unseen` counts the notifications each server session had out of view.
+    public static func items(_ workspaces: [Workspace], unseen: [UUID: Int] = [:]) -> [Item] {
         workspaces.flatMap { workspace in
-            let sessions = sessionItems(workspace.sessions)
+            let sessions = sessionItems(workspace.sessions, unseen: unseen)
             return workspace.isRoot ? sessions
                 : [Item(id: workspace.id, title: workspace.name, isWorkspace: true, ended: false, children: sessions)]
         }
     }
 
-    private static func sessionItems(_ sessions: [Session]) -> [Item] {
+    private static func sessionItems(_ sessions: [Session], unseen: [UUID: Int]) -> [Item] {
         let ids = Set(sessions.map(\.id))
         return sessions.filter { $0.parentID.map { !ids.contains($0) } ?? true }.map { parent in
-            item(parent, children: sessions.filter { $0.parentID == parent.id }.map { item($0, children: []) })
+            item(parent, unseen: unseen, children: sessions.filter { $0.parentID == parent.id }.map { item($0, unseen: unseen, children: []) })
         }
     }
 
-    private static func item(_ session: Session, children: [Item]) -> Item {
-        Item(id: session.id, title: session.ended ? "\(session.displayName) (ended)" : session.displayName, isWorkspace: false,
-             ended: session.ended, children: children)
+    private static func item(_ session: Session, unseen: [UUID: Int], children: [Item]) -> Item {
+        let count = unseen[session.id] ?? 0
+        let marker = count > 0 ? "● \(NotificationRules.countLabel(count)) " : ""
+        return Item(id: session.id, title: marker + (session.ended ? "\(session.displayName) (ended)" : session.displayName),
+                    isWorkspace: false, ended: session.ended, children: children)
     }
 
     /// localTitle is a local session's sidebar label: ● while it wants attention (a bell or notification since it was
-    /// last shown), and marked once its program exits.
-    public nonisolated static func localTitle(_ name: String, exited: Bool, attention: Bool) -> String {
-        (attention ? "● " : "") + name + (exited ? " (exited)" : "")
+    /// last shown), with how many notifications when `unseen` counts them, and marked once its program exits.
+    public nonisolated static func localTitle(_ name: String, exited: Bool, attention: Bool, unseen: Int = 0) -> String {
+        let marker = unseen > 0 ? "● \(NotificationRules.countLabel(unseen)) " : attention ? "● " : ""
+        return marker + name + (exited ? " (exited)" : "")
     }
 
     /// selection keeps `current` while the catalog still has it, else falls to the first live session, else the first

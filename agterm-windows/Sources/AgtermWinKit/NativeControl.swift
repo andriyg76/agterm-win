@@ -21,12 +21,18 @@ public protocol NativeControlHost: AnyObject {
     /// screen is the session's lines, oldest first, and how many of the last ones are on screen; nil when the session
     /// has no terminal here.
     func screen(of id: UUID) -> (lines: [String], rows: Int)?
-    func notify(_ id: UUID, title: String, body: String)
+    /// notify shows a `notify` for the session and returns why no banner was shown, nil when one was.
+    func notify(_ id: UUID, title: String, body: String) -> String?
     var fontPoints: Float { get }
     func setFontPoints(_ points: Float)
     var keymap: ControlKeymap { get }
     /// reloadKeymap reads keymap.conf again and returns how many problems it found.
     func reloadKeymap() -> Int
+    var appearance: Appearance { get }
+    var themeCatalog: ThemeCatalog { get }
+    var systemIsDark: Bool { get }
+    /// setAppearance saves `appearance` and draws every terminal with it.
+    func setAppearance(_ appearance: Appearance)
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -39,15 +45,18 @@ public enum NativeControl {
         public let commandLine: String
         public let exited: Bool
         public let attention: Bool
+        public let unseen: Int
         public let cwd: String
         public let title: String?
 
-        public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, cwd: String = "", title: String? = nil) {
+        public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, unseen: Int = 0, cwd: String = "",
+                    title: String? = nil) {
             self.id = id
             self.name = name
             self.commandLine = commandLine
             self.exited = exited
             self.attention = attention
+            self.unseen = unseen
             self.cwd = cwd
             self.title = title
         }
@@ -99,14 +108,24 @@ public enum NativeControl {
         case .notify:
             guard let body = request.args?.body, !body.isEmpty else { return failure("notify requires a body") }
             return await withSession(request.target, host: host) { id in
-                host.notify(id, title: request.args?.title ?? "agterm", body: body)
-                return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+                let note = host.notify(id, title: request.args?.title ?? "", body: body)
+                return ControlResponse(ok: true, result: ControlResult(id: id.uuidString, text: note))
             }
         case .fontInc, .fontDec, .fontReset:
             let command: NativeMenu.Command = request.cmd == .fontInc ? .fontBigger : request.cmd == .fontDec ? .fontSmaller : .fontReset
             let points = NativeMenu.points(after: command, from: host.fontPoints)
             host.setFontPoints(points)
             return ControlResponse(ok: true, result: ControlResult(text: String(format: "%g", points)))
+        case .themeList:
+            return ControlResponse(ok: true, result: themeResult(host, themes: host.themeCatalog.names))
+        case .themeSet:
+            let args = request.args
+            switch host.appearance.setting(name: args?.name, light: args?.light, dark: args?.dark, catalog: host.themeCatalog) {
+            case .failure(let refusal): return failure(refusal.description)
+            case .success(let next):
+                host.setAppearance(next)
+                return ControlResponse(ok: true, result: themeResult(host, themes: nil))
+            }
         case .keymapList:
             return ControlResponse(ok: true, result: ControlResult(keymap: host.keymap))
         case .keymapReload:
@@ -117,6 +136,14 @@ public enum NativeControl {
     }
 
     static func failure(_ message: String) -> ControlResponse { ControlResponse(ok: false, error: message) }
+
+    /// themeResult is `theme.list` and `theme.set`'s read-back, the macOS app's shape: the theme on screen, the light and
+    /// dark slots, and whether they follow the system.
+    private static func themeResult(_ host: NativeControlHost, themes: [String]?) -> ControlResult {
+        let appearance = host.appearance
+        return ControlResult(theme: appearance.activeTheme(dark: host.systemIsDark), themes: themes, sync: appearance.followsSystem,
+                             light: appearance.theme, dark: appearance.darkTheme)
+    }
 
     /// resolve maps a target (id, unique prefix, or `active`/none for the selected session) to a session id.
     struct Refusal: Error {
@@ -180,7 +207,7 @@ public enum NativeControl {
         let locals = host.localSessions.map { local in
             ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: local.id == selected, split: false,
                                backedByZmx: nil, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
-                               unseen: local.attention ? 1 : nil, fontSize: Double(host.fontPoints))
+                               unseen: local.unseen > 0 ? local.unseen : local.attention ? 1 : nil, fontSize: Double(host.fontPoints))
         }
         let local = locals.isEmpty ? [] : [ControlWorkspaceNode(id: localWorkspace.uuidString, name: "Local",
                                                                 active: locals.contains { $0.active }, sessions: locals)]

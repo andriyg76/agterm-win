@@ -73,7 +73,7 @@ struct RemotePresentationClientTests {
     static let blocked = PresentationStatus(status: .blocked, blink: false, color: nil, shape: nil, pane: nil,
                                             changedAt: nil)
 
-    func makeClient(version: Int? = 1, observer: Bool = false) -> RemotePresentationClient {
+    func makeClient(version: Int? = 1, observer: Bool = false, presents: Bool = true) -> RemotePresentationClient {
         let recorder = recorder
         let clock = clock
         let effects = RemotePresentationEffects(
@@ -116,7 +116,8 @@ struct RemotePresentationClientTests {
             acked: { recorder.acks += 1 },
             warn: { recorder.warnings.append($0) })
         return RemotePresentationClient(argv: ["ssh", "buildbox", "present"], presentationVersion: version,
-                                        transport: transport, effects: effects, now: { clock.now }, observer: observer)
+                                        transport: transport, effects: effects, now: { clock.now }, observer: observer,
+                                        presents: presents)
     }
 
     func line(_ body: PresentationFrame.Body, gen: Int = 7, rev: Int) -> Data {
@@ -377,6 +378,22 @@ struct RemotePresentationClientTests {
 
         #expect(!transport.links[0].sent.map(\.body).contains(.presenterAcquire))
         #expect(recorder.modes == [.mirror])
+    }
+
+    @Test func aClientThatDoesNotPresentStaysAMirrorAndStillHearsNotifications() {
+        let client = makeClient(presents: false)
+        client.start()
+        connect(client, mode: .presenter)
+        transport.deliver(line(.presenterVacant, rev: 2))
+        transport.deliver(line(.notify(PresentationNotify(title: "build", body: "done", pane: nil, source: "control")), rev: 3))
+
+        let sent = transport.links[0].sent.map(\.body)
+        guard case .hello(let hello)? = sent.first else {
+            Issue.record("no hello sent")
+            return
+        }
+        #expect(hello.mode == .mirror && !sent.contains(.presenterAcquire))
+        #expect(recorder.notifies.map(\.body) == ["done"] && recorder.modes == [.mirror])
     }
 
     @Test func aGrantMakesThisMacThePresenter() {

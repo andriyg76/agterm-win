@@ -179,14 +179,20 @@ public final class RemotePresentationClient {
     /// and pages to itself: it never asks for the presenter role and answers nothing but pings.
     public let observer: Bool
 
+    /// presents is whether the client takes the presenter role an origin offers. A client that cannot show asks, picks,
+    /// overlays or pages leaves it false and stays a mirror, so the origin keeps those for a viewer that can.
+    public let presents: Bool
+
     public init(argv: [String], presentationVersion: Int?, transport: RemotePresentationTransport,
-                effects: RemotePresentationEffects, now: @escaping () -> Date = Date.init, observer: Bool = false) {
+                effects: RemotePresentationEffects, now: @escaping () -> Date = Date.init, observer: Bool = false,
+                presents: Bool = true) {
         self.argv = argv
         self.presentationVersion = presentationVersion
         self.transport = transport
         self.effects = effects
         self.now = now
         self.observer = observer
+        self.presents = presents
     }
 
     /// Opens the stream. An origin that predates the protocol is never launched at all.
@@ -325,11 +331,11 @@ public final class RemotePresentationClient {
         // an origin that predates the role answers mirror, and nothing is asked of it
         case .hello(let answer):
             originKinds = Set(answer.kinds)
-            if answer.mode == .presenter { send(.presenterAcquire, on: link) }
+            if presents, answer.mode == .presenter { send(.presenterAcquire, on: link) }
             refreshLeads()
         case .presenterGranted: report(.presenter)
         case .presenterRefused: report(.mirror)
-        case .presenterVacant: if mode != .presenter { send(.presenterAcquire, on: link) }
+        case .presenterVacant: if presents, mode != .presenter { send(.presenterAcquire, on: link) }
         case .askRequest(let ask):
             if !effects.askRequest(ask) { send(.askRejected(PresentationAskRef(id: ask.id, owner: ask.owner, offer: ask.offer)), on: link) }
         case .askDismiss(let ref): effects.askDismiss(ref)
@@ -415,7 +421,7 @@ public final class RemotePresentationClient {
             onClose: { [weak self] reason in self?.linkClosed(reason: reason, launch: launch) })
         link = opened
         let hello = PresentationHello(version: PresentationCodec.version, kinds: observer ? Self.observerKinds : PresentationHub.supportedKinds,
-                                      mode: observer ? .mirror : .presenter)
+                                      mode: observer || !presents ? .mirror : .presenter)
         send(.hello(hello), on: opened)
     }
 

@@ -24,6 +24,11 @@ Or in Windows Sandbox, which keeps the host desktop free and starts from a clean
 powershell -ExecutionPolicy Bypass -File tests\integration\sandbox.ps1 -App $env:TEMP\agterm-win-stage
 ```
 
+Command-window cases read the terminal's text back; the full-window cases in `shell-cases.ps1` start the window on
+their own state directory and drive it with the staged `agtermctl` (session names, notifications, theme, keymap).
+They save PNG snapshots beside their results: the window at key steps and when it stops (`final.png`), and the
+whole desktop after a `notify` to show its banner; CI uploads them in the `integration-results-<arch>` artifact.
+
 Sandbox needs the `Containers-DisposableClientVM` feature, a restart, and one manual start from Start to finish
 installing its client. Each case leaves `screen.txt`, its state directory (`agterm-win.log`, `crash.log`) and
 `cases.json` under the results folder.

@@ -28,10 +28,15 @@ final class NativeTerminal {
     nonisolated(unsafe) private var pending = Data()
     nonisolated(unsafe) private var acceptedGeneration = 0
     private let testScreen = ProcessInfo.processInfo.environment["AGTERM_WIN_TEST_SCREEN"]
+    /// theme and fontFamily are what every terminal draws with, a new one included; the shell sets them from Settings.
+    static var theme: TerminalTheme?
+    static var fontFamily: String?
     /// onExit runs when the started program exits.
     var onExit: (() -> Void)?
-    /// onAttention runs when the program rings the bell or posts a notification.
+    /// onAttention runs when the program rings the bell.
     var onAttention: (() -> Void)?
+    /// onNotification runs with the title and body of an OSC 9 or 777 notification.
+    var onNotification: ((String, String) -> Void)?
     /// onNaming runs when the program's title or reported working directory changes.
     var onNaming: (() -> Void)?
     fileprivate let autoscrollTimer: UINT_PTR = 1
@@ -78,13 +83,33 @@ final class NativeTerminal {
         for message in [UINT(WM_DROPFILES), UINT(WM_COPYDATA), 0x0049] { ChangeWindowMessageFilterEx(window, message, DWORD(MSGFLT_ALLOW), nil) }
         if parent == nil { nt_dark_title_bar(UnsafeMutableRawPointer(window)) }
         var error = [UInt16](repeating: 0, count: 512)
-        terminal = nt_create(UnsafeMutableRawPointer(window), Array("Cascadia Mono".utf16) + [0], points, &error, Int32(error.count))
+        terminal = nt_create(UnsafeMutableRawPointer(window), Array((Self.fontFamily ?? "").utf16) + [0], points, &error, Int32(error.count))
         guard terminal != nil else {
             let reason = String(decodingCString: error, as: UTF16.self)
             log("native: \(reason)")
             MessageBoxW(parent ?? window, Array(reason.utf16) + [0], Array("agterm".utf16) + [0], UINT(MB_ICONERROR))
             exit(1)
         }
+        applyTheme()
+    }
+
+    /// applyTheme draws with `NativeTerminal.theme`; the built-in colors without one.
+    func applyTheme() {
+        guard let terminal else { return }
+        let theme = Self.theme, unset = UInt32.max
+        var palette = [UInt32](repeating: unset, count: 256)
+        for (index, color) in theme?.palette ?? [:] { palette[index] = color }
+        palette.withUnsafeBufferPointer { entries in
+            nt_set_theme(terminal, theme?.foreground ?? unset, theme?.background ?? unset, theme?.cursor ?? unset,
+                         theme?.cursorText ?? unset, theme?.selectionBackground ?? unset, theme == nil ? nil : entries.baseAddress)
+        }
+    }
+
+    /// applyFontFamily switches to `NativeTerminal.fontFamily` and refits the grid.
+    func applyFontFamily() {
+        guard let terminal else { return }
+        nt_set_font_family(terminal, Array((Self.fontFamily ?? "").utf16) + [0])
+        resize()
     }
 
     /// start replaces whatever ran in the terminal with `commandLine` on a fresh screen.
@@ -118,6 +143,7 @@ final class NativeTerminal {
         acceptedGeneration = generation
         pendingLock.unlock()
         if let terminal { nt_reset(terminal) }
+        applyTheme()
     }
 
     nonisolated private func enqueue(_ data: Data, generation: Int, window: HWND?) {
@@ -150,6 +176,7 @@ final class NativeTerminal {
             }, Unmanaged.passUnretained(self).toOpaque())
         }
         if nt_take_attention(terminal) != 0 { onAttention?() }
+        if let notification = takeNotification() { onNotification?(notification.title, notification.body) }
         if nt_take_naming(terminal) != 0 { onNaming?() }
     }
 
@@ -324,7 +351,7 @@ final class NativeTerminal {
             let next = NativeMenu.points(after: command, from: points)
             if let onFontSize { onFontSize(next) } else { setFontSize(next) }
         case .newSession, .newServerSession, .renameSession, .restartSession, .closeSession, .nextSession, .previousSession, .find, .quit,
-             .editKeymap, .reloadKeymap:
+             .editKeymap, .reloadKeymap, .settings:
             if let onWindowCommand { onWindowCommand(command) } else if command == .quit { DestroyWindow(window) }
         }
     }
@@ -420,6 +447,7 @@ final class NativeTerminal {
             if letter("K") { return .command(.clearScrollback) }
             if onWindowCommand != nil, letter("R") { return .command(.restartSession) }
         }
+        if onWindowCommand != nil, modifiers == .control, key == VK_OEM_COMMA { return .command(.settings) }
         if modifiers == .control, letter("C"), hasSelection { return .command(.copy) }
         guard let chord = Keys.chord(virtualKey: key) else { return nil }
         switch Keys.keymap.press(chord) {
@@ -517,6 +545,16 @@ final class NativeTerminal {
         guard console != nil else { return false }
         send(TerminalInput.paste(text, bracketed: false))
         return true
+    }
+
+    private func takeNotification() -> (title: String, body: String)? {
+        guard let terminal else { return nil }
+        var titleLength: Int32 = 0, bodyLength: Int32 = 0
+        guard nt_take_notification(terminal, nil, 0, &titleLength, nil, 0, &bodyLength) != 0 else { return nil }
+        var title = [UInt16](repeating: 0, count: Int(titleLength)), body = [UInt16](repeating: 0, count: Int(bodyLength))
+        var tookTitle: Int32 = 0, tookBody: Int32 = 0
+        guard nt_take_notification(terminal, &title, titleLength, &tookTitle, &body, bodyLength, &tookBody) != 0 else { return nil }
+        return (String(decoding: title, as: UTF16.self), String(decoding: body, as: UTF16.self))
     }
 
     /// title is the program's OSC 0/2 title, empty when it set none.
