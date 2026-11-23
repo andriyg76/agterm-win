@@ -19,8 +19,8 @@ $tools = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory -Filter "$Toolset.*" | Sor
 if (-not $tools) { throw "MSVC $Toolset is not under $vs\VC\Tools\MSVC after installing $Component" }
 # swift build's build system takes the newest MSVC folder, whatever the environment or the default toolset file say;
 # the runner is discarded after the job
-Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Where-Object Name -ne $tools.Name |
-    ForEach-Object { Rename-Item $_.FullName "hidden-$($_.Name)" }
+$hidden = New-Item -ItemType Directory -Force "$vs\VC\Tools\MSVC-hidden"
+Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Where-Object Name -ne $tools.Name | Move-Item -Destination $hidden
 
 $exported = "INCLUDE", "LIB", "LIBPATH", "PATH", "VCINSTALLDIR", "VCToolsInstallDir", "VCToolsVersion", "VCToolsRedistDir"
 $environment = cmd /c "`"$vs\VC\Auxiliary\Build\vcvarsall.bat`" $Arch -vcvars_ver=$Toolset >nul && set"
