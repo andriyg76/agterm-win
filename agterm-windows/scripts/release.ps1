@@ -6,7 +6,7 @@
 #   AGTERM_SIGN_DLIB + AGTERM_SIGN_METADATA        Azure Trusted Signing's dlib and its metadata.json
 # AGTERM_SIGN_TIMESTAMP overrides the RFC 3161 server. With neither, the build stops unless AGTERM_ALLOW_UNSIGNED=1,
 # which makes an unsigned dry run (and an unsigned -Publish).
-# Needs Inno Setup 6 (ISCC, or AGTERM_ISCC), the Windows SDK's signtool (or AGTERM_SIGNTOOL), Zig 0.17 for zmx,
+# Needs Inno Setup 6 (ISCC, or AGTERM_ISCC), the Windows SDK's signtool (or AGTERM_SIGNTOOL), Zig 0.17,
 # 7-Zip for the DMG check (-SkipDmgCheck skips it), and gh for -Publish.
 param(
     [Parameter(Mandatory)][string]$Version,
@@ -49,7 +49,7 @@ if ($signArguments) {
 $iscc = Find-Tool $env:AGTERM_ISCC "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" "ISCC"
 
 # ── dependencies and build ───────────────────────────────────────────────────
-foreach ($fetch in "fetch-webview2", "fetch-xterm", "fetch-server", "fetch-zmx") {
+foreach ($fetch in "fetch-server", "fetch-zmx", "fetch-ghostty-vt") {
     & (Join-Path $PSScriptRoot "$fetch.ps1")
 }
 
@@ -106,7 +106,7 @@ $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
 # ── publish ──────────────────────────────────────────────────────────────────
 if (-not $Publish) { exit 0 }
 $repo = (git -C $root remote get-url origin) -replace '^https://github\.com/', '' -replace '\.git$', ''
-$notes = "agterm-win $Version, locked to agterm $agterm: Windows 10 1809 or later, x64. Installs per user, no admin."
+$notes = "agterm-win $Version, locked to agterm ${agterm}: Windows 10 1809 or later, x64. Installs per user, no admin."
 if (-not $signArguments) { $notes += " UNSIGNED: SmartScreen warns on first run." }
 gh release create "v$Version" $setup "$setup.sha256" --repo $repo --title "agterm-win $Version" --notes $notes
 if ($LASTEXITCODE) { throw "gh release create failed" }

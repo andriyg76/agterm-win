@@ -8,9 +8,9 @@ private nonisolated(unsafe) var shell: NativeShell!
 private let menuButtonID = 100
 private let localWorkspaceID = Foundation.UUID()
 
-/// NativeShell is a window drawn without WebView2: the sidebar as a Win32 tree beside the selected session's
-/// terminal. It holds local sessions started from launch profiles, each with a terminal of its own, and the catalog
-/// of an agterm-server in WSL, whose sessions share one terminal that attaches whichever is selected.
+/// NativeShell is the application window: a Win32 sidebar beside the selected native terminal. It holds local
+/// sessions started from launch profiles, each with a terminal of its own, and the catalog of an agterm-server in
+/// WSL, whose sessions share one terminal that attaches whichever is selected.
 @MainActor
 final class NativeShell {
     private struct LocalSession {
@@ -23,7 +23,6 @@ final class NativeShell {
     }
 
     private let remote: RemoteWindow
-    private let core: URL
     private let settingsURL: URL
     private var settings: NativeSettings
     private var window: HWND?
@@ -52,21 +51,20 @@ final class NativeShell {
     private let version: String
 
     /// open shows the window; `profiles` name launch profiles to start local sessions from once they are known.
-    static func open(remote: RemoteWindow, core: URL, settings: URL, profiles: [String], version: String) {
+    static func open(remote: RemoteWindow, settings: URL, profiles: [String], version: String, installServer: Bool) {
         nt_init_process()
-        shell = NativeShell(remote: remote, core: core, settingsURL: settings, version: version)
-        shell.create(starting: profiles)
+        shell = NativeShell(remote: remote, settingsURL: settings, version: version)
+        shell.create(starting: profiles, installServer: installServer)
     }
 
-    private init(remote: RemoteWindow, core: URL, settingsURL: URL, version: String) {
+    private init(remote: RemoteWindow, settingsURL: URL, version: String) {
         self.remote = remote
-        self.core = core
         self.settingsURL = settingsURL
         self.version = version
         settings = NativeSettings.load(from: settingsURL)
     }
 
-    private func create(starting requested: [String]) {
+    private func create(starting requested: [String], installServer: Bool) {
         let instance = GetModuleHandleW(nil)
         let className = Array("agterm-shell".utf16) + [0]
         className.withUnsafeBufferPointer { name in
@@ -104,12 +102,39 @@ final class NativeShell {
         restoreLocals()
         discoverProfiles(then: requested)
         remote.changed = { [weak self] in self?.catalogChanged() }
-        catalogChanged()
-        remote.start()
+        if installServer {
+            installRemoteServer()
+        } else {
+            catalogChanged()
+            remote.start()
+        }
+    }
+
+    /// Installs or upgrades the WSL server off the UI thread, then connects whether installation succeeded or not.
+    private func installRemoteServer() {
+        remoteTerminal.show(notice: "Installing agterm-server in WSL \(remote.host.distribution)…")
+        let host = remote.host
+        DispatchQueue.global().async {
+            do {
+                let release = try serverRelease()
+                let code = try host.installServer(version: release.version, checksums: release.checksums) {
+                    log("server install: \($0)")
+                }
+                log("server install exited \(code)")
+            } catch {
+                log("server install failed: \(error)")
+            }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    shell.catalogChanged()
+                    shell.remote.start()
+                }
+            }
+        }
     }
 
     private func makeTerminal() -> NativeTerminal {
-        let terminal = NativeTerminal(parent: window, core: core, points: settings.fontPoints)
+        let terminal = NativeTerminal(parent: window, points: settings.fontPoints)
         terminal.onWindowCommand = { [unowned self] in windowCommand($0) }
         terminal.onFontSize = { [unowned self] in setFontSize($0) }
         terminal.setDPI(dpi)
