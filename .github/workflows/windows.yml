@@ -86,5 +86,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: integration-results-${{ matrix.arch }}
-          path: ${{ runner.temp }}/results
+          # a window's AF_UNIX socket cannot be read, and the upload stops at the first one
+          path: |
+            ${{ runner.temp }}/results
+            !${{ runner.temp }}/results/**/*.sock
           if-no-files-found: ignore

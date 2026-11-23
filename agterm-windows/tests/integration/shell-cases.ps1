@@ -83,6 +83,8 @@ function Start-Shell([string]$Name, [scriptblock]$Prepare) {
 function Stop-Shell($Shell) {
     Stop-Process -Id $Shell.Process.Id -Force -ErrorAction SilentlyContinue
     $Shell.Process.WaitForExit(10000) | Out-Null
+    # a killed window leaves its AF_UNIX socket, which nothing can stat, and an artifact upload stops at it
+    cmd.exe /d /c del /f /q "$(Join-Path $Shell.State 'agterm.sock')" 2>$null
 }
 
 function Get-Node([string]$State, [string]$Id) {
