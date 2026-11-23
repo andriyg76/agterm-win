@@ -51,42 +51,12 @@ Source: "{#Stage}\zmx\current"; DestDir: "{app}\zmx"; Flags: ignoreversion
 Name: "{autoprograms}\agterm"; Filename: "{app}\agterm-win.exe"
 
 [Run]
-; downloaded by PrepareToInstall rather than bundled, so the installer carries no Microsoft binary
-Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; Check: NeedsWebView2; \
-  StatusMsg: "Installing the WebView2 runtime..."
 Filename: "{app}\agterm-win.exe"; Description: "Launch agterm"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\zmx"
 
 [Code]
-const
-  WebView2Client = 'Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
-
-function WebView2Installed(Root: Integer; Key: String): Boolean;
-var
-  Version: String;
-begin
-  Result := RegQueryStringValue(Root, Key, 'pv', Version) and (Version <> '') and (Version <> '0.0.0.0');
-end;
-
-function NeedsWebView2: Boolean;
-begin
-  Result := not (WebView2Installed(HKLM, 'SOFTWARE\WOW6432Node\' + WebView2Client)
-    or WebView2Installed(HKCU, 'Software\' + WebView2Client));
-end;
-
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-begin
-  Result := '';
-  if NeedsWebView2 then
-  try
-    DownloadTemporaryFile('https://go.microsoft.com/fwlink/p/?LinkId=2124703', 'MicrosoftEdgeWebview2Setup.exe', '', nil);
-  except
-    Result := 'agterm needs the Microsoft Edge WebView2 runtime, and downloading its installer failed: ' + GetExceptionMessage;
-  end;
-end;
-
 // {app} goes on the user PATH so agtermctl runs from any shell, not only agterm's own sessions
 function PathHas(Path, Dir: String): Boolean;
 begin

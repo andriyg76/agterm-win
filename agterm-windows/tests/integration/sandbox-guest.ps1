@@ -12,7 +12,6 @@ $failure = $null
 try {
     New-Item -ItemType Directory $WorkDirectory | Out-Null
     Get-ChildItem $InputDirectory -Force | % { Copy-Item $_.FullName $WorkDirectory -Recurse }
-    $env:AGTERM_WIN_WEBVIEW2_RUNTIME = "$WorkDirectory\webview2"
     $process = Start-Process powershell.exe -ArgumentList @(
         "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "$WorkDirectory\tests\run.ps1",
         "-App", "$WorkDirectory\app", "-Results", "$ResultsDirectory\cases"
