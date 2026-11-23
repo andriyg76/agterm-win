@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 # windows-2022 keeps Visual Studio 2022 (MSVC 14.4x), the toolchain the Swift 6.4.3 clang supports and the dev
-# machine builds with; windows-2025 ships MSVC 14.5x, whose STL refuses that clang
+# machine builds with; windows-2025 ships MSVC 14.5x, whose STL refuses that clang. NativeShim uses no STL, so
+# windows-11-arm's Visual Studio 2026 serves arm64 as it is
 env:
   SWIFT_VERSION: swift-6.4.3-release
   SWIFT_BUILD: 6.4.3-RELEASE
@@ -42,7 +43,14 @@ jobs:
 
   # the real window on the runner's interactive desktop, as tests/integration/README.md runs it locally
   app:
-    runs-on: windows-2022
+    name: app (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, runner: windows-2022, swift-arch: amd64 }
+          - { arch: arm64, runner: windows-11-arm, swift-arch: arm64 }
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     defaults:
       run:
@@ -54,6 +62,7 @@ jobs:
         with:
           swift-version: ${{ env.SWIFT_VERSION }}
           swift-build: ${{ env.SWIFT_BUILD }}
+          build_arch: ${{ matrix.swift-arch }}
           cache: true
       - uses: mlugg/setup-zig@v2
         with:
@@ -62,17 +71,17 @@ jobs:
         with:
           # not .build: its debug link comes back from the cache unreadable, and stage.ps1 copies through it
           path: agterm-windows/vendor
-          key: app-vendor-${{ env.SWIFT_BUILD }}-${{ hashFiles('agterm-windows/Package.swift', 'agtermCore/Package.swift', 'agtermCore/Package.resolved', 'agterm-windows/scripts/fetch-*.ps1') }}
-      - run: ./scripts/fetch-server.ps1; ./scripts/fetch-ghostty-vt.ps1
+          key: app-vendor-${{ matrix.arch }}-${{ env.SWIFT_BUILD }}-${{ hashFiles('agterm-windows/Package.swift', 'agtermCore/Package.swift', 'agtermCore/Package.resolved', 'agterm-windows/scripts/fetch-*.ps1') }}
+      - run: ./scripts/fetch-server.ps1; ./scripts/fetch-ghostty-vt.ps1 -Arch ${{ matrix.arch }}
       - run: swift build --build-tests
       - run: swift build --product agtermctl
       - run: swift test --skip-build
       - run: ./scripts/stage.ps1 -Output "$env:RUNNER_TEMP\agterm-win"
-      - run: ./scripts/msix.ps1 -Version "$(Get-Content AGTERM_VERSION -TotalCount 1).0" -Stage "$env:RUNNER_TEMP\agterm-win" -Output "$env:RUNNER_TEMP\msix"
+      - run: ./scripts/msix.ps1 -Version "$(Get-Content AGTERM_VERSION -TotalCount 1).0" -Arch ${{ matrix.arch }} -Stage "$env:RUNNER_TEMP\agterm-win" -Output "$env:RUNNER_TEMP\msix"
       - run: ./tests/integration/run.ps1 -App "$env:RUNNER_TEMP\agterm-win" -Results "$env:RUNNER_TEMP\results"
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: integration-results
+          name: integration-results-${{ matrix.arch }}
           path: ${{ runner.temp }}/results
           if-no-files-found: ignore

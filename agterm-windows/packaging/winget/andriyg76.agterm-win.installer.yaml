@@ -16,7 +16,10 @@ AppsAndFeaturesEntries:
 - ProductCode: '{33086B3F-821D-4FAF-9EC9-F6490E82190B}_is1'
 Installers:
 - Architecture: x64
-  InstallerUrl: {{Url}}
-  InstallerSha256: {{Sha256Upper}}
+  InstallerUrl: {{UrlX64}}
+  InstallerSha256: {{Sha256X64Upper}}
+- Architecture: arm64
+  InstallerUrl: {{UrlArm64}}
+  InstallerSha256: {{Sha256Arm64Upper}}
 ManifestType: installer
 ManifestVersion: 1.10.0

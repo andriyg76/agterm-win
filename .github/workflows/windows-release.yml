@@ -1,7 +1,7 @@
 name: windows-release
 
-# Run by hand on windows-port: picks the next v<AGTERM_VERSION>.<n> from the existing tags, builds the installer on a
-# GitHub-hosted runner (as SignPath Foundation requires of every job before a signing request), has SignPath sign it
+# Run by hand on windows-port: picks the next v<AGTERM_VERSION>.<n> from the existing tags, builds the x64 and arm64
+# installers and MSIX packages on GitHub-hosted runners (as SignPath Foundation requires of every job before a signing request), has SignPath sign it
 # once SIGNPATH_ORGANIZATION_ID is set, and publishes the release, which creates the tag on the built commit.
 # Without SignPath configured the release ships unsigned.
 on:
@@ -19,33 +19,51 @@ env:
   SWIFT_BUILD: 6.4.3-RELEASE
 
 jobs:
-  release:
+  version:
     if: github.ref == 'refs/heads/windows-port'
-    runs-on: windows-2022
-    timeout-minutes: 150
-    defaults:
-      run:
-        shell: pwsh
-        working-directory: agterm-windows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.next.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-tags: true
           fetch-depth: 0
-      - id: version
-        name: Next version
+      - id: next
+        shell: pwsh
         run: |
-          $agterm = Get-Content AGTERM_VERSION -TotalCount 1
+          $agterm = Get-Content agterm-windows/AGTERM_VERSION -TotalCount 1
           $prefix = "v$agterm."
           $last = git tag --list "$prefix*" | % { $_.Substring($prefix.Length) } | ? { $_ -match '^\d+$' } | % { [int]$_ } |
             Measure-Object -Maximum
           $version = "$agterm.$(1 + [int]$last.Maximum)"
           "version=$version" >> $env:GITHUB_OUTPUT
           "releasing $version"
+
+  # each architecture builds natively, since Swift on Windows does not cross-compile the app here
+  build:
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - { arch: x64, runner: windows-2022, swift-arch: amd64 }
+          - { arch: arm64, runner: windows-11-arm, swift-arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: agterm-windows
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
       - uses: compnerd/gha-setup-swift@v0.5.1
         with:
           swift-version: ${{ env.SWIFT_VERSION }}
           swift-build: ${{ env.SWIFT_BUILD }}
+          build_arch: ${{ matrix.swift-arch }}
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
@@ -54,27 +72,27 @@ jobs:
       - name: Build
         env:
           AGTERM_ALLOW_UNSIGNED: "1"
-        run: ./scripts/release.ps1 -Version ${{ steps.version.outputs.version }}
+        run: ./scripts/release.ps1 -Version $env:VERSION -Arch ${{ matrix.arch }}
       # the Store signs it, so it is an artifact for Partner Center rather than a release asset
       - name: MSIX
         env:
           AGTERM_MSIX_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
           AGTERM_MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
           AGTERM_MSIX_PUBLISHER_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
-        run: ./scripts/msix.ps1 -Version ${{ steps.version.outputs.version }}
+        run: ./scripts/msix.ps1 -Version $env:VERSION -Arch ${{ matrix.arch }}
       - uses: actions/upload-artifact@v7
         with:
-          name: msix
-          path: agterm-windows/build/release/agterm-win-*-x64.msix
+          name: msix-${{ matrix.arch }}
+          path: agterm-windows/build/release/agterm-win-*-${{ matrix.arch }}.msix
           if-no-files-found: error
       - id: upload
         uses: actions/upload-artifact@v7
         with:
-          name: installer-unsigned
-          path: agterm-windows/build/release/agterm-win-*-x64-setup.exe
+          name: installer-unsigned-${{ matrix.arch }}
+          path: agterm-windows/build/release/agterm-win-*-${{ matrix.arch }}-setup.exe
           if-no-files-found: error
       # the artifact configuration signs the one installer inside the uploaded zip:
-      #   <zip-file><pe-file path="agterm-win-*-x64-setup.exe"><authenticode-sign/></pe-file></zip-file>
+      #   <zip-file><pe-file path="agterm-win-*-setup.exe"><authenticode-sign/></pe-file></zip-file>
       - if: vars.SIGNPATH_ORGANIZATION_ID != ''
         uses: signpath/github-action-submit-signing-request@v3
         with:
@@ -87,16 +105,44 @@ jobs:
           wait-for-completion: true
           wait-for-completion-timeout-in-seconds: 7200
           output-artifact-directory: agterm-windows/build/signed
+      - name: Release installer
+        run: |
+          $signed = Test-Path build/signed
+          $setup = Get-Item "$(if ($signed) { 'build/signed' } else { 'build/release' })/agterm-win-$env:VERSION-${{ matrix.arch }}-setup.exe"
+          New-Item -ItemType Directory build/publish | Out-Null
+          Copy-Item $setup.FullName build/publish
+          if ($signed) { New-Item build/publish/signed | Out-Null }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer-${{ matrix.arch }}
+          path: agterm-windows/build/publish
+          if-no-files-found: error
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: installer-*
+          path: publish
       - name: Publish
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $agterm = Get-Content AGTERM_VERSION -TotalCount 1
-          $signed = Test-Path build/signed
-          $setup = Get-Item "$(if ($signed) { 'build/signed' } else { 'build/release' })/agterm-win-$version-x64-setup.exe"
-          $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
-          [IO.File]::WriteAllText("$($setup.FullName).sha256", "$hash  $($setup.Name)`n")
-          $notes = "agterm-win $version, locked to agterm ${agterm}: Windows 10 1809 or later, x64, installs per user without admin."
+          $agterm = Get-Content agterm-windows/AGTERM_VERSION -TotalCount 1
+          $signed = @(Get-ChildItem publish -Recurse -Filter signed).Count -eq 2
+          $assets = foreach ($setup in Get-ChildItem publish -Recurse -Filter "agterm-win-$env:VERSION-*-setup.exe") {
+            $hash = (Get-FileHash -Algorithm SHA256 $setup.FullName).Hash.ToLowerInvariant()
+            [IO.File]::WriteAllText("$($setup.FullName).sha256", "$hash  $($setup.Name)`n")
+            $setup.FullName
+            "$($setup.FullName).sha256"
+          }
+          if ($assets.Count -ne 4) { throw "expected the x64 and arm64 installers, got $($assets -join ', ')" }
+          $notes = "agterm-win $env:VERSION, locked to agterm ${agterm}: Windows 10 1809 or later, x64 or arm64, installs per user without admin."
           $notes += if ($signed) { "`n`nFree code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)." } else { "`n`nUnsigned: SmartScreen warns on first run." }
-          gh release create "v$version" --target $env:GITHUB_SHA $setup.FullName "$($setup.FullName).sha256" --title "agterm-win $version" --notes $notes
+          gh release create "v$env:VERSION" --target $env:GITHUB_SHA @assets --title "agterm-win $env:VERSION" --notes $notes

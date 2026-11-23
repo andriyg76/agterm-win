@@ -7,30 +7,139 @@
 #include <dwmapi.h>
 #include <dwrite.h>
 #include <ghostty/vt.h>
-#include <wrl/client.h>
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <cwchar>
-#include <utility>
-#include <string>
-#include <vector>
-
-using Microsoft::WRL::ComPtr;
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <wchar.h>
 
 namespace {
 
+template <typename T> T lesser(T a, T b) { return b < a ? b : a; }
+template <typename T> T greater(T a, T b) { return a < b ? b : a; }
+template <typename T> T clamped(T value, T low, T high) { return value < low ? low : high < value ? high : value; }
+
+template <typename T> class Com {
+public:
+    Com() = default;
+    Com(decltype(nullptr)) {}
+    Com(const Com &) = delete;
+    Com &operator=(const Com &) = delete;
+    Com(Com &&other) : pointer(other.pointer) { other.pointer = nullptr; }
+    Com &operator=(Com &&other) {
+        if (this != &other) {
+            Reset();
+            pointer = other.pointer;
+            other.pointer = nullptr;
+        }
+        return *this;
+    }
+    ~Com() { Reset(); }
+    void Reset() {
+        if (pointer) pointer->Release();
+        pointer = nullptr;
+    }
+    T **put() {
+        Reset();
+        return &pointer;
+    }
+    T *Get() const { return pointer; }
+    T *operator->() const { return pointer; }
+    explicit operator bool() const { return pointer != nullptr; }
+
+private:
+    T *pointer = nullptr;
+};
+
+// a growable array of trivially copyable items; new items are zeroed, as std::vector value-initializes them
+template <typename T> class Buffer {
+public:
+    Buffer() = default;
+    Buffer(const Buffer &) = delete;
+    Buffer &operator=(const Buffer &) = delete;
+    ~Buffer() { free(items); }
+    T *data() const { return items; }
+    size_t size() const { return count; }
+    bool empty() const { return count == 0; }
+    T &operator[](size_t index) const { return items[index]; }
+    void clear() { count = 0; }
+    void reserve(size_t wanted) {
+        if (wanted <= capacity) return;
+        size_t next = greater<size_t>(wanted, capacity * 2);
+        auto grown = static_cast<T *>(realloc(items, next * sizeof(T)));
+        if (!grown) abort();
+        items = grown;
+        capacity = next;
+    }
+    void resize(size_t wanted) {
+        reserve(wanted);
+        if (wanted > count) memset(items + count, 0, (wanted - count) * sizeof(T));
+        count = wanted;
+    }
+    void push(T item) {
+        reserve(count + 1);
+        items[count++] = item;
+    }
+    void append(const T *source, size_t length) {
+        reserve(count + length);
+        memcpy(items + count, source, length * sizeof(T));
+        count += length;
+    }
+    void swap(Buffer &other) {
+        T *otherItems = other.items;
+        size_t otherCount = other.count, otherCapacity = other.capacity;
+        other.items = items;
+        other.count = count;
+        other.capacity = capacity;
+        items = otherItems;
+        count = otherCount;
+        capacity = otherCapacity;
+    }
+
+private:
+    T *items = nullptr;
+    size_t count = 0, capacity = 0;
+};
+
+using Text = Buffer<wchar_t>;
+
+const wchar_t *terminated(Text &text) {
+    text.reserve(text.size() + 1);
+    text.data()[text.size()] = 0;
+    return text.data();
+}
+
+bool same(const Text &a, const Text &b) { return a.size() == b.size() && (a.empty() || !wmemcmp(a.data(), b.data(), a.size())); }
+
+uint32_t utf16(uint32_t codepoint, wchar_t *out) {
+    if (codepoint <= 0xFFFF) {
+        out[0] = static_cast<wchar_t>(codepoint);
+        return 1;
+    }
+    codepoint -= 0x10000;
+    out[0] = static_cast<wchar_t>(0xD800 + (codepoint >> 10));
+    out[1] = static_cast<wchar_t>(0xDC00 + (codepoint & 0x3FF));
+    return 2;
+}
+
+void appendCodepoint(Text &text, uint32_t codepoint) {
+    wchar_t units[2];
+    text.append(units, utf16(codepoint, units));
+}
+
 constexpr uint32_t attributeBold = 1, attributeItalic = 2, attributeUnderline = 4, attributeInverse = 8, attributeDim = 16,
                    attributeStrikethrough = 32;
+
+// a grapheme cluster longer than this keeps only its base rune
+constexpr uint32_t clusterCapacity = 32;
 
 struct Cell {
     int32_t rune;
     uint32_t foreground, background, attributes, width;
     uint32_t foregroundKind, foregroundIndex, foregroundRGB, backgroundKind, backgroundIndex, backgroundRGB;
-    std::wstring text;
+    uint32_t textLength;
+    wchar_t text[clusterCapacity];
 };
 
 struct Info {
@@ -54,36 +163,27 @@ uint32_t blend(uint32_t a, uint32_t b) {
     return result;
 }
 
-ComPtr<IDWriteFontFace> face(IDWriteFontCollection *fonts, const wchar_t *family, DWRITE_FONT_WEIGHT weight,
-                             DWRITE_FONT_STYLE style) {
+Com<IDWriteFontFace> face(IDWriteFontCollection *fonts, const wchar_t *family, DWRITE_FONT_WEIGHT weight,
+                          DWRITE_FONT_STYLE style) {
     UINT32 index = 0;
     BOOL exists = FALSE;
-    ComPtr<IDWriteFontFamily> fontFamily;
-    ComPtr<IDWriteFont> font;
-    ComPtr<IDWriteFontFace> result;
-    if (FAILED(fonts->FindFamilyName(family, &index, &exists)) || !exists || FAILED(fonts->GetFontFamily(index, &fontFamily)) ||
-        FAILED(fontFamily->GetFirstMatchingFont(weight, DWRITE_FONT_STRETCH_NORMAL, style, &font)) ||
-        FAILED(font->CreateFontFace(&result))) {
+    Com<IDWriteFontFamily> fontFamily;
+    Com<IDWriteFont> font;
+    Com<IDWriteFontFace> result;
+    if (FAILED(fonts->FindFamilyName(family, &index, &exists)) || !exists || FAILED(fonts->GetFontFamily(index, fontFamily.put())) ||
+        FAILED(fontFamily->GetFirstMatchingFont(weight, DWRITE_FONT_STRETCH_NORMAL, style, font.put())) ||
+        FAILED(font->CreateFontFace(result.put()))) {
         return nullptr;
     }
     return result;
 }
 
-std::wstring widen(const uint8_t *bytes, uint32_t length) {
+void widen(Text &text, const uint8_t *bytes, uint32_t length) {
+    text.clear();
+    if (!bytes) return;
     int count = MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<const char *>(bytes), static_cast<int>(length), nullptr, 0);
-    std::wstring text(count, L'\0');
+    text.resize(static_cast<size_t>(count));
     MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<const char *>(bytes), static_cast<int>(length), text.data(), count);
-    return text;
-}
-
-void appendCodepoint(std::wstring &text, uint32_t codepoint) {
-    if (codepoint > 0xFFFF) {
-        codepoint -= 0x10000;
-        text += static_cast<wchar_t>(0xD800 + (codepoint >> 10));
-        text += static_cast<wchar_t>(0xDC00 + (codepoint & 0x3FF));
-    } else {
-        text += static_cast<wchar_t>(codepoint);
-    }
 }
 
 struct Style {
@@ -97,10 +197,14 @@ struct Point {
     bool operator<(const Point &other) const { return line < other.line || (line == other.line && column < other.column); }
 };
 
+struct Span {
+    Point first, second;
+};
+
 bool wordCharacter(int32_t rune) {
     if (rune <= ' ') return false;
     static const wchar_t *delimiters = L"()[]{}<>'\"`|,;";
-    return rune > 0xFFFF || !std::wcschr(delimiters, static_cast<wchar_t>(rune));
+    return rune > 0xFFFF || !wcschr(delimiters, static_cast<wchar_t>(rune));
 }
 
 // Process-wide crash diagnostics live with the one native implementation rather than in a rendering backend.
@@ -123,7 +227,7 @@ LONG WINAPI unhandled(EXCEPTION_POINTERS *info) {
                            static_cast<LPCSTR>(address), &module)) {
         GetModuleFileNameA(module, name, MAX_PATH);
     }
-    std::snprintf(line, sizeof line, "unhandled exception 0x%08lx at %p (%s+0x%llx) thread %lu\n",
+    snprintf(line, sizeof line, "unhandled exception 0x%08lx at %p (%s+0x%llx) thread %lu\n",
                   info->ExceptionRecord->ExceptionCode, address, name,
                   static_cast<unsigned long long>(static_cast<char *>(address) - reinterpret_cast<char *>(module)),
                   GetCurrentThreadId());
@@ -133,7 +237,7 @@ LONG WINAPI unhandled(EXCEPTION_POINTERS *info) {
 
 void invalidParameter(const wchar_t *, const wchar_t *, const wchar_t *, unsigned int, uintptr_t) {
     char line[96];
-    std::snprintf(line, sizeof line, "UCRT invalid parameter, thread %lu\n", GetCurrentThreadId());
+    snprintf(line, sizeof line, "UCRT invalid parameter, thread %lu\n", GetCurrentThreadId());
     crashLine(line);
     TerminateProcess(GetCurrentProcess(), 0xC000000D);
 }
@@ -146,13 +250,13 @@ struct nt_terminal {
     GhosttyRenderState render = nullptr;
     nt_reply_fn reply = nullptr;
     void *replyContext = nullptr;
-    ComPtr<ID2D1Factory> d2d;
-    ComPtr<IDWriteFactory> dwrite;
-    ComPtr<ID2D1HwndRenderTarget> target;
-    ComPtr<ID2D1SolidColorBrush> brush;
-    ComPtr<IDWriteFontFace> faces[4];  // regular, bold, italic, bold italic
-    ComPtr<IDWriteTextFormat> fallback[4];
-    std::wstring family;
+    Com<ID2D1Factory> d2d;
+    Com<IDWriteFactory> dwrite;
+    Com<ID2D1HwndRenderTarget> target;
+    Com<ID2D1SolidColorBrush> brush;
+    Com<IDWriteFontFace> faces[4];  // regular, bold, italic, bold italic
+    Com<IDWriteTextFormat> fallback[4];
+    Text family;
     float points = 11;
     float dpi = 96;
     float emSize = 0, cellWidth = 0, cellHeight = 0, baseline = 0;  // DIPs, cell edges on whole pixels
@@ -166,12 +270,12 @@ struct nt_terminal {
     bool selecting = false, hasSelection = false;
     int32_t selectionMode = 0;  // 0 cells, 1 words, 2 lines
     Point anchor{}, head{};
-    std::pair<Point, Point> paintSpan{};  // range() once per frame, not per row
+    Span paintSpan{};  // range() once per frame, not per row
     uint32_t foreground = 0xCCCCCC, background = 0x1E1E1E;
-    std::vector<Cell> grid, history;
-    std::wstring title, pwd;
-    std::vector<UINT16> glyphs;
-    std::vector<FLOAT> advances;
+    Buffer<Cell> grid, history;
+    Text title, pwd;
+    Buffer<UINT16> glyphs;
+    Buffer<FLOAT> advances;
 
     float scale() const { return dpi / 96.f; }
 
@@ -199,7 +303,7 @@ struct nt_terminal {
         result.cursorRow = cursorY;
         result.cursorVisible = cursorVisible;
         result.alternateScreen = screen == GHOSTTY_TERMINAL_SCREEN_ALTERNATE;
-        result.historyCount = static_cast<uint32_t>(std::min<size_t>(history, UINT32_MAX));
+        result.historyCount = static_cast<uint32_t>(lesser<size_t>(history, UINT32_MAX));
         result.mouseClick = mode(9) || mode(1000);
         result.mouseDrag = mode(1002);
         result.mouseMotion = mode(1003);
@@ -225,11 +329,12 @@ struct nt_terminal {
         if (ghostty_terminal_get(emulator, GHOSTTY_TERMINAL_DATA_COLOR_BACKGROUND, &bg) == GHOSTTY_SUCCESS) background = rgb(bg);
     }
 
-    void rowCells(const Info &state, int64_t line, std::vector<Cell> &out) {
+    void rowCells(const Info &state, int64_t line, Buffer<Cell> &out) {
         GhosttyColorRgb palette[256]{};
         ghostty_terminal_get(emulator, GHOSTTY_TERMINAL_DATA_COLOR_PALETTE, palette);
-        out.assign(state.columns, Cell{});
-        line = std::clamp<int64_t>(line, 0, state.historyCount + state.rows - 1);
+        out.clear();
+        out.resize(state.columns);
+        line = clamped<int64_t>(line, 0, state.historyCount + state.rows - 1);
         for (uint32_t column = 0; column < state.columns; column++) {
             GhosttyPoint point{};
             point.tag = line >= state.historyCount ? GHOSTTY_POINT_TAG_ACTIVE : GHOSTTY_POINT_TAG_SCREEN;
@@ -248,18 +353,19 @@ struct nt_terminal {
             ghostty_cell_get(raw, GHOSTTY_CELL_DATA_WIDE, &wide);
             cell.rune = static_cast<int32_t>(codepoint);
             cell.width = wide == GHOSTTY_CELL_WIDE_WIDE ? 2 : wide == GHOSTTY_CELL_WIDE_NARROW ? 1 : 0;
-            uint32_t graphemes[8];
+            uint32_t graphemes[clusterCapacity];
             size_t graphemeCount = 0;
-            GhosttyResult graphemeResult = ghostty_grid_ref_graphemes(&reference, graphemes, 8, &graphemeCount);
-            std::vector<uint32_t> graphemeOverflow;
-            if (graphemeResult == GHOSTTY_OUT_OF_SPACE) {
-                graphemeOverflow.resize(graphemeCount);
-                graphemeResult =
-                    ghostty_grid_ref_graphemes(&reference, graphemeOverflow.data(), graphemeOverflow.size(), &graphemeCount);
-            }
-            if (graphemeResult == GHOSTTY_SUCCESS) {
-                const uint32_t *cluster = graphemeOverflow.empty() ? graphemes : graphemeOverflow.data();
-                for (size_t index = 0; index < graphemeCount; index++) appendCodepoint(cell.text, cluster[index]);
+            if (ghostty_grid_ref_graphemes(&reference, graphemes, clusterCapacity, &graphemeCount) == GHOSTTY_SUCCESS) {
+                for (size_t index = 0; index < graphemeCount; index++) {
+                    wchar_t units[2];
+                    uint32_t length = utf16(graphemes[index], units);
+                    if (cell.textLength + length > clusterCapacity) {
+                        cell.textLength = 0;
+                        break;
+                    }
+                    memcpy(cell.text + cell.textLength, units, length * sizeof(wchar_t));
+                    cell.textLength += length;
+                }
             }
             cell.attributes = ((style.flags & GHOSTTY_STYLE_FLAG_BOLD) ? attributeBold : 0) |
                               ((style.flags & GHOSTTY_STYLE_FLAG_ITALIC) ? attributeItalic : 0) |
@@ -302,18 +408,18 @@ struct nt_terminal {
 
     Point point(int32_t x, int32_t y) {
         Info state = info();
-        int32_t column = std::clamp((x - paddingPixels) / cellWidthPixels, 0, static_cast<int32_t>(state.columns) - 1);
-        int32_t row = std::clamp((y - paddingPixels) / cellHeightPixels, 0, static_cast<int32_t>(state.rows) - 1);
+        int32_t column = clamped((x - paddingPixels) / cellWidthPixels, 0, static_cast<int32_t>(state.columns) - 1);
+        int32_t row = clamped((y - paddingPixels) / cellHeightPixels, 0, static_cast<int32_t>(state.rows) - 1);
         return {static_cast<int64_t>(state.historyCount) - scroll + row, column};
     }
 
     // range is the selection in reading order, widened to whole words or lines
-    std::pair<Point, Point> range() {
-        Point start = std::min(anchor, head), end = std::max(anchor, head);
+    Span range() {
+        Point start = lesser(anchor, head), end = greater(anchor, head);
         if (selectionMode == 2) return {{start.line, 0}, {end.line, INT32_MAX}};
         if (selectionMode == 1) {
             Info state = info();
-            std::vector<Cell> cells;
+            Buffer<Cell> cells;
             rowCells(state, start.line, cells);
             while (start.column > 0 && wordCharacter(cells[start.column - 1].rune) && wordCharacter(cells[start.column].rune)) start.column--;
             rowCells(state, end.line, cells);
@@ -325,7 +431,7 @@ struct nt_terminal {
         return {start, end};
     }
 
-    bool selected(const std::pair<Point, Point> &span, int64_t line, uint32_t column) const {
+    bool selected(const Span &span, int64_t line, uint32_t column) const {
         Point here{line, static_cast<int32_t>(column)};
         return hasSelection && !(here < span.first) && !(span.second < here);
     }
@@ -340,17 +446,17 @@ struct nt_terminal {
         DWRITE_GLYPH_METRICS glyphMetrics{};
         faces[0]->GetGlyphIndices(&zero, 1, &glyph);
         faces[0]->GetDesignGlyphMetrics(&glyph, 1, &glyphMetrics, FALSE);
-        cellWidthPixels = std::max(1L, std::lround(glyphMetrics.advanceWidth * units * scale()));
-        cellHeightPixels = std::max(1, static_cast<int32_t>(std::ceil((metrics.ascent + metrics.descent + metrics.lineGap) * units * scale())));
-        paddingPixels = static_cast<int32_t>(std::lround(4 * scale()));
+        cellWidthPixels = greater(1L, lroundf(glyphMetrics.advanceWidth * units * scale()));
+        cellHeightPixels = greater(1, static_cast<int32_t>(ceilf((metrics.ascent + metrics.descent + metrics.lineGap) * units * scale())));
+        paddingPixels = static_cast<int32_t>(lroundf(4 * scale()));
         cellWidth = cellWidthPixels / scale();
         cellHeight = cellHeightPixels / scale();
-        baseline = std::round((metrics.lineGap / 2.f + metrics.ascent) * units * scale()) / scale();
+        baseline = roundf((metrics.lineGap / 2.f + metrics.ascent) * units * scale()) / scale();
         for (uint32_t index = 0; index < 4; index++) {
             fallback[index].Reset();
-            dwrite->CreateTextFormat(family.c_str(), nullptr, index & 1 ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+            dwrite->CreateTextFormat(terminated(family), nullptr, index & 1 ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
                                      index & 2 ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
-                                     DWRITE_FONT_STRETCH_NORMAL, emSize, L"", &fallback[index]);
+                                     DWRITE_FONT_STRETCH_NORMAL, emSize, L"", fallback[index].put());
             if (fallback[index]) fallback[index]->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         }
     }
@@ -361,9 +467,9 @@ struct nt_terminal {
         GetClientRect(window, &client);
         auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(), dpi, dpi);
         auto hwnd = D2D1::HwndRenderTargetProperties(window, D2D1::SizeU(client.right - client.left, client.bottom - client.top));
-        if (FAILED(d2d->CreateHwndRenderTarget(properties, hwnd, &target))) return false;
+        if (FAILED(d2d->CreateHwndRenderTarget(properties, hwnd, target.put()))) return false;
         target->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
-        target->CreateSolidColorBrush(color(foreground), &brush);
+        target->CreateSolidColorBrush(color(foreground), brush.put());
         return true;
     }
 
@@ -371,7 +477,11 @@ struct nt_terminal {
         // a default-colored cell takes this window's colors, whatever the core resolved it to
         uint32_t fg = cell.foregroundKind == 0 ? foreground : cell.foreground;
         uint32_t bg = cell.backgroundKind == 0 ? background : cell.background;
-        if (cell.attributes & attributeInverse) std::swap(fg, bg);
+        if (cell.attributes & attributeInverse) {
+            uint32_t swapped = fg;
+            fg = bg;
+            bg = swapped;
+        }
         if (cell.attributes & attributeDim) fg = blend(fg, bg);
         uint32_t faceIndex = ((cell.attributes & attributeBold) ? 1 : 0) | ((cell.attributes & attributeItalic) ? 2 : 0);
         return {fg, bg, faces[faceIndex] ? faceIndex : 0, cell.attributes};
@@ -418,12 +528,12 @@ struct nt_terminal {
             if (cell.width == 0) continue;
             Style s = style(cell);
             uint32_t fg = override ? *override : s.foreground;
-            float left = x + column * cellWidth, span = std::max<uint32_t>(cell.width, 1) * cellWidth;
+            float left = x + column * cellWidth, span = greater<uint32_t>(cell.width, 1) * cellWidth;
             UINT32 codepoint = cell.rune > 0 ? static_cast<UINT32>(cell.rune) : ' ';
-            bool cluster = !cell.text.empty() && cell.text.size() != (codepoint > 0xFFFF ? 2 : 1);
+            bool cluster = cell.textLength != 0 && cell.textLength != (codepoint > 0xFFFF ? 2u : 1u);
             if (cluster) {
                 flush(runFace, runX, y, runColor);
-                drawFallback(cell.text.c_str(), static_cast<UINT32>(cell.text.size()), left, y, span, fg, s.face);
+                drawFallback(cell.text, cell.textLength, left, y, span, fg, s.face);
             } else {
                 UINT16 glyph = 0;
                 faces[s.face]->GetGlyphIndices(&codepoint, 1, &glyph);
@@ -431,24 +541,15 @@ struct nt_terminal {
                 if (glyph == 0 && codepoint != ' ') {
                     flush(runFace, runX, y, runColor);
                     wchar_t text[2];
-                    UINT32 length = 1;
-                    if (codepoint > 0xFFFF) {
-                        codepoint -= 0x10000;
-                        text[0] = static_cast<wchar_t>(0xD800 + (codepoint >> 10));
-                        text[1] = static_cast<wchar_t>(0xDC00 + (codepoint & 0x3FF));
-                        length = 2;
-                    } else {
-                        text[0] = static_cast<wchar_t>(codepoint);
-                    }
-                    drawFallback(text, length, left, y, span, fg, s.face);
+                    drawFallback(text, utf16(codepoint, text), left, y, span, fg, s.face);
                 } else {
                     if (glyphs.empty()) {
                         runFace = faces[s.face].Get();
                         runColor = fg;
                         runX = left;
                     }
-                    glyphs.push_back(glyph);
-                    advances.push_back(span);
+                    glyphs.push(glyph);
+                    advances.push(span);
                 }
             }
             float line = 1 / scale();
@@ -469,23 +570,25 @@ struct nt_terminal {
     void updateTitle() {
         GhosttyString value{};
         ghostty_terminal_get(emulator, GHOSTTY_TERMINAL_DATA_TITLE, &value);
-        std::wstring next = value.ptr ? widen(value.ptr, static_cast<uint32_t>(value.len)) : std::wstring();
-        if (next != title) {
-            title = next;
+        Text next;
+        widen(next, value.ptr, static_cast<uint32_t>(value.len));
+        if (!same(next, title)) {
+            title.swap(next);
             naming = true;
             if (IsWindowVisible(window)) showTitle();
         }
         GhosttyString path{};
         ghostty_terminal_get(emulator, GHOSTTY_TERMINAL_DATA_PWD, &path);
-        std::wstring directory = path.ptr ? widen(path.ptr, static_cast<uint32_t>(path.len)) : std::wstring();
-        if (directory != pwd) {
-            pwd = directory;
+        Text directory;
+        widen(directory, path.ptr, static_cast<uint32_t>(path.len));
+        if (!same(directory, pwd)) {
+            pwd.swap(directory);
             naming = true;
         }
     }
 
     // the window's title is the shown terminal's; a hidden one keeps its title until it is shown
-    void showTitle() const { SetWindowTextW(GetAncestor(window, GA_ROOT), title.empty() ? L"agterm" : title.c_str()); }
+    void showTitle() { SetWindowTextW(GetAncestor(window, GA_ROOT), title.empty() ? L"agterm" : terminated(title)); }
 };
 
 namespace {
@@ -559,10 +662,10 @@ extern "C" int32_t nt_sha256_file(const uint16_t *path, uint8_t *digest) {
 }
 
 extern "C" nt_terminal *nt_create(void *window, const uint16_t *font, float points, uint16_t *error, int32_t error_capacity) {
-    auto fail = [&](const std::wstring &reason, nt_terminal *partial) -> nt_terminal * {
+    auto fail = [&](const wchar_t *reason, nt_terminal *partial) -> nt_terminal * {
         if (error && error_capacity > 0) {
-            size_t count = std::min<size_t>(reason.size(), static_cast<size_t>(error_capacity - 1));
-            std::memcpy(error, reason.data(), count * sizeof(wchar_t));
+            size_t count = lesser<size_t>(wcslen(reason), static_cast<size_t>(error_capacity - 1));
+            memcpy(error, reason, count * sizeof(wchar_t));
             error[count] = 0;
         }
         nt_destroy(partial);
@@ -570,16 +673,17 @@ extern "C" nt_terminal *nt_create(void *window, const uint16_t *font, float poin
     };
     auto terminal = new nt_terminal();
     terminal->window = static_cast<HWND>(window);
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, terminal->d2d.GetAddressOf())) ||
+    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, terminal->d2d.put())) ||
         FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
-                                   reinterpret_cast<IUnknown **>(terminal->dwrite.GetAddressOf())))) {
+                                   reinterpret_cast<IUnknown **>(terminal->dwrite.put())))) {
         return fail(L"Direct2D or DirectWrite did not start", terminal);
     }
-    ComPtr<IDWriteFontCollection> fonts;
-    terminal->dwrite->GetSystemFontCollection(&fonts);
-    for (const wchar_t *family : {reinterpret_cast<const wchar_t *>(font), L"Cascadia Mono", L"Consolas"}) {
+    Com<IDWriteFontCollection> fonts;
+    terminal->dwrite->GetSystemFontCollection(fonts.put());
+    const wchar_t *families[] = {reinterpret_cast<const wchar_t *>(font), L"Cascadia Mono", L"Consolas"};
+    for (const wchar_t *family : families) {
         if (!family || !(terminal->faces[0] = face(fonts.Get(), family, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL))) continue;
-        terminal->family = family;
+        terminal->family.append(family, wcslen(family));
         terminal->faces[1] = face(fonts.Get(), family, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL);
         terminal->faces[2] = face(fonts.Get(), family, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC);
         terminal->faces[3] = face(fonts.Get(), family, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC);
@@ -628,9 +732,9 @@ extern "C" void nt_destroy(nt_terminal *terminal) {
 
 extern "C" void nt_resize(nt_terminal *terminal, int32_t width, int32_t height, int32_t *columns, int32_t *rows,
                           nt_reply_fn reply, void *context) {
-    if (terminal->target) terminal->target->Resize(D2D1::SizeU(std::max(width, 1), std::max(height, 1)));
-    uint32_t nextColumns = static_cast<uint32_t>(std::max(1, (width - 2 * terminal->paddingPixels) / terminal->cellWidthPixels));
-    uint32_t nextRows = static_cast<uint32_t>(std::max(1, (height - 2 * terminal->paddingPixels) / terminal->cellHeightPixels));
+    if (terminal->target) terminal->target->Resize(D2D1::SizeU(greater(width, 1), greater(height, 1)));
+    uint32_t nextColumns = static_cast<uint32_t>(greater(1, (width - 2 * terminal->paddingPixels) / terminal->cellWidthPixels));
+    uint32_t nextRows = static_cast<uint32_t>(greater(1, (height - 2 * terminal->paddingPixels) / terminal->cellHeightPixels));
     terminal->columns = nextColumns;
     terminal->rows = nextRows;
     terminal->reply = reply;
@@ -669,11 +773,11 @@ extern "C" void nt_paint(nt_terminal *terminal) {
     uint32_t columns = info.columns, rows = info.rows;
     terminal->grid.resize(static_cast<size_t>(columns) * rows);
     terminal->history.resize(columns);
-    int32_t scroll = info.alternateScreen ? 0 : std::min(terminal->scroll, static_cast<int32_t>(info.historyCount));
+    int32_t scroll = info.alternateScreen ? 0 : lesser(terminal->scroll, static_cast<int32_t>(info.historyCount));
     terminal->scroll = scroll;
 
     terminal->refreshColors();
-    auto target = terminal->target;
+    ID2D1HwndRenderTarget *target = terminal->target.Get();
     target->BeginDraw();
     target->Clear(color(terminal->background));
     float origin = terminal->paddingPixels / terminal->scale();
@@ -681,18 +785,15 @@ extern "C" void nt_paint(nt_terminal *terminal) {
     for (uint32_t row = 0; row < rows; row++) {
         int64_t line = static_cast<int64_t>(info.historyCount) - scroll + row;
         terminal->rowCells(info, line, terminal->history);
-        if (scroll == 0) {
-            std::copy(terminal->history.begin(), terminal->history.end(),
-                      terminal->grid.begin() + static_cast<size_t>(row) * columns);
-        }
+        if (scroll == 0) memcpy(&terminal->grid[static_cast<size_t>(row) * columns], terminal->history.data(), columns * sizeof(Cell));
         terminal->drawRow(terminal->history.data(), columns, origin, origin + row * terminal->cellHeight, nullptr, line);
     }
     if (scroll > 0) {
         // a thumb on the right edge while the view is back in the scrollback; at the live screen it is gone
         D2D1_SIZE_F size = target->GetSize();
         float total = static_cast<float>(info.historyCount + rows), top = static_cast<float>(info.historyCount - scroll);
-        float height = std::max(size.height * rows / total, 24.0f);
-        float y = std::min(size.height * top / total, size.height - height), width = 6, inset = 2;
+        float height = greater(size.height * rows / total, 24.0f);
+        float y = lesser(size.height * top / total, size.height - height), width = 6, inset = 2;
         D2D1_COLOR_F thumb = color(terminal->foreground);
         thumb.a = 0.35f;
         terminal->brush->SetColor(thumb);
@@ -700,16 +801,16 @@ extern "C" void nt_paint(nt_terminal *terminal) {
                                                        width / 2, width / 2), terminal->brush.Get());
     }
     if (scroll == 0 && info.cursorVisible && info.cursorRow < rows && columns > 0) {
-        uint32_t column = std::min(info.cursorColumn, columns - 1);
+        uint32_t column = lesser(info.cursorColumn, columns - 1);
         const Cell *cell = &terminal->grid[static_cast<size_t>(info.cursorRow) * columns + column];
         if (cell->width == 0 && column > 0) {
             column--;
             cell--;
         }
         float left = origin + column * terminal->cellWidth, top = origin + info.cursorRow * terminal->cellHeight;
-        float right = left + std::max<uint32_t>(cell->width, 1) * terminal->cellWidth, bottom = top + terminal->cellHeight;
+        float right = left + greater<uint32_t>(cell->width, 1) * terminal->cellWidth, bottom = top + terminal->cellHeight;
         // DECSCUSR: 0-2 block, 3-4 underline, 5-6 bar; blinking variants draw steady
-        float stroke = std::round(2 * terminal->scale()) / terminal->scale();
+        float stroke = roundf(2 * terminal->scale()) / terminal->scale();
         if (info.cursorShape >= 3 && info.cursorShape <= 4) {
             terminal->fill(left, bottom - stroke, right, bottom, terminal->foreground);
         } else if (info.cursorShape >= 5 && info.cursorShape <= 6) {
@@ -733,7 +834,7 @@ extern "C" void nt_paint(nt_terminal *terminal) {
 
 extern "C" void nt_scroll(nt_terminal *terminal, int32_t lines) {
     Info info = terminal->info();
-    terminal->scroll = std::clamp(terminal->scroll + lines, 0, info.alternateScreen ? 0 : static_cast<int32_t>(info.historyCount));
+    terminal->scroll = clamped(terminal->scroll + lines, 0, info.alternateScreen ? 0 : static_cast<int32_t>(info.historyCount));
     InvalidateRect(terminal->window, nullptr, FALSE);
 }
 
@@ -779,27 +880,27 @@ extern "C" int32_t nt_has_selection(nt_terminal *terminal) { return terminal->ha
 
 namespace {
 
-// rowText is cells first...last as UTF-16, wide-character tails skipped and trailing blanks dropped
-std::wstring rowText(const std::vector<Cell> &cells, int32_t first, int32_t last) {
-    std::wstring row;
+// appendRow appends cells first...last as UTF-16, wide-character tails skipped and trailing blanks dropped
+void appendRow(Text &text, const Buffer<Cell> &cells, int32_t first, int32_t last) {
+    size_t start = text.size();
     for (int32_t column = first; column <= last; column++) {
         const Cell &cell = cells[column];
         if (cell.width == 0) continue;
-        if (!cell.text.empty()) {
-            row += cell.text;
+        if (cell.textLength != 0) {
+            text.append(cell.text, cell.textLength);
             continue;
         }
         uint32_t rune = cell.rune > 0 ? static_cast<uint32_t>(cell.rune) : ' ';
-        appendCodepoint(row, rune);
+        appendCodepoint(text, rune);
     }
-    size_t end = row.find_last_not_of(L' ');
-    row.erase(end == std::wstring::npos ? 0 : end + 1);
-    return row;
+    size_t end = text.size();
+    while (end > start && text[end - 1] == L' ') end--;
+    text.resize(end);
 }
 
-int32_t give(const std::wstring &text, uint16_t *out, int32_t capacity) {
+int32_t give(const Text &text, uint16_t *out, int32_t capacity) {
     int32_t length = static_cast<int32_t>(text.size());
-    if (out && capacity >= length) std::memcpy(out, text.data(), text.size() * sizeof(wchar_t));
+    if (out && capacity >= length && length > 0) memcpy(out, text.data(), text.size() * sizeof(wchar_t));
     return length;
 }
 
@@ -809,25 +910,26 @@ extern "C" int32_t nt_selection_text(nt_terminal *terminal, uint16_t *out, int32
     if (!terminal->hasSelection) return 0;
     Info state = terminal->info();
     auto [start, end] = terminal->range();
-    std::wstring text;
-    std::vector<Cell> cells;
+    Text text;
+    Buffer<Cell> cells;
     for (int64_t line = start.line; line <= end.line; line++) {
         terminal->rowCells(state, line, cells);
         int32_t first = line == start.line ? start.column : 0;
-        int32_t last = std::min<int32_t>(line == end.line ? end.column : INT32_MAX, static_cast<int32_t>(cells.size()) - 1);
-        text += rowText(cells, first, last);
-        if (line < end.line) text += L"\r\n";
+        int32_t last = lesser<int32_t>(line == end.line ? end.column : INT32_MAX, static_cast<int32_t>(cells.size()) - 1);
+        appendRow(text, cells, first, last);
+        if (line < end.line) text.append(L"\r\n", 2);
     }
     return give(text, out, capacity);
 }
 
 extern "C" int32_t nt_screen_text(nt_terminal *terminal, uint16_t *out, int32_t capacity) {
     Info state = terminal->info();
-    std::wstring text;
-    std::vector<Cell> cells(state.columns);
+    Text text;
+    Buffer<Cell> cells;
     for (uint32_t row = 0; row < state.historyCount + state.rows; row++) {
         terminal->rowCells(state, row, cells);
-        text += rowText(cells, 0, static_cast<int32_t>(state.columns) - 1) + L"\n";
+        appendRow(text, cells, 0, static_cast<int32_t>(state.columns) - 1);
+        text.push(L'\n');
     }
     return give(text, out, capacity);
 }
@@ -835,12 +937,12 @@ extern "C" int32_t nt_screen_text(nt_terminal *terminal, uint16_t *out, int32_t 
 extern "C" int32_t nt_row_runes(nt_terminal *terminal, int32_t x, int32_t y, uint32_t *runes, int32_t capacity, int32_t *column) {
     Info state = terminal->info();
     Point at = terminal->point(x, y);
-    std::vector<Cell> cells;
+    Buffer<Cell> cells;
     terminal->rowCells(state, at.line, cells);
     *column = at.column;
     int32_t count = static_cast<int32_t>(cells.size());
-    for (int32_t i = 0; i < std::min(count, capacity); i++) {
-        runes[i] = cells[i].width == 0 ? UINT32_MAX : static_cast<uint32_t>(std::max(cells[i].rune, 0));
+    for (int32_t i = 0; i < lesser(count, capacity); i++) {
+        runes[i] = cells[i].width == 0 ? UINT32_MAX : static_cast<uint32_t>(greater(cells[i].rune, 0));
     }
     return count;
 }
@@ -852,11 +954,11 @@ extern "C" int32_t nt_line_count(nt_terminal *terminal) {
 
 extern "C" int32_t nt_line_runes(nt_terminal *terminal, int32_t line, uint32_t *runes, int32_t capacity) {
     Info state = terminal->info();
-    std::vector<Cell> cells;
+    Buffer<Cell> cells;
     terminal->rowCells(state, line, cells);
     int32_t count = static_cast<int32_t>(cells.size());
-    for (int32_t i = 0; i < std::min(count, capacity); i++) {
-        runes[i] = cells[i].width == 0 ? UINT32_MAX : static_cast<uint32_t>(std::max(cells[i].rune, 0));
+    for (int32_t i = 0; i < lesser(count, capacity); i++) {
+        runes[i] = cells[i].width == 0 ? UINT32_MAX : static_cast<uint32_t>(greater(cells[i].rune, 0));
     }
     return count;
 }
@@ -865,12 +967,12 @@ extern "C" void nt_select_cells(nt_terminal *terminal, int32_t line, int32_t col
     Info state = terminal->info();
     terminal->selectionMode = 0;
     terminal->anchor = {line, column};
-    terminal->head = {line, column + std::max(cells, 1) - 1};
+    terminal->head = {line, column + greater(cells, 1) - 1};
     terminal->selecting = false;
     terminal->hasSelection = true;
     int64_t history = state.historyCount, top = history - terminal->scroll;
     if (!state.alternateScreen && (line < top || line >= top + state.rows)) {
-        terminal->scroll = static_cast<int32_t>(std::clamp<int64_t>(history - (line - state.rows / 2), 0, history));
+        terminal->scroll = static_cast<int32_t>(clamped<int64_t>(history - (line - state.rows / 2), 0, history));
     }
     InvalidateRect(terminal->window, nullptr, FALSE);
 }
@@ -908,9 +1010,17 @@ extern "C" void nt_reset(nt_terminal *terminal) {
 
 extern "C" void nt_show_title(nt_terminal *terminal) { terminal->showTitle(); }
 
-extern "C" int32_t nt_take_attention(nt_terminal *terminal) { return std::exchange(terminal->attention, false); }
+extern "C" int32_t nt_take_attention(nt_terminal *terminal) {
+    bool attention = terminal->attention;
+    terminal->attention = false;
+    return attention;
+}
 
-extern "C" int32_t nt_take_naming(nt_terminal *terminal) { return std::exchange(terminal->naming, false); }
+extern "C" int32_t nt_take_naming(nt_terminal *terminal) {
+    bool naming = terminal->naming;
+    terminal->naming = false;
+    return naming;
+}
 
 extern "C" int32_t nt_title(nt_terminal *terminal, uint16_t *out, int32_t capacity) { return give(terminal->title, out, capacity); }
 
@@ -923,8 +1033,8 @@ extern "C" void nt_dark_title_bar(void *window) {
 
 extern "C" void nt_cell_at(nt_terminal *terminal, int32_t x, int32_t y, int32_t *column, int32_t *row) {
     Info state = terminal->info();
-    *column = std::clamp((x - terminal->paddingPixels) / terminal->cellWidthPixels, 0, static_cast<int32_t>(state.columns) - 1) + 1;
-    *row = std::clamp((y - terminal->paddingPixels) / terminal->cellHeightPixels, 0, static_cast<int32_t>(state.rows) - 1) + 1;
+    *column = clamped((x - terminal->paddingPixels) / terminal->cellWidthPixels, 0, static_cast<int32_t>(state.columns) - 1) + 1;
+    *row = clamped((y - terminal->paddingPixels) / terminal->cellHeightPixels, 0, static_cast<int32_t>(state.rows) - 1) + 1;
 }
 
 extern "C" int32_t nt_mouse_modes(nt_terminal *terminal) {
@@ -937,3 +1047,8 @@ extern "C" int32_t nt_bracketed_paste(nt_terminal *terminal) {
     Info info = terminal->info();
     return info.bracketedPaste != 0;
 }
+
+// Swift's Clang and the MSVC STL accept only each other's matching versions, so the shim stays clear of the STL
+#ifdef _YVALS_CORE_H_
+#error "NativeShim must not include the MSVC STL"
+#endif

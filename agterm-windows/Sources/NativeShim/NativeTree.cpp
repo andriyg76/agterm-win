@@ -5,9 +5,8 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 
-#include <algorithm>
-#include <cstring>
-#include <cwchar>
+#include <string.h>
+#include <wchar.h>
 
 #pragma comment(lib, "uxtheme")
 
@@ -150,7 +149,8 @@ extern "C" int32_t nt_tree_label_edit(intptr_t notification, int64_t *tag, uint1
     if (header->code == TVN_BEGINLABELEDITW) return 1;
     if (!edit->item.pszText) return 3;
     if (text && capacity > 0) {
-        size_t count = std::min<size_t>(wcslen(edit->item.pszText), static_cast<size_t>(capacity - 1));
+        size_t count = wcslen(edit->item.pszText);
+        if (count > static_cast<size_t>(capacity - 1)) count = static_cast<size_t>(capacity - 1);
         memcpy(text, edit->item.pszText, count * sizeof(wchar_t));
         text[count] = 0;
     }
@@ -168,3 +168,8 @@ extern "C" void nt_tree_set_edit_text(void *tree, const uint16_t *text) {
         SendMessageW(edit, EM_SETSEL, 0, -1);
     }
 }
+
+// see NativeShim.cpp: the shim stays clear of the MSVC STL
+#ifdef _YVALS_CORE_H_
+#error "NativeShim must not include the MSVC STL"
+#endif

@@ -1,6 +1,7 @@
 # Builds, signs and packages an agterm-win release locally, and with -Publish uploads it to this fork's GitHub
 # releases. VERSION is AGTERM_VERSION plus a Windows build number (0.44.0 -> 0.44.0.1, 0.44.0.2, ...).
-#   scripts\release.ps1 -Version 0.44.0.1 [-Publish]
+#   scripts\release.ps1 -Version 0.44.0.1 [-Arch x64|arm64] [-Publish]
+# -Arch is what the binaries are built for; Swift builds natively, so it is the host's architecture.
 # Signing, one of:
 #   AGTERM_SIGN_THUMBPRINT                         a code-signing certificate in the user's store (Certum SimplySign etc.)
 #   AGTERM_SIGN_DLIB + AGTERM_SIGN_METADATA        Azure Trusted Signing's dlib and its metadata.json
@@ -10,6 +11,7 @@
 # 7-Zip for the DMG check (-SkipDmgCheck skips it), and gh for -Publish.
 param(
     [Parameter(Mandatory)][string]$Version,
+    [ValidateSet("x64", "arm64")][string]$Arch = "x64",
     [switch]$Publish,
     [switch]$SkipDmgCheck
 )
@@ -50,7 +52,7 @@ $iscc = Find-Tool $env:AGTERM_ISCC "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.e
 
 # ── dependencies and build ───────────────────────────────────────────────────
 foreach ($fetch in "fetch-server", "fetch-zmx", "fetch-ghostty-vt") {
-    & (Join-Path $PSScriptRoot "$fetch.ps1")
+    if ($fetch -eq "fetch-server") { & (Join-Path $PSScriptRoot "$fetch.ps1") } else { & (Join-Path $PSScriptRoot "$fetch.ps1") -Arch $Arch }
 }
 
 # the sha256 the Mac app of the same release seals in, so a tarball replaced on GitHub since cannot pass
@@ -94,14 +96,14 @@ if ($signArguments) {
         if ($LASTEXITCODE) { throw "signing $($file.Name) failed" }
     }
 }
-$defines = @("/DAppVersion=$Version", "/DStage=$stage", "/DOutput=$out", "/DZmxRev=$zmxRev")
+$defines = @("/DAppVersion=$Version", "/DArch=$Arch", "/DStage=$stage", "/DOutput=$out", "/DZmxRev=$zmxRev")
 if ($signArguments) {
     $quoted = ($sign | ForEach-Object { if ($_ -match '\s') { "`$q$_`$q" } else { $_ } }) -join " "
     $defines += @("/DSign", "/Sagterm=`$q$signtool`$q $quoted `$f")
 }
 & $iscc @defines (Join-Path $root "packaging\agterm.iss")
 if ($LASTEXITCODE) { throw "ISCC failed" }
-$setup = Join-Path $out "agterm-win-$Version-x64-setup.exe"
+$setup = Join-Path $out "agterm-win-$Version-$Arch-setup.exe"
 $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText("$setup.sha256", "$hash  $(Split-Path -Leaf $setup)`n")
 "built $setup"
@@ -109,7 +111,14 @@ $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
 # ── publish ──────────────────────────────────────────────────────────────────
 if (-not $Publish) { exit 0 }
 $repo = (git -C $root remote get-url origin) -replace '^https://github\.com/', '' -replace '\.git$', ''
-$notes = "agterm-win $Version, locked to agterm ${agterm}: Windows 10 1809 or later, x64. Installs per user, no admin."
+# the other architecture's run adds its installer to the release the first one created
+gh release view "v$Version" --repo $repo *> $null
+if (-not $LASTEXITCODE) {
+    gh release upload "v$Version" $setup "$setup.sha256" --repo $repo
+    if ($LASTEXITCODE) { throw "gh release upload failed" }
+    exit 0
+}
+$notes = "agterm-win $Version, locked to agterm ${agterm}: Windows 10 1809 or later, x64 or arm64. Installs per user, no admin."
 if (-not $signArguments) { $notes += " UNSIGNED: SmartScreen warns on first run." }
 gh release create "v$Version" $setup "$setup.sha256" --repo $repo --title "agterm-win $Version" --notes $notes
 if ($LASTEXITCODE) { throw "gh release create failed" }
