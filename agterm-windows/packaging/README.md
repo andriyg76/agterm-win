@@ -34,7 +34,8 @@ Only the installer built by `windows-release.yml` on a GitHub-hosted runner from
 and every signing request is approved by hand.
 
 Privacy: this program will not transfer any information to other networked systems unless specifically requested by
-the user or the person installing or operating it. `--install-server` downloads agterm-server from GitHub only when run.
+the user or the person installing or operating it. `--install-server` downloads agterm-server from GitHub only when run. The full policy,
+for the Store listing's privacy policy URL, is [PRIVACY.md](../PRIVACY.md).
 
 ### Setting SignPath up
 
