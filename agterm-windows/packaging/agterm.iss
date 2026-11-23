@@ -11,6 +11,7 @@ AppId={{33086B3F-821D-4FAF-9EC9-F6490E82190B}
 AppName=agterm
 AppVersion={#AppVersion}
 AppVerName=agterm {#AppVersion}
+AppPublisher=andriyg76
 AppPublisherURL=https://github.com/andriyg76/agterm-win
 DefaultDirName={autopf}\agterm
 PrivilegesRequired=lowest
