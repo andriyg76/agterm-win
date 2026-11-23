@@ -88,7 +88,7 @@ jobs:
       - id: upload
         uses: actions/upload-artifact@v7
         with:
-          name: installer-unsigned-${{ matrix.arch }}
+          name: unsigned-installer-${{ matrix.arch }}
           path: agterm-windows/build/release/agterm-win-*-${{ matrix.arch }}-setup.exe
           if-no-files-found: error
       # the artifact configuration signs the one installer inside the uploaded zip:
