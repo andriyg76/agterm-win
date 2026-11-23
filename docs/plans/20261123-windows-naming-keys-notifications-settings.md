@@ -1,6 +1,8 @@
 # agterm-win: session naming, keymap, notifications, settings dialog
 
 Order agreed 2026-11-23: naming → keymap → settings (appearance first) → notifications.
+Rule: every feature behaves as it does in agterm on macOS; where agterm-win cannot do part of it yet, it keeps
+agterm's behavior for a viewer that cannot (the server holds what no presenter shows) rather than inventing one.
 The native Windows server port waits until the client reaches parity with the WSL server.
 
 ## 1. Dynamic session naming — done on `claude/nice-einstein-u0a4qh`, not yet verified on Windows
@@ -45,8 +47,9 @@ The native Windows server port waits until the client reaches parity with the WS
 - Settings ▸ Notifications: banners, sound, the count beside ●, taskbar flash (off / once / until in front,
   default until in front, the behavior before this setting).
 - `notify` replies with `ControlNotify.bannersOffNote` while banners are off; `tree` reports `unseen`.
-- agterm-server sessions: as on a Mac, every catalog row opens its `zmx present` stream as presenter
-  (`RemoteWindow`), which brings the server's `notify`; asks, picks, overlays and pages it declines for now. A
+- agterm-server sessions: as on a Mac, every catalog row opens its `zmx present` stream (`RemoteWindow`), which
+  brings the server's `notify`. It is a mirror (`RemotePresentationClient.presents` false) until agterm-win shows
+  asks, picks, HUD, overlays and pages, so the server keeps those waiting as it does while no Mac shows the session. A
   server program's OSC 9/777 travels as bytes in the attached pane, so it reaches agterm-win only from the session
   the shared server terminal shows; a background server session's OSC needs a terminal per server session.
 
