@@ -1,8 +1,7 @@
-# Builds the pinned zmx Windows port into windows/vendor/zmx (zmx.exe and its LICENSE), which --local panes attach
-# through. The port carries agterm's zmx patches as commits, so nothing is applied over the pin. Zig 0.17 comes
-# from AGTERM_ZMX_ZIG, else from PATH.
+# Builds the vendored zmx Windows port into vendor/zmx (zmx.exe and its LICENSE), which --local panes attach through.
+# zmx and its complete Zig dependency closure are committed under third-party, so this build performs no network access.
+# Zig 0.17 comes from AGTERM_ZMX_ZIG, else from PATH.
 $ErrorActionPreference = "Stop"
-$repo = "https://github.com/andriyg76/zmx-win"
 $rev = "be6bd9b7025fa7dfb4a37855c302ad2b7014933a"
 $zig = if ($env:AGTERM_ZMX_ZIG) { $env:AGTERM_ZMX_ZIG } else { (Get-Command zig -ErrorAction Stop).Source }
 $zigVersion = (& $zig version).Trim()
@@ -14,16 +13,11 @@ $stamp = Join-Path $target ".version"
 $want = "$rev $zigVersion"
 if ((Test-Path $stamp) -and ((Get-Content $stamp) -eq $want) -and (Test-Path (Join-Path $target "zmx.exe"))) { exit 0 }
 
-$build = Join-Path $env:TEMP "agterm-zmx-$($rev.Substring(0, 12))"
-# the Ghostty package zig fetches into the tree has paths past MAX_PATH, which only the \\?\ form removes
-function Remove-Build { if (Test-Path $build) { cmd /c rd /s /q "\\?\$build" } }
-Remove-Build
-git init -q $build
-git -C $build remote add origin $repo
-git -C $build fetch -q --depth 1 origin $rev
-git -C $build -c advice.detachedHead=false checkout -q FETCH_HEAD
-if ($LASTEXITCODE -ne 0) { throw "fetching zmx $rev failed" }
-Push-Location $build
+$source = Join-Path $root "third-party\zmx"
+if (-not (Test-Path (Join-Path $source "build.zig")) -or -not (Test-Path (Join-Path $root "third-party\zmx-deps\ghostty"))) {
+    throw "vendored zmx sources are incomplete under third-party"
+}
+Push-Location $source
 try {
     # agterm panes export ZMX_NO_DETACH_KEY, and an upstream test that unsets it aborts Zig 0.17's test runner
     Remove-Item Env:ZMX_NO_DETACH_KEY -ErrorAction SilentlyContinue
@@ -37,6 +31,5 @@ try {
 
 if (Test-Path $target) { Remove-Item -Recurse -Force $target }
 New-Item -ItemType Directory -Force $target | Out-Null
-Copy-Item (Join-Path $build "zig-out\bin\zmx.exe"), (Join-Path $build "LICENSE") $target
+Copy-Item (Join-Path $source "zig-out\bin\zmx.exe"), (Join-Path $source "LICENSE") $target
 Set-Content $stamp $want
-Remove-Build

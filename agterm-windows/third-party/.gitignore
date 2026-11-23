@@ -1,0 +1,6 @@
+# vendored trees are committed as fetched; only build output stays out
+!build/
+!vendor/
+!windows/
+.zig-cache/
+zig-out/
