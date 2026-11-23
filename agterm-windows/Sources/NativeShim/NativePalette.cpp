@@ -229,7 +229,7 @@ extern "C" void *nt_palette_create(void *parent, uint32_t dpi) {
     WNDCLASSEXW windowClass{sizeof(windowClass)};
     windowClass.lpfnWndProc = panelProcedure;
     windowClass.hInstance = GetModuleHandleW(nullptr);
-    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    windowClass.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));  // IDC_ARROW, which is narrow without UNICODE
     windowClass.lpszClassName = L"agterm-palette";
     RegisterClassExW(&windowClass);
     HWND panel = CreateWindowExW(0, L"agterm-palette", L"", WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0, 0, 10, 10,
