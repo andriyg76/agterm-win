@@ -5,8 +5,11 @@ Running `.github/workflows/windows-release.yml` on `windows-port` (Actions ▸ w
 with `scripts\release.ps1`, has SignPath sign it, and publishes the release. `scripts\release.ps1 -Version <version>
 [-Publish]` does the same locally; its header lists the tools and the signing variables.
 
-- **GitHub / winget**: `-Publish` uploads the installer and its `.sha256` to this fork's release `v<version>`.
-  A winget manifest points at that asset with `InstallerType: inno`.
+- **GitHub**: `-Publish` uploads the installer and its `.sha256` to this fork's release `v<version>`.
+- **winget / Chocolatey**: `scripts\package-managers.ps1 -Version <version>` renders `winget/` and `chocolatey/` for
+  that release into `build\package-managers\<version>`. The winget folder goes to a `microsoft/winget-pkgs` PR as
+  `manifests/a/andriyg76/agterm-win/<version>`; the `.nupkg` is pushed with `choco push` and the account's API key.
+  Both identifiers are `agterm-win`, leaving `agterm` to upstream.
 - **Microsoft Store**: in Partner Center, an EXE app whose package URL is that release asset (versioned, HTTPS),
   silent switches `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`. The Store requires a signed installer and does not
   update the app; winget or the next installer does.

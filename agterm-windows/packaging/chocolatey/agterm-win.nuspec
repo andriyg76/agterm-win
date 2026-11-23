@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>agterm-win</id>
+    <version>{{Version}}</version>
+    <title>agterm (Windows port)</title>
+    <authors>Umputun, andriyg76</authors>
+    <owners>andriyg76</owners>
+    <projectUrl>https://github.com/andriyg76/agterm-win</projectUrl>
+    <packageSourceUrl>https://github.com/andriyg76/agterm-win/tree/windows-port/agterm-windows/packaging/chocolatey</packageSourceUrl>
+    <projectSourceUrl>https://github.com/andriyg76/agterm-win</projectSourceUrl>
+    <bugTrackerUrl>https://github.com/andriyg76/agterm-win/issues</bugTrackerUrl>
+    <iconUrl>https://raw.githubusercontent.com/andriyg76/agterm-win/windows-port/agterm-windows/Resources/agterm.png</iconUrl>
+    <licenseUrl>https://github.com/andriyg76/agterm-win/blob/windows-port/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <releaseNotes>https://github.com/andriyg76/agterm-win/releases/tag/v{{Version}}</releaseNotes>
+    <tags>agterm terminal terminal-emulator ghostty cli</tags>
+    <summary>Windows port of agterm, a simply good terminal with a full control API.</summary>
+    <description>agterm-win is the Windows port of agterm: a native terminal built on libghostty with a workspace-to-session sidebar and a full control API driven by `agtermctl`. It installs per user and adds its folder to the user PATH so `agtermctl` runs from any shell. Requires Windows 10 1809 or later, x64.</description>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
