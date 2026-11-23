@@ -109,6 +109,10 @@ final class NativeShell {
                                  instance, nil)
         findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
         remoteTerminal = makeTerminal()
+        // OSC 9/777 of the server session this terminal attaches; the server sends only `notify` through its stream
+        remoteTerminal.onNotification = { [unowned self] title, body in
+            if let running { deliver(running, title: title, body: body, source: .terminal) }
+        }
         control = ControlSocket.start(path: socketPath, host: self, version: version)
         startToasts()
         Keys.onReload = { [unowned self] in WinKeyHook.update(window: self.window) }
@@ -119,6 +123,9 @@ final class NativeShell {
         restoreLocals()
         discoverProfiles(then: requested)
         remote.changed = { [weak self] in self?.catalogChanged() }
+        remote.onNotification = { [weak self] id, notification in
+            self?.deliver(id, title: notification.title, body: notification.body, source: notification.source == "control" ? .control : .terminal)
+        }
         if installServer {
             installRemoteServer()
         } else {
@@ -427,8 +434,12 @@ final class NativeShell {
             log("notification: dropped for \(id), the session is in view")
             return nil
         }
-        if selected != id || !inFront, let index = locals.firstIndex(where: { $0.id == id }) {
-            locals[index].unseen += 1
+        if selected != id || !inFront {
+            if let index = locals.firstIndex(where: { $0.id == id }) {
+                locals[index].unseen += 1
+            } else {
+                serverUnseen[id, default: 0] += 1
+            }
             rebuild()
         }
         flashTaskbar()
@@ -457,6 +468,8 @@ final class NativeShell {
     }
 
     private var toastsReady = false
+    // notifications each server session had out of view, kept here as a Mac keeps its own count for a remote row
+    private var serverUnseen: [Foundation.UUID: Int] = [:]
 
     private func startToasts() {
         let icon = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).deletingLastPathComponent()
@@ -686,7 +699,7 @@ final class NativeShell {
 
     private func rebuild() {
         guard let tree else { return }
-        var sidebar = SessionSidebar.items(remote.store.workspaces)
+        var sidebar = SessionSidebar.items(remote.store.workspaces, unseen: settings.notifications.unseenCount ? serverUnseen : [:])
         if !locals.isEmpty {
             let children = locals.map {
                 SessionSidebar.Item(id: $0.id, title: SessionSidebar.localTitle($0.name, exited: $0.exited, attention: $0.attention || $0.unseen > 0,
@@ -733,6 +746,7 @@ final class NativeShell {
             locals[index].unseen = 0
             rebuild()
         }
+        if serverUnseen.removeValue(forKey: id) != nil { rebuild() }
         // banners already shown for the session say nothing new once it is in view
         if toastsReady { nt_toast_remove_group(Array(id.uuidString.utf16) + [0]) }
         if let tree, let item = items[id] { nt_tree_select(tree, item) }

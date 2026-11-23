@@ -45,8 +45,10 @@ The native Windows server port waits until the client reaches parity with the WS
 - Settings ▸ Notifications: banners, sound, the count beside ●, taskbar flash (off / once / until in front,
   default until in front, the behavior before this setting).
 - `notify` replies with `ControlNotify.bannersOffNote` while banners are off; `tree` reports `unseen`.
-- Remote: sessions on agterm-server only notify through the server's presentation stream, which agterm-win does
-  not open yet; see the open question in the PR.
+- agterm-server sessions: as on a Mac, every catalog row opens its `zmx present` stream as presenter
+  (`RemoteWindow`), which brings the server's `notify`; asks, picks, overlays and pages it declines for now. A
+  server program's OSC 9/777 travels as bytes in the attached pane, so it reaches agterm-win only from the session
+  the shared server terminal shows; a background server session's OSC needs a terminal per server session.
 
 ## 4. Settings — Appearance done locally, not yet verified on Windows
 
