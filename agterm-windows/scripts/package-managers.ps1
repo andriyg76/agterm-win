@@ -1,5 +1,5 @@
 # Renders packaging\winget and packaging\chocolatey for a published release into build\package-managers\<version>,
-# taking the installer's sha256 from the release, and packs the Chocolatey .nupkg when choco is on PATH.
+# taking the x64 and arm64 installers' sha256 from the release, and packs the Chocolatey .nupkg when choco is on PATH.
 #   scripts\package-managers.ps1 -Version 0.44.1.1
 # winget: the winget folder is the manifests/a/andriyg76/agterm-win/<version> directory of a microsoft/winget-pkgs PR.
 # Chocolatey: choco push <nupkg> --source https://push.chocolatey.org/ with the account's API key.
@@ -10,14 +10,17 @@ $repo = (git -C $root remote get-url origin) -replace '^https://github\.com/', '
 $tag = "v$Version"
 $release = gh release view $tag --repo $repo --json publishedAt | ConvertFrom-Json
 if ($LASTEXITCODE) { throw "no release $tag in $repo" }
-$sha256 = ((gh release download $tag --repo $repo --pattern "*.sha256" --output -) -split '\s+')[0].ToLowerInvariant()
-if ($sha256 -notmatch '^[0-9a-f]{64}$') { throw "release $tag has no readable .sha256" }
 $tokens = @{
     Version     = $Version
-    Url         = "https://github.com/$repo/releases/download/$tag/agterm-win-$Version-x64-setup.exe"
-    Sha256      = $sha256
-    Sha256Upper = $sha256.ToUpperInvariant()
     ReleaseDate = ([datetime]$release.publishedAt).ToUniversalTime().ToString("yyyy-MM-dd")
+}
+foreach ($arch in @{ X64 = "x64"; Arm64 = "arm64" }.GetEnumerator()) {
+    $setup = "agterm-win-$Version-$($arch.Value)-setup.exe"
+    $sha256 = ((gh release download $tag --repo $repo --pattern "$setup.sha256" --output -) -split '\s+')[0].ToLowerInvariant()
+    if ($sha256 -notmatch '^[0-9a-f]{64}$') { throw "release $tag has no readable $setup.sha256" }
+    $tokens["Url$($arch.Key)"] = "https://github.com/$repo/releases/download/$tag/$setup"
+    $tokens["Sha256$($arch.Key)"] = $sha256
+    $tokens["Sha256$($arch.Key)Upper"] = $sha256.ToUpperInvariant()
 }
 
 $out = Join-Path $root "build\package-managers\$Version"

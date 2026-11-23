@@ -1,17 +1,19 @@
 # agterm-win packaging
 
 Running `.github/workflows/windows-release.yml` on `windows-port` (Actions ▸ windows-release ▸ Run workflow, or
-`gh workflow run windows-release.yml --ref windows-port`) tags the next `v<AGTERM_VERSION>.<n>`, builds the installer
-with `scripts\release.ps1`, has SignPath sign it, and publishes the release. `scripts\release.ps1 -Version <version>
-[-Publish]` does the same locally; its header lists the tools and the signing variables.
+`gh workflow run windows-release.yml --ref windows-port`) tags the next `v<AGTERM_VERSION>.<n>`, builds the x64 and
+arm64 installers natively on `windows-2022` and `windows-11-arm` with `scripts\release.ps1`, has SignPath sign them, and
+publishes the release. `scripts\release.ps1 -Version <version> [-Arch x64|arm64] [-Publish]` does the same locally for the
+host's architecture; its header lists the tools and the signing variables.
 
-- **GitHub**: `-Publish` uploads the installer and its `.sha256` to this fork's release `v<version>`.
+- **GitHub**: `-Publish` uploads the installer and its `.sha256` to this fork's release `v<version>`, creating it
+  for the first architecture and adding to it for the second.
 - **winget / Chocolatey**: `scripts\package-managers.ps1 -Version <version>` renders `winget/` and `chocolatey/` for
-  that release into `build\package-managers\<version>`. The winget folder goes to a `microsoft/winget-pkgs` PR as
+  that release's two installers into `build\package-managers\<version>`. The winget folder goes to a `microsoft/winget-pkgs` PR as
   `manifests/a/andriyg76/agterm-win/<version>`; the `.nupkg` is pushed with `choco push` and the account's API key.
   Both identifiers are `agterm-win`, leaving `agterm` to upstream.
-- **Microsoft Store**: an MSIX from `scripts\msix.ps1`, which `windows-release.yml` uploads as the `msix` artifact for
-  Partner Center; the Store signs it. Its identity comes from the repository variables `MSIX_IDENTITY_NAME`,
+- **Microsoft Store**: one MSIX per architecture from `scripts\msix.ps1`, which `windows-release.yml` uploads as the
+  `msix-x64` and `msix-arm64` artifacts; both go into the same Partner Center submission, and the Store signs them. Its identity comes from the repository variables `MSIX_IDENTITY_NAME`,
   `MSIX_PUBLISHER` and `MSIX_PUBLISHER_DISPLAY_NAME`, as Partner Center's Product identity page shows them.
   The package needs Windows 10 1903, turns AppData and registry write virtualization off (`unvirtualizedResources`) so
   shells write where they would outside it, and puts `agtermctl` on PATH as its one execution alias; `agterm-win` starts from the Start menu.
