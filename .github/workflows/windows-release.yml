@@ -67,6 +67,8 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
+      - if: matrix.arch == 'arm64'
+        run: ./scripts/use-msvc.ps1 -Toolset 14.43 -Component Microsoft.VisualStudio.Component.VC.14.43.17.13.ARM64 -Arch arm64
       - name: Inno Setup
         run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
       - name: Build
