@@ -204,6 +204,8 @@ $shellCases = [ordered]@{
     }
 }
 
+. (Join-Path $PSScriptRoot "title-bar-cases.ps1")
+
 # seeds a case's state directory before its window starts; a keymap problem at launch would open a message box
 $shellPreparations = @{
     "notify-banners-off" = { param($state) Set-Content (Join-Path $state "native.json") '{"notifications": {"banners": false}}' }
