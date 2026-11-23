@@ -46,12 +46,11 @@ package.targets[0].dependencies.append(.product(name: "Markdown", package: "swif
 #endif
 
 #if os(Windows)
-// agterm-server hosts sessions on Linux; the Windows client only connects to one. agtermctl runs inside a session
-// on its own host, so on Windows it waits for local sessions, which need a CreateProcess/ConPTY port of its POSIX job control.
-package.products.removeAll { ["agterm-server", "agtermctl"].contains($0.name) }
+// agterm-server hosts sessions on Linux; the Windows client only connects to one. agtermctl drives agterm-win's own
+// control socket; its tests run on macOS and Linux.
+package.products.removeAll { $0.name == "agterm-server" }
 package.targets.removeAll {
-    ["AgtermServerKit", "agterm-server", "AgtermServerTests",
-     "agtermctlKit", "agtermctl", "session-wait-watchdog-probe", "agtermctlKitTests"].contains($0.name)
+    ["AgtermServerKit", "agterm-server", "AgtermServerTests", "session-wait-watchdog-probe", "agtermctlKitTests"].contains($0.name)
 }
 #endif
 

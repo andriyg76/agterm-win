@@ -1,6 +1,7 @@
 import Foundation
 import agtermCore
 
+#if !os(Windows)
 /// Bridges a streaming control command between a pair of descriptors and the app's socket: the request
 /// goes out, its one ordinary reply comes back, and after an ok everything is copied both ways untouched.
 ///
@@ -131,3 +132,21 @@ struct StreamBridge: Sendable {
         }
     }
 }
+#else
+let STDIN_FILENO: Int32 = 0
+let STDOUT_FILENO: Int32 = 1
+
+/// StreamBridge on Windows refuses: its streams are host plumbing a viewer reaches over ssh, which no Windows
+/// agterm serves.
+struct StreamBridge: Sendable {
+    let socket: Int32
+    let input: Int32
+    let output: Int32
+
+    func open(_ request: ControlRequest) throws {
+        throw SocketClientError("\(request.cmd.rawValue) streams are not served on Windows")
+    }
+
+    func pump() {}
+}
+#endif

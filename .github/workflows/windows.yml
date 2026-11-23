@@ -60,8 +60,10 @@ jobs:
           # not .build: its debug link comes back from the cache unreadable, and stage.ps1 copies through it
           path: agterm-windows/vendor
           key: app-vendor-${{ env.SWIFT_BUILD }}-${{ hashFiles('agterm-windows/Package.swift', 'agtermCore/Package.swift', 'agtermCore/Package.resolved', 'agterm-windows/scripts/fetch-*.ps1') }}
-      - run: ./scripts/fetch-webview2.ps1; ./scripts/fetch-xterm.ps1; ./scripts/fetch-server.ps1
-      - run: swift build
+      - run: ./scripts/fetch-webview2.ps1; ./scripts/fetch-xterm.ps1; ./scripts/fetch-server.ps1; ./scripts/fetch-agwcore.ps1
+      - run: swift build --build-tests
+      - run: swift build --product agtermctl
+      - run: swift test --skip-build
       - run: ./scripts/stage.ps1 -Output "$env:RUNNER_TEMP\agterm-win"
       - run: ./tests/integration/run.ps1 -App "$env:RUNNER_TEMP\agterm-win" -Results "$env:RUNNER_TEMP\results"
       - if: always()

@@ -923,7 +923,9 @@ struct Version: RequestCommand {
     /// `argv[0]`, which is whatever the caller chose to exec with, and `realpath` because the installed CLI
     /// is a symlink into the bundle.
     static func clientPath() -> String? {
-        #if !canImport(Darwin)
+        #if os(Windows)
+        return Bundle.main.executablePath
+        #elseif !canImport(Darwin)
         guard let resolved = realpath("/proc/self/exe", nil) else { return nil }
         defer { free(resolved) }
         return String(cString: resolved)

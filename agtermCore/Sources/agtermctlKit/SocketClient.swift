@@ -56,7 +56,7 @@ struct SocketClient {
         data.append(UInt8(ascii: "\n"))
 
         let fd = try connect()
-        defer { close(fd) }
+        defer { UnixSocket.closeSocket(fd) }
 
         try Self.writeAll(fd, data)
 
@@ -72,6 +72,12 @@ struct SocketClient {
 
     /// Open and connect a `AF_UNIX` stream socket to `path`. The caller owns the descriptor.
     func connect() throws -> Int32 {
+        #if os(Windows)
+        guard let fd = UnixSocket.connected(path: path) else {
+            throw SocketClientError("connect(\(path)) failed — agterm may be stopped or unable to accept connections")
+        }
+        return fd
+        #else
         var addr = sockaddr_un()
         let pathCapacity = MemoryLayout.size(ofValue: addr.sun_path)
         guard path.utf8.count < pathCapacity else {
@@ -113,6 +119,7 @@ struct SocketClient {
                                     connectErrno: failure)
         }
         return fd
+        #endif
     }
 
     /// The sentence after a failed `connect`. A refusal and a missing socket are the two the ownership
@@ -133,7 +140,7 @@ struct SocketClient {
         #if canImport(Darwin)
         let fd = open(ControlResolve.ownershipLockPath(forSocket: socketPath), O_RDONLY | O_CLOEXEC)
         guard fd >= 0 else { return nil }
-        defer { close(fd) }
+        defer { UnixSocket.closeSocket(fd) }
         var query = flock()
         query.l_type = Int16(F_WRLCK)
         query.l_whence = Int16(SEEK_SET)
@@ -167,7 +174,7 @@ struct SocketClient {
         var buffer = Data()
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
         while true {
-            let n = chunk.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+            let n = chunk.withUnsafeMutableBytes { UnixSocket.read(fd, $0.baseAddress!, $0.count) }
             if n == 0 { return buffer.isEmpty ? nil : buffer }
             if n < 0 { return nil }
             if let idx = chunk[0..<n].firstIndex(of: UInt8(ascii: "\n")) {
@@ -564,6 +571,8 @@ struct SocketClient {
     }
 }
 
+#if !os(Windows)
 private func systemConnect(_ fd: Int32, _ addr: UnsafePointer<sockaddr>, _ len: socklen_t) -> Int32 {
     UnixSocket.connect(fd, addr, len)
 }
+#endif

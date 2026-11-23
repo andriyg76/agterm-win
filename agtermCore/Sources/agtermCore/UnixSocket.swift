@@ -92,6 +92,11 @@ public enum UnixSocket {
         _ = closesocket(SOCKET(UInt32(bitPattern: fd)))
     }
 
+    /// read receives up to `count` bytes, 0 at end of stream and negative on failure, as POSIX read does.
+    public static func read(_ fd: Int32, _ bytes: UnsafeMutableRawPointer, _ count: Int) -> Int {
+        Int(recv(SOCKET(UInt32(bitPattern: fd)), bytes.assumingMemoryBound(to: CChar.self), Int32(count), 0))
+    }
+
     private static func streamSocket() -> Int32 {
         guard started else { return -1 }
         let s = socket(AF_UNIX, streamType, 0)
@@ -117,6 +122,26 @@ public enum UnixSocket {
         Glibc.send(fd, bytes, count, Int32(MSG_NOSIGNAL))
         #else
         Musl.send(fd, bytes, count, Int32(MSG_NOSIGNAL))
+        #endif
+    }
+
+    public static func read(_ fd: Int32, _ bytes: UnsafeMutableRawPointer, _ count: Int) -> Int {
+        #if canImport(Darwin)
+        Darwin.read(fd, bytes, count)
+        #elseif canImport(Glibc)
+        Glibc.read(fd, bytes, count)
+        #else
+        Musl.read(fd, bytes, count)
+        #endif
+    }
+
+    public static func closeSocket(_ fd: Int32) {
+        #if canImport(Darwin)
+        _ = Darwin.close(fd)
+        #elseif canImport(Glibc)
+        _ = Glibc.close(fd)
+        #else
+        _ = Musl.close(fd)
         #endif
     }
 

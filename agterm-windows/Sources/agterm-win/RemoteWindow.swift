@@ -9,6 +9,7 @@ final class RemoteWindow: RemoteCatalogEffects {
     let store: AppStore
     private(set) var mirror: RemoteCatalogMirror!
     private var client: RemoteCatalogClient!
+    private(set) var actions: RemoteCatalogActions!
     private let transport: WSLTransport
     /// changed runs whenever what the sidebar shows may have moved.
     var changed: () -> Void = {}
@@ -27,6 +28,18 @@ final class RemoteWindow: RemoteCatalogEffects {
             self?.changed()
         }
         client = RemoteCatalogClient(mirror: mirror, transport: transport, runner: transport.runner)
+        actions = RemoteCatalogActions(mirror: mirror, runner: transport.runner)
+        store.remoteActions = actions
+    }
+
+    var connected: Bool { mirror.state == .connected }
+
+    /// perform sends a structural operation to the server; the catalog stream brings back what it changed.
+    func perform(_ operation: RemoteOperation) async -> ControlResponse {
+        switch actions.prepare(operation) {
+        case .ready(let prepared): await actions.send(prepared)
+        case .refused(let response): response
+        }
     }
 
     func start() {
