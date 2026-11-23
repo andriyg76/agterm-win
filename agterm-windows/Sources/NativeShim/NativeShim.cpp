@@ -161,6 +161,7 @@ struct nt_terminal {
     int32_t scroll = 0;
     bool focused = true;
     bool attention = false;  // a bell or notification since nt_take_attention
+    bool naming = false;     // the title or the working directory changed since nt_take_naming
     uint32_t selectionColor = 0x264F78;
     bool selecting = false, hasSelection = false;
     int32_t selectionMode = 0;  // 0 cells, 1 words, 2 lines
@@ -168,7 +169,7 @@ struct nt_terminal {
     std::pair<Point, Point> paintSpan{};  // range() once per frame, not per row
     uint32_t foreground = 0xCCCCCC, background = 0x1E1E1E;
     std::vector<Cell> grid, history;
-    std::wstring title;
+    std::wstring title, pwd;
     std::vector<UINT16> glyphs;
     std::vector<FLOAT> advances;
 
@@ -469,9 +470,18 @@ struct nt_terminal {
         GhosttyString value{};
         ghostty_terminal_get(emulator, GHOSTTY_TERMINAL_DATA_TITLE, &value);
         std::wstring next = value.ptr ? widen(value.ptr, static_cast<uint32_t>(value.len)) : std::wstring();
-        if (next == title) return;
-        title = next;
-        if (IsWindowVisible(window)) showTitle();
+        if (next != title) {
+            title = next;
+            naming = true;
+            if (IsWindowVisible(window)) showTitle();
+        }
+        GhosttyString path{};
+        ghostty_terminal_get(emulator, GHOSTTY_TERMINAL_DATA_PWD, &path);
+        std::wstring directory = path.ptr ? widen(path.ptr, static_cast<uint32_t>(path.len)) : std::wstring();
+        if (directory != pwd) {
+            pwd = directory;
+            naming = true;
+        }
     }
 
     // the window's title is the shown terminal's; a hidden one keeps its title until it is shown
@@ -899,6 +909,12 @@ extern "C" void nt_reset(nt_terminal *terminal) {
 extern "C" void nt_show_title(nt_terminal *terminal) { terminal->showTitle(); }
 
 extern "C" int32_t nt_take_attention(nt_terminal *terminal) { return std::exchange(terminal->attention, false); }
+
+extern "C" int32_t nt_take_naming(nt_terminal *terminal) { return std::exchange(terminal->naming, false); }
+
+extern "C" int32_t nt_title(nt_terminal *terminal, uint16_t *out, int32_t capacity) { return give(terminal->title, out, capacity); }
+
+extern "C" int32_t nt_pwd(nt_terminal *terminal, uint16_t *out, int32_t capacity) { return give(terminal->pwd, out, capacity); }
 
 extern "C" void nt_dark_title_bar(void *window) {
     BOOL dark = TRUE;

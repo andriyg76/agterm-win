@@ -10,12 +10,18 @@ struct NativeSettingsTests {
         settings.fontPoints = 14
         settings.frame = .init(left: 10, top: 20, right: 1210, bottom: 820)
         settings.maximized = true
-        settings.localSessions = [.init(title: "build", commandLine: "cmd.exe"), .init(title: "WSL Ubuntu", commandLine: "wsl.exe -d Ubuntu --cd ~")]
+        settings.localSessions = [.init(title: "build", customName: "api", commandLine: "cmd.exe", directory: #"C:\dev"#), .init(title: "WSL Ubuntu", commandLine: "wsl.exe -d Ubuntu --cd ~")]
         settings.selectedLocal = 1
         settings.defaultProfile = "WSL Ubuntu"
         try settings.save(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         #expect(NativeSettings.load(from: url) == settings)
+    }
+
+    @Test func aLocalSessionFromAnOlderBuildLoadsWithoutANameOrFolder() throws {
+        try Data(#"{"localSessions": [{"title": "Windows PowerShell", "commandLine": "powershell.exe -NoLogo"}]}"#.utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(NativeSettings.load(from: url).localSessions == [.init(title: "Windows PowerShell", commandLine: "powershell.exe -NoLogo")])
     }
 
     @Test func missingOrBrokenFilesGiveTheDefaults() throws {

@@ -101,6 +101,22 @@ struct NativeControlTests {
         #expect(!missing.ok && missing.error == "no such session: ffffffff" && host.closed.isEmpty)
     }
 
+    @Test func aBlankRenameReachesTheHostToRestoreTheAutomaticName() async {
+        let host = FakeHost()
+        _ = host.add("a")
+        #expect(await handle(ControlRequest(cmd: .sessionRename, args: ControlArgs(name: "")), host).ok)
+        #expect(host.renamed.map(\.1) == [""])
+        #expect(await handle(ControlRequest(cmd: .sessionRename), host).error == "session.rename requires a name")
+    }
+
+    @Test func treeReportsALocalSessionsDirectoryAndTitle() async {
+        let host = FakeHost()
+        host.localSessions = [NativeControl.Local(id: UUID(), name: "agterm", commandLine: "pwsh.exe", exited: false, attention: false,
+                                                  cwd: #"C:\dev\agterm"#, title: "vim")]
+        let session = try! #require(await handle(ControlRequest(cmd: .tree), host).result?.tree?.workspaces.first?.sessions.first)
+        #expect(session.cwd == #"C:\dev\agterm"# && session.title == "vim")
+    }
+
     @Test func newSessionStartsLocallyUnlessTheWorkspaceIsTheServers() async {
         let host = FakeHost()
         let workspace = UUID()
