@@ -27,13 +27,9 @@
       desktop4:SupportsMultipleInstances="true">
       <uap:VisualElements DisplayName="agterm" Description="A simply good terminal with a full control API."
         BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
-      <!-- agtermctl rides on agterm's entry: a second Application without a Start entry is a headless app the Store refuses -->
+      <!-- one alias extension per Application, and a second Application without a Start entry is a headless app the
+           Store refuses, so only agtermctl is aliased; agterm's own sessions have its folder on PATH -->
       <Extensions>
-        <uap5:Extension Category="windows.appExecutionAlias" Executable="agterm-win.exe" EntryPoint="Windows.FullTrustApplication">
-          <uap5:AppExecutionAlias>
-            <uap5:ExecutionAlias Alias="agterm-win.exe" />
-          </uap5:AppExecutionAlias>
-        </uap5:Extension>
         <uap5:Extension Category="windows.appExecutionAlias" Executable="agtermctl.exe" EntryPoint="Windows.FullTrustApplication">
           <uap5:AppExecutionAlias desktop4:Subsystem="console">
             <uap5:ExecutionAlias Alias="agtermctl.exe" />
