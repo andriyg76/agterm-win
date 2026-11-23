@@ -42,7 +42,7 @@ struct TerminalThemeTests {
         #expect(Appearance(theme: "Nord", darkTheme: "Dracula").activeTheme(dark: true) == "Nord")
     }
 
-    @Test func themeSetFollowsTheMacRules() {
+    @Test func themeSetFollowsTheMacRules() throws {
         let catalog = ThemeCatalog(names: ["Dracula", "Nord"])
         let start = Appearance(theme: "Nord")
         #expect(start.setting(name: "Nord", light: "Dracula", dark: nil, catalog: catalog) == .failure(.both))
