@@ -9,7 +9,7 @@ public enum TerminalInput {
         public static let alt = Modifiers(rawValue: 2)
         public static let control = Modifiers(rawValue: 4)
 
-        /// parameter is xterm's modifier parameter: 1 plus shift 1, alt 2, control 4.
+        /// parameter is the CSI modifier parameter: 1 plus shift 1, alt 2, control 4.
         var parameter: Int { 1 + rawValue }
     }
 

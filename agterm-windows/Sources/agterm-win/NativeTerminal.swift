@@ -8,13 +8,10 @@ private let nativeExitMessage = UINT(WM_APP + 12)
 // the window procedure finds its terminal here; a terminal is in it from its window's creation to its destruction
 private nonisolated(unsafe) var terminals: [HWND: NativeTerminal] = [:]
 
-/// NativeTerminal is one terminal drawn without WebView2: the program under ConPTY, agwinterm's emulator core parsing
-/// its output, Direct2D with DirectWrite drawing it. It is a top-level window of its own (`--native -- <command>`) or
-/// a child of NativeShell beside the sidebar.
+/// NativeTerminal runs a program under ConPTY, parses its output with libghostty-vt, and draws it with
+/// Direct2D and DirectWrite. It is a top-level window for `-- <command>` or a child of NativeShell beside the sidebar.
 @MainActor
 final class NativeTerminal {
-    static let coreFile = "agwinterm_core-abi19.dll"
-
     private(set) var window: HWND?
     private var terminal: OpaquePointer?
     private var console: PseudoConsole?
@@ -45,15 +42,15 @@ final class NativeTerminal {
     var onFontSize: ((Float) -> Void)?
 
     /// open runs `commandLine` in a top-level terminal window.
-    static func open(commandLine: String, core: URL) {
+    static func open(commandLine: String) {
         nt_init_process()
-        let terminal = NativeTerminal(parent: nil, core: core)
+        let terminal = NativeTerminal(parent: nil)
         ShowWindow(terminal.window, SW_SHOW)
         terminal.resize()
         terminal.start(commandLine)
     }
 
-    init(parent: HWND?, core: URL, points: Float = NativeMenu.defaultPoints) {
+    init(parent: HWND?, points: Float = NativeMenu.defaultPoints) {
         self.points = points
         let instance = GetModuleHandleW(nil)
         let className = Array("agterm-native".utf16) + [0]
@@ -79,8 +76,7 @@ final class NativeTerminal {
         for message in [UINT(WM_DROPFILES), UINT(WM_COPYDATA), 0x0049] { ChangeWindowMessageFilterEx(window, message, DWORD(MSGFLT_ALLOW), nil) }
         if parent == nil { nt_dark_title_bar(UnsafeMutableRawPointer(window)) }
         var error = [UInt16](repeating: 0, count: 512)
-        terminal = nt_create(UnsafeMutableRawPointer(window), Array(core.path.utf16) + [0], Array("Cascadia Mono".utf16) + [0], points,
-                             &error, Int32(error.count))
+        terminal = nt_create(UnsafeMutableRawPointer(window), Array("Cascadia Mono".utf16) + [0], points, &error, Int32(error.count))
         guard terminal != nil else {
             let reason = String(decodingCString: error, as: UTF16.self)
             log("native: \(reason)")
@@ -180,7 +176,11 @@ final class NativeTerminal {
         var client = RECT()
         GetClientRect(window, &client)
         var columns: Int32 = 0, rows: Int32 = 0
-        nt_resize(terminal, client.right - client.left, client.bottom - client.top, &columns, &rows)
+        nt_resize(terminal, client.right - client.left, client.bottom - client.top, &columns, &rows, { context, bytes, length in
+            guard let context, let bytes else { return }
+            let reply = Data(bytes: bytes, count: Int(length))
+            MainActor.assumeIsolated { Unmanaged<NativeTerminal>.fromOpaque(context).takeUnretainedValue().console?.write(reply) }
+        }, Unmanaged.passUnretained(self).toOpaque())
         guard (columns, rows) != grid else { return }
         grid = (columns, rows)
         console?.resize(columns: Int16(clamping: columns), rows: Int16(clamping: rows))

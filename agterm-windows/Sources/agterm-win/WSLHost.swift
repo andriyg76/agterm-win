@@ -1,5 +1,5 @@
 import Foundation
-import WebView2Shim
+import NativeShim
 import agtermCore
 
 /// An agterm-server inside a WSL distribution, reached through `wsl.exe` where the Mac reaches a host through ssh. The
@@ -79,7 +79,7 @@ struct WSLHost {
 
     private static func sha256(of file: URL) throws -> String {
         var digest = [UInt8](repeating: 0, count: 32)
-        let status = sha256_file(Array(file.path.utf16) + [0], &digest)
+        let status = nt_sha256_file(Array(file.path.utf16) + [0], &digest)
         guard status == 0 else { throw Failure.reply("hashing \(file.path) failed: \(String(UInt32(bitPattern: status), radix: 16))") }
         return digest.map { String(format: "%02x", $0) }.joined()
     }

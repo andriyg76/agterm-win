@@ -29,11 +29,6 @@ New-Item -ItemType Directory $payload, $results | Out-Null
 Copy-Item -Recurse $App (Join-Path $payload "app")
 Copy-Item -Recurse $PSScriptRoot (Join-Path $payload "tests")
 if (-not $KeepOpen) { Set-Content (Join-Path $payload "close-on-pass") "" }
-# Sandbox's image has no WebView2 runtime: carry the host's, which agterm-win loads as a fixed-version one
-$webview = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft\EdgeWebView\Application" -Directory |
-    ? { $_.Name -match '^\d+(\.\d+){3}$' } | Sort-Object { [version]$_.Name } | Select-Object -Last 1
-if (-not $webview) { throw "no WebView2 runtime on the host to carry into the Sandbox" }
-Copy-Item -Recurse $webview.FullName (Join-Path $payload "webview2")
 $inputXml = [Security.SecurityElement]::Escape($payload)
 $resultsXml = [Security.SecurityElement]::Escape($results)
 $vgpu = if ($DisableVGpu) { "Disable" } else { "Enable" }

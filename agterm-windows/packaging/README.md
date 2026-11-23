@@ -26,15 +26,14 @@ Only the installer built by `windows-release.yml` on a GitHub-hosted runner from
 and every signing request is approved by hand.
 
 Privacy: this program will not transfer any information to other networked systems unless specifically requested by
-the user or the person installing or operating it. The installer downloads the Microsoft Edge WebView2 runtime
-only when it is missing, and `--install-server` downloads agterm-server from GitHub only when run.
+the user or the person installing or operating it. `--install-server` downloads agterm-server from GitHub only when run.
 
 ### Setting SignPath up
 
 1. Publish one unsigned release first (run the workflow with no SignPath variables set): SignPath signs only projects
    already released in the form to be signed. Link this section from the repository's home page and its releases.
 2. Apply at https://signpath.org/apply. Ask there whether the Swift runtime and MSVC runtime DLLs the installer
-   carries count as system libraries; the WebView2 loader is linked statically and its bootstrapper downloaded.
+   carries count as system libraries.
 3. In SignPath: project `agterm-win`, signing policy `release-signing`, artifact configuration `installer`
    (the one in the workflow's comment), GitHub as the trusted build system.
 4. In this repository: secret `SIGNPATH_API_TOKEN`, variable `SIGNPATH_ORGANIZATION_ID`. MFA on GitHub and SignPath

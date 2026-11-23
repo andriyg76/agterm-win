@@ -35,20 +35,13 @@ function Invoke-Case([string]$Name, [string]$Arguments) {
 }
 
 $cases = @(
-    @{ Name = "local-exit-code"
-       Arguments = "-- cmd.exe /d /c echo agterm-smoke-ok& exit /b 3"
-       Expect = @("agterm-smoke-ok", "[process exited with code 3]") },
-    @{ Name = "native-exit-code"
-       Arguments = "--native -- cmd.exe /d /c echo agterm-native-ok& exit /b 3"
+    @{ Name = "exit-code"
+       Arguments = "-- cmd.exe /d /c echo agterm-native-ok& exit /b 3"
        Ready = "native: started"
        Expect = @("agterm-native-ok", "[process exited with code 3]") },
-    @{ Name = "native-unicode"
-       Arguments = "--native -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $fixtures\unicode.ps1"
-       Ready = "native: started"
-       Expect = @(("smoke-" + (-join [char[]](0x043F, 0x0440, 0x0438, 0x0432, 0x0456, 0x0442)) + " " + [char]0x2713),
-                  "[process exited with code 0]") },
-    @{ Name = "local-unicode"
+    @{ Name = "unicode"
        Arguments = "-- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $fixtures\unicode.ps1"
+       Ready = "native: started"
        Expect = @(("smoke-" + (-join [char[]](0x043F, 0x0440, 0x0438, 0x0432, 0x0456, 0x0442)) + " " + [char]0x2713),
                   "[process exited with code 0]") }
 )
@@ -57,8 +50,7 @@ $outcomes = foreach ($case in $cases) {
     $run = Invoke-Case $case.Name $case.Arguments
     $failures = @()
     if ($run.TimedOut) { $failures += "window did not close within $CaseTimeoutSeconds s" }
-    $ready = if ($case.Ready) { $case.Ready } else { "webview ready" }
-    if (-not $run.Log.Contains($ready)) { $failures += "log lacks '$ready'" }
+    if (-not $run.Log.Contains($case.Ready)) { $failures += "log lacks '$($case.Ready)'" }
     if ($null -eq $run.Screen) { $failures += "no screen.txt" }
     else { foreach ($text in $case.Expect) { if (-not $run.Screen.Contains($text)) { $failures += "screen lacks '$text'" } } }
     $crash = Join-Path $run.Dir "state\crash.log"
