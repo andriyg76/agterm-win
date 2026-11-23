@@ -24,6 +24,9 @@ public protocol NativeControlHost: AnyObject {
     func notify(_ id: UUID, title: String, body: String)
     var fontPoints: Float { get }
     func setFontPoints(_ points: Float)
+    var keymap: ControlKeymap { get }
+    /// reloadKeymap reads keymap.conf again and returns how many problems it found.
+    func reloadKeymap() -> Int
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -104,6 +107,10 @@ public enum NativeControl {
             let points = NativeMenu.points(after: command, from: host.fontPoints)
             host.setFontPoints(points)
             return ControlResponse(ok: true, result: ControlResult(text: String(format: "%g", points)))
+        case .keymapList:
+            return ControlResponse(ok: true, result: ControlResult(keymap: host.keymap))
+        case .keymapReload:
+            return ControlResponse(ok: true, result: ControlResult(count: host.reloadKeymap()))
         default:
             return failure("\(request.cmd.rawValue) is not supported on Windows")
         }

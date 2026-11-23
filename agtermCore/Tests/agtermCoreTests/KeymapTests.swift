@@ -1504,3 +1504,11 @@ struct KeymapTests {
         #expect(keymap.commands.isEmpty)
     }
 }
+
+struct WindowsDefaultChordTests {
+    @Test func windowsDefaultsAreDistinctAndSpellableInKeymapConf() {
+        let chords = BuiltinAction.allCases.compactMap(\.windowsDefaultChord)
+        #expect(Set(chords).count == chords.count)
+        #expect(chords.allSatisfy { parseKeybind($0.displayString) == [$0] && !$0.mods.contains(.command) })
+    }
+}

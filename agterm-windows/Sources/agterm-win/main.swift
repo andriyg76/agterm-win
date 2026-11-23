@@ -69,6 +69,8 @@ MainActor.assumeIsolated {
     try? FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
     nt_install_crash_log(Array(stateDirectory.appendingPathComponent("crash.log").path.utf16) + [0])
     log("agterm-win starting on \(UpdateCheck.hostName)")
+    Keys.load(configDirectory: ConfigPaths.configDirectory(setting: nil, stateDir: stateDirectory.path,
+                                                          home: FileManager.default.homeDirectoryForCurrentUser))
 
     let arguments = CommandLine.arguments
     if let flag = arguments.firstIndex(of: "--local") {

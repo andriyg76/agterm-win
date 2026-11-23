@@ -14,14 +14,21 @@ The native Windows server port waits until the client reaches parity with the WS
   OSC 9;9 through, and an oh-my-posh prompt still renders.
 - A session renamed in an older build restores with that name as its fallback, so its folder overrides it.
 
-## 2. Keymap
+## 2. Keymap — done on `claude/nice-einstein-u0a4qh`, not yet verified on Windows
 
-- Reuse `agtermCore`'s `parseKeymap`/`KeymapStore` and the Mac `keymap.conf` format, read from the state dir's
-  config folder.
-- `cmd` means the Win key. Built-in defaults stay on `Ctrl+Shift+…`; only Win chords a user binds go through a
-  `WH_KEYBOARD_LL` hook. `Win+L` and other secure chords cannot be taken.
-- Map `BuiltinAction` to `NativeMenu.Command`; menus show the effective chord; diagnostics surface like the Mac's.
-- Control: `keymap reload` and read-back of the effective chords.
+- `<stateDir>\config\keymap.conf` (`%LOCALAPPDATA%\agterm-win\config`), the Mac format and parser.
+  ☰ ▸ Edit Keymap… writes the commented starter when missing; Reload Keymap and startup show problems.
+- On Windows `BuiltinAction.defaultChord` is `windowsDefaultChord` (the old `Ctrl+Shift+…`), so the parser's
+  conflict rules, the starter file and `keymap.list` see agterm-win's defaults.
+- Bindable: new_session, new_remote_session, rename_session, close_session, next/previous_session,
+  toggle_search, increase/decrease/reset_font_size. Copy, paste, select all, clear scrollback, restart and Alt+F4
+  stay fixed; a binding on one is reported and never fires.
+- `cmd` is the Win key: a `WH_KEYBOARD_LL` hook, installed only while a binding uses it, swallows bound Win
+  chords with agterm in front and taps VK 0xE8 so Start does not open. `Win+L` cannot be taken.
+- Leader sequences work; Esc abandons one; there is no leader timeout yet.
+- `command` lines are reported as unsupported and skipped; running them needs the Windows command runner.
+- Check on Windows: Win+T with `map cmd+t new_session`, the Start menu staying closed, a hook-hostile security
+  product, and a non-US layout's OEM keys.
 
 ## 3. Notifications
 

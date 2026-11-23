@@ -106,6 +106,9 @@ final class NativeShell {
         findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
         remoteTerminal = makeTerminal()
         control = ControlSocket.start(path: socketPath, host: self, version: version)
+        Keys.onReload = { [unowned self] in WinKeyHook.update(window: self.window) }
+        WinKeyHook.update(window: window)
+        DispatchQueue.main.async { Keys.report(window) }
         restorePlacement()
         layout()
         restoreLocals()
@@ -520,6 +523,8 @@ final class NativeShell {
             }
         case .find: showFindBar()
         case .quit: if confirmQuit() { DestroyWindow(window) }
+        case .editKeymap: Keys.edit(owner: window)
+        case .reloadKeymap: Keys.reload(owner: window)
         default: visibleTerminal.perform(command)
         }
     }
@@ -672,7 +677,7 @@ final class NativeShell {
         GetWindowRect(menuButton, &button)
         let entries = NativeMenu.window(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
                                         canCloseSession: canCloseSelected, sessionCount: tagged.count, canRenameSession: canRename(selected), canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
-                                        canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
+                                        canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), shortcuts: Keys.keymap.shortcuts)
         run(showMenu(entries, owner: window, at: POINT(x: button.left, y: button.bottom)))
     }
 
@@ -685,7 +690,8 @@ final class NativeShell {
         if x != -1 || y != -1 { point = POINT(x: x, y: y) }
         run(showMenu(NativeMenu.sessions(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
                                          canCloseSession: canCloseSelected, sessionCount: tagged.count,
-                                         canRenameSession: canRename(selected), canRestartSession: canRestart(selected)),
+                                         canRenameSession: canRename(selected), canRestartSession: canRestart(selected),
+                                         shortcuts: Keys.keymap.shortcuts),
                      owner: window, at: point))
     }
 
@@ -729,9 +735,14 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             if let result = shell.customDraw(lParam) { return result }
             if let result = shell.labelEdit(lParam) { return result }
             if let key = UnsafePointer<NMTVKEYDOWN>(bitPattern: Int(lParam)), key.pointee.hdr.code == UINT(TVN_KEYDOWN),
-               key.pointee.wVKey == WORD(VK_F2) {
-                shell.windowCommand(.renameSession)
-                return 1
+               let chord = Keys.chord(virtualKey: Int32(key.pointee.wVKey)) {
+                switch Keys.keymap.press(chord) {
+                case .command(let command):
+                    shell.windowCommand(command)
+                    return 1
+                case .consumed: return 1
+                case .pass: break
+                }
             }
             var tag: Int64 = 0
             if nt_tree_selection_changed(Int(lParam), &tag) != 0 { shell.userSelected(tag) }
@@ -768,7 +779,11 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
         case UINT(WM_CLOSE):
             if shell.confirmQuit() { DestroyWindow(window) }
             return 0
+        case WinKeyHook.commandMessage:
+            if let command = NativeMenu.Command(rawValue: Int(wParam)) { shell.windowCommand(command) }
+            return 0
         case UINT(WM_DESTROY):
+            WinKeyHook.remove()
             shell.closing()
             PostQuitMessage(0)
             return 0
@@ -861,6 +876,10 @@ extension NativeShell: NativeControlHost {
     }
 
     var fontPoints: Float { settings.fontPoints }
+
+    var keymap: ControlKeymap { Keys.keymap.control }
+
+    func reloadKeymap() -> Int { Keys.reload(owner: window, quiet: true) }
 
     func setFontPoints(_ points: Float) { setFontSize(points) }
 }

@@ -36,6 +36,32 @@ public enum BuiltinAction: String, CaseIterable, Sendable {
     /// arrows are part of the chord grammar, so their defaults round-trip through `keymap.conf` like any
     /// other and the menu needs no hardcoded fallback.
     public var defaultChord: Chord? {
+        #if os(Windows)
+        windowsDefaultChord
+        #else
+        macDefaultChord
+        #endif
+    }
+
+    /// windowsDefaultChord is agterm-win's shipped chord, where `cmd` means the Win key, which Windows keeps for
+    /// itself; nil for every action agterm-win does not have.
+    public var windowsDefaultChord: Chord? {
+        switch self {
+        case .newSession: Chord(mods: [.control, .shift], key: "t")
+        case .newRemoteSession: Chord(mods: [.control, .shift], key: "n")
+        case .renameSession: Chord(mods: [], key: "f2")
+        case .closeSession: Chord(mods: [.control, .shift], key: "w")
+        case .nextSession: Chord(mods: [.control], key: "tab")
+        case .previousSession: Chord(mods: [.control, .shift], key: "tab")
+        case .toggleSearch: Chord(mods: [.control, .shift], key: "f")
+        case .increaseFontSize: Chord(mods: [.control], key: "=")
+        case .decreaseFontSize: Chord(mods: [.control], key: "-")
+        case .resetFontSize: Chord(mods: [.control], key: "0")
+        default: nil
+        }
+    }
+
+    var macDefaultChord: Chord? {
         switch self {
         case .newWindow: return Chord(mods: [.command, .option], key: "n")
         case .newWorkspace: return Chord(mods: [.command, .shift], key: "n")

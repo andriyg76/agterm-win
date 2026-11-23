@@ -48,7 +48,8 @@ struct NativeMenuTests {
     }
 
     @Test func everyCommandNamesItsShortcut() {
-        #expect(NativeMenu.Command.allCases.allSatisfy { !$0.title.isEmpty && !$0.shortcut.isEmpty })
+        #expect(NativeMenu.Command.allCases.allSatisfy { !$0.title.isEmpty })
+        #expect(NativeMenu.Command.allCases.filter { $0.shortcut.isEmpty } == [.editKeymap, .reloadKeymap])
     }
 
     @Test func fontStepsStayInRange() {
