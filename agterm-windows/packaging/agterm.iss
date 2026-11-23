@@ -1,9 +1,18 @@
 ; agterm-win's per-user installer, compiled by scripts/release.ps1 from a stage.ps1 folder:
-;   ISCC /DAppVersion=0.44.0.1 /DStage=... /DOutput=... /DZmxRev=... [/DSign /Sagterm=...] agterm.iss
+;   ISCC /DAppVersion=0.44.0.1 /DArch=x64|arm64 /DStage=... /DOutput=... /DZmxRev=... [/DSign /Sagterm=...] agterm.iss
 ; Silent install for winget and the Store: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 #ifndef AppVersion
   #error pass /DAppVersion
+#endif
+#ifndef Arch
+  #define Arch "x64"
+#endif
+; x64compatible also admits arm64 Windows 11, which emulates x64; the arm64 installer is native there
+#if Arch == "arm64"
+  #define Architectures "arm64"
+#else
+  #define Architectures "x64compatible"
 #endif
 
 [Setup]
@@ -19,10 +28,10 @@ DisableDirPage=yes
 DisableProgramGroupPage=yes
 ; ConPTY
 MinVersion=10.0.17763
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#Architectures}
+ArchitecturesInstallIn64BitMode={#Architectures}
 OutputDir={#Output}
-OutputBaseFilename=agterm-win-{#AppVersion}-x64-setup
+OutputBaseFilename=agterm-win-{#AppVersion}-{#Arch}-setup
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

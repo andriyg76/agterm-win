@@ -1,5 +1,6 @@
-# Builds the pinned libghostty-vt source release for Windows x64. The paired dependency archive makes the Zig build
+# Builds the pinned libghostty-vt source release for Windows -Arch. The paired dependency archive makes the Zig build
 # offline after the two verified downloads. Output is an install tree under vendor\ghostty-vt.
+param([ValidateSet("x64", "arm64")][string]$Arch = "x64")
 $ErrorActionPreference = "Stop"
 $version = "1.0.1"
 $sourceHash = "333dfce97641ef9b536bb9e08907ad86abaaada50e8f7417b70d9284adef37aa"
@@ -7,7 +8,8 @@ $depsHash = "91a4e10960a52bf5bf4b15aa2a2cddaff8a89d6cd903d3055bda4fd17de3356d"
 $root = Split-Path -Parent $PSScriptRoot
 $target = Join-Path $root "vendor\ghostty-vt"
 $stamp = Join-Path $target ".version"
-if ((Test-Path $stamp) -and ((Get-Content $stamp -TotalCount 1) -eq $version) -and
+$want = "$version $Arch"
+if ((Test-Path $stamp) -and ((Get-Content $stamp -TotalCount 1) -eq $want) -and
     (Test-Path (Join-Path $target "bin\ghostty-vt.dll")) -and
     (Test-Path (Join-Path $target "lib\ghostty-vt.lib")) -and
     (Test-Path (Join-Path $target "include\ghostty\vt.h")) -and
@@ -45,7 +47,7 @@ $dependencies = Join-Path $work "libghostty-vt-$version-deps"
 if (Test-Path $target) { Remove-Item -Recurse -Force $target }
 Push-Location $source
 try {
-    & zig build --prefix $target --system $dependencies -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast -Dcpu=baseline
+    & zig build --prefix $target --system $dependencies -Dtarget=$(@{ x64 = "x86_64"; arm64 = "aarch64" }[$Arch])-windows-gnu -Doptimize=ReleaseFast -Dcpu=baseline
     if ($LASTEXITCODE) { throw "building libghostty-vt failed" }
 } finally {
     Pop-Location
@@ -71,5 +73,5 @@ foreach ($entry in $thirdParty.third_party | Where-Object { $_.use -eq "linked" 
         Copy-Item $license.FullName $copy
     }
 }
-[IO.File]::WriteAllText($stamp, "$version`n")
-"built libghostty-vt $version from source"
+[IO.File]::WriteAllText($stamp, "$want`n")
+"built libghostty-vt $version for $Arch from source"

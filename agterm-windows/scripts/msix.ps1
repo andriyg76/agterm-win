@@ -1,11 +1,13 @@
 # Packs a stage.ps1 folder as the Microsoft Store's MSIX: packaging\msix\AppxManifest.xml, logos drawn from
 # Resources\agterm.png, and MakeAppx. The Store signs the package; the .msix itself is unsigned and does not install.
-#   scripts\msix.ps1 -Version 0.44.1.2 [-Stage build\release\stage] [-Output build\release] [-LayoutOnly]
+#   scripts\msix.ps1 -Version 0.44.1.2 [-Arch x64|arm64] [-Stage build\release\stage] [-Output build\release] [-LayoutOnly]
+# Partner Center takes one .msix per architecture in the same submission and serves each device its own.
 # -LayoutOnly stops at the folder, which Developer Mode registers with Add-AppxPackage -Register <folder>\AppxManifest.xml.
 # The identity is what Partner Center reserved: AGTERM_MSIX_NAME, AGTERM_MSIX_PUBLISHER (its CN=...) and
 # AGTERM_MSIX_PUBLISHER_NAME; the defaults serve only a local register. MakeAppx comes from AGTERM_MAKEAPPX or the Windows SDK.
 param(
     [Parameter(Mandatory)][string]$Version,
+    [ValidateSet("x64", "arm64")][string]$Arch = "x64",
     [string]$Stage,
     [string]$Output,
     [switch]$LayoutOnly
@@ -26,6 +28,7 @@ $tokens = @{
     Publisher            = if ($env:AGTERM_MSIX_PUBLISHER) { $env:AGTERM_MSIX_PUBLISHER } else { "CN=andriyg76" }
     PublisherDisplayName = if ($env:AGTERM_MSIX_PUBLISHER_NAME) { $env:AGTERM_MSIX_PUBLISHER_NAME } else { "andriyg76" }
     Version              = $packageVersion
+    Architecture         = $Arch
 }
 
 $layout = Join-Path $Output "msix"
@@ -58,7 +61,7 @@ $makeappx = if ($env:AGTERM_MAKEAPPX) { $env:AGTERM_MAKEAPPX } else {
         Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
 }
 if (-not $makeappx) { throw "no makeappx.exe; install the Windows SDK or set AGTERM_MAKEAPPX" }
-$package = Join-Path $Output "agterm-win-$Version-x64.msix"
+$package = Join-Path $Output "agterm-win-$Version-$Arch.msix"
 & $makeappx pack /o /d $layout /p $package
 if ($LASTEXITCODE) { throw "makeappx failed" }
 "packed $package ($packageVersion)"
