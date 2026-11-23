@@ -63,6 +63,11 @@ private final class FakeHost: NativeControlHost {
         reloads += 1
         return 2
     }
+
+    var appearance = Appearance()
+    var themeCatalog = ThemeCatalog(names: ["Dracula", "Nord"])
+    var systemIsDark = false
+    func setAppearance(_ appearance: Appearance) { self.appearance = appearance }
 }
 
 @MainActor
@@ -106,6 +111,24 @@ struct NativeControlTests {
         #expect(host.renamed.map(\.1) == ["build"])
         let missing = await handle(ControlRequest(cmd: .sessionClose, target: "ffffffff"), host)
         #expect(!missing.ok && missing.error == "no such session: ffffffff" && host.closed.isEmpty)
+    }
+
+    @Test func themeSetChangesTheAppearanceAndReadsItBack() async {
+        let host = FakeHost()
+        let set = await handle(ControlRequest(cmd: .themeSet, args: ControlArgs(name: "Nord")), host)
+        #expect(set.ok && set.result?.theme == "Nord" && host.appearance.theme == "Nord")
+        let list = await handle(ControlRequest(cmd: .themeList), host)
+        #expect(list.result?.themes == ["Dracula", "Nord"] && list.result?.sync == false)
+        #expect(await handle(ControlRequest(cmd: .themeSet, args: ControlArgs(name: "Missing")), host).error == "unknown theme: Missing")
+    }
+
+    @Test func aDarkThemeFollowsTheSystem() async {
+        let host = FakeHost()
+        host.systemIsDark = true
+        let set = await handle(ControlRequest(cmd: .themeSet, args: ControlArgs(light: "Nord", dark: "Dracula")), host)
+        #expect(set.result?.theme == "Dracula" && set.result?.light == "Nord" && set.result?.sync == true)
+        _ = await handle(ControlRequest(cmd: .themeSet, args: ControlArgs(dark: "none")), host)
+        #expect(!host.appearance.followsSystem && host.appearance.activeTheme(dark: true) == "Nord")
     }
 
     @Test func keymapListAndReloadReachTheHost() async {

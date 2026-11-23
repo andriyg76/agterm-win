@@ -17,6 +17,7 @@ public struct WindowsKeymap: Sendable {
         Chord(mods: [.control, .shift], key: "c"): .copy, Chord(mods: [.control, .shift], key: "v"): .paste,
         Chord(mods: [.control, .shift], key: "a"): .selectAll, Chord(mods: [.control, .shift], key: "k"): .clearScrollback,
         Chord(mods: [.control, .shift], key: "r"): .restartSession, Chord(mods: [.option], key: "f4"): .quit,
+        Chord(mods: [.control], key: ","): .settings,
     ]
 
     public let keymap: Keymap

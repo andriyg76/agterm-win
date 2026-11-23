@@ -1,3 +1,4 @@
+import AgtermWinKit
 import Foundation
 import NativeShim
 import WinSDK
@@ -69,8 +70,13 @@ MainActor.assumeIsolated {
     try? FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
     nt_install_crash_log(Array(stateDirectory.appendingPathComponent("crash.log").path.utf16) + [0])
     log("agterm-win starting on \(UpdateCheck.hostName)")
-    Keys.load(configDirectory: ConfigPaths.configDirectory(setting: nil, stateDir: stateDirectory.path,
-                                                          home: FileManager.default.homeDirectoryForCurrentUser))
+    let configDirectory = ConfigPaths.configDirectory(setting: nil, stateDir: stateDirectory.path,
+                                                      home: FileManager.default.homeDirectoryForCurrentUser)
+    Keys.load(configDirectory: configDirectory)
+    TerminalAppearance.themes = TerminalThemes(userDirectory: configDirectory.appendingPathComponent("themes"),
+                                               bundledDirectory: bundled("themes", source: "Resources/themes"))
+    // a window without the sidebar draws with the saved appearance too
+    TerminalAppearance.use(NativeSettings.load(from: stateDirectory.appendingPathComponent("native.json")).appearance)
 
     let arguments = CommandLine.arguments
     if let flag = arguments.firstIndex(of: "--local") {
@@ -99,6 +105,8 @@ loop: while true {
     if queueHandle != nil, woke == WAIT_OBJECT_0 { drainMainQueue(nil) }
     while PeekMessageW(&message, nil, 0, 0, UINT(PM_REMOVE)) {
         if message.message == UINT(WM_QUIT) { break loop }
+        // Tab, Enter and Esc move through Settings' controls as in a dialog
+        if let settings = MainActor.assumeIsolated({ SettingsWindow.current?.handle }), IsDialogMessageW(settings, &message) { continue }
         TranslateMessage(&message)
         DispatchMessageW(&message)
     }

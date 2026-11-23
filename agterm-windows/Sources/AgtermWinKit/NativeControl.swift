@@ -27,6 +27,11 @@ public protocol NativeControlHost: AnyObject {
     var keymap: ControlKeymap { get }
     /// reloadKeymap reads keymap.conf again and returns how many problems it found.
     func reloadKeymap() -> Int
+    var appearance: Appearance { get }
+    var themeCatalog: ThemeCatalog { get }
+    var systemIsDark: Bool { get }
+    /// setAppearance saves `appearance` and draws every terminal with it.
+    func setAppearance(_ appearance: Appearance)
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -107,6 +112,16 @@ public enum NativeControl {
             let points = NativeMenu.points(after: command, from: host.fontPoints)
             host.setFontPoints(points)
             return ControlResponse(ok: true, result: ControlResult(text: String(format: "%g", points)))
+        case .themeList:
+            return ControlResponse(ok: true, result: themeResult(host, themes: host.themeCatalog.names))
+        case .themeSet:
+            let args = request.args
+            switch host.appearance.setting(name: args?.name, light: args?.light, dark: args?.dark, catalog: host.themeCatalog) {
+            case .failure(let refusal): return failure(refusal.description)
+            case .success(let next):
+                host.setAppearance(next)
+                return ControlResponse(ok: true, result: themeResult(host, themes: nil))
+            }
         case .keymapList:
             return ControlResponse(ok: true, result: ControlResult(keymap: host.keymap))
         case .keymapReload:
@@ -117,6 +132,14 @@ public enum NativeControl {
     }
 
     static func failure(_ message: String) -> ControlResponse { ControlResponse(ok: false, error: message) }
+
+    /// themeResult is `theme.list` and `theme.set`'s read-back, the macOS app's shape: the theme on screen, the light and
+    /// dark slots, and whether they follow the system.
+    private static func themeResult(_ host: NativeControlHost, themes: [String]?) -> ControlResult {
+        let appearance = host.appearance
+        return ControlResult(theme: appearance.activeTheme(dark: host.systemIsDark), themes: themes, sync: appearance.followsSystem,
+                             light: appearance.theme, dark: appearance.darkTheme)
+    }
 
     /// resolve maps a target (id, unique prefix, or `active`/none for the selected session) to a session id.
     struct Refusal: Error {

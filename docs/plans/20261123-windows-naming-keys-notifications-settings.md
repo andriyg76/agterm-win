@@ -1,6 +1,6 @@
 # agterm-win: session naming, keymap, notifications, settings dialog
 
-Order agreed 2026-11-23: naming → keymap → notifications → settings dialog.
+Order agreed 2026-11-23: naming → keymap → settings (appearance first) → notifications.
 The native Windows server port waits until the client reaches parity with the WSL server.
 
 ## 1. Dynamic session naming — done on `claude/nice-einstein-u0a4qh`, not yet verified on Windows
@@ -37,7 +37,17 @@ The native Windows server port waits until the client reaches parity with the WS
 - Pass the OSC 9/777 title and body from the shim's desktop-notification callback (today only `attention` is set).
 - Deliver under `TerminalNotification.shouldDeliver`; a click selects the session; `agtermctl notify` posts the same.
 
-## 4. Settings dialog
+## 4. Settings — Appearance done locally, not yet verified on Windows
 
-- Win32 PropertySheet: General, Appearance (font, size), Notifications, Keys (effective bindings, Edit keymap.conf).
-- Backed by `NativeSettings`; every setting stays readable through the control API.
+- ☰ ▸ Settings… (Ctrl+, fixed) opens one window; its Appearance group holds the theme, the dark-mode theme with
+  "Follow Windows light and dark mode", the font family (installed monospaced fonts) and the size.
+  Every change previews on all terminals; OK saves to `native.json`, Cancel and close restore.
+- Themes are ghostty theme files: 34 bundled from iTerm2-Color-Schemes `86a776d` (the commit ghostty's themes
+  release names) plus agterm's own, in `Resources/themes`, staged as `themes\`; `<config>\themes` adds or
+  overrides by name. Names match the macOS app, so `theme = Dracula` means the same on both.
+- The shim sets libghostty-vt's default colors, cursor and palette (unset entries keep the built-in palette);
+  the cursor draws in the effective cursor color, selection in the theme's selection background.
+- `theme.list` / `theme.set NAME | --light L --dark D | --dark none` match the macOS command and read-back.
+- Not yet: the sidebar and window chrome keep their dark colors; selection-foreground is not applied; a Settings
+  window open during `theme.set` keeps showing its own values.
+- Next pages: Notifications, then General (WSL distribution, session restore).

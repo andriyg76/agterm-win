@@ -30,6 +30,7 @@ let package = Package(
             linkerSettings: [
                 .linkedLibrary("user32"),
                 .linkedLibrary("shell32"),
+                .linkedLibrary("advapi32"),
                 .unsafeFlags(["-Xlinker", "/SUBSYSTEM:WINDOWS", "-Xlinker", "/ENTRY:mainCRTStartup", "-Xlinker", iconResource]),
             ]
         ),

@@ -71,6 +71,7 @@ final class NativeShell {
         self.settingsURL = settingsURL
         self.version = version
         settings = NativeSettings.load(from: settingsURL)
+        TerminalAppearance.use(settings.appearance)
     }
 
     private func create(starting requested: [String], installServer: Bool) {
@@ -157,8 +158,41 @@ final class NativeShell {
 
     private func setFontSize(_ points: Float) {
         settings.fontPoints = points
+        shown.points = points
         terminalsShown.forEach { $0.setFontSize(points) }
         saveSettings()
+    }
+
+    // what the terminals draw with now: the saved appearance, or Settings' preview while it is open
+    private lazy var shown = SettingsWindow.Values(appearance: settings.appearance, points: settings.fontPoints)
+
+    /// applyAppearance draws every terminal with `values`, without saving them.
+    private func applyAppearance(_ values: SettingsWindow.Values) {
+        let refit = TerminalAppearance.use(values.appearance)
+        for terminal in terminalsShown {
+            terminal.applyTheme()
+            if refit { terminal.applyFontFamily() }
+            if values.points != shown.points { terminal.setFontSize(values.points) }
+        }
+        shown = values
+    }
+
+    private func openSettings() {
+        SettingsWindow.show(owner: window, values: .init(appearance: settings.appearance, points: settings.fontPoints),
+                            themes: TerminalAppearance.themes.catalog.names, fonts: TerminalAppearance.monospaceFonts,
+                            preview: { [unowned self] in applyAppearance($0) },
+                            finish: { [unowned self] kept in
+                                guard let kept else { return }
+                                settings.appearance = kept.appearance
+                                settings.fontPoints = kept.points
+                                saveSettings()
+                            })
+    }
+
+    /// systemAppearanceChanged follows Windows switching between light and dark mode.
+    fileprivate func systemAppearanceChanged() {
+        guard shown.appearance.followsSystem else { return }
+        applyAppearance(shown)
     }
 
     /// restorePlacement shows the window where it last was, or where Windows put it when that rectangle is on no monitor
@@ -523,6 +557,7 @@ final class NativeShell {
             }
         case .find: showFindBar()
         case .quit: if confirmQuit() { DestroyWindow(window) }
+        case .settings: openSettings()
         case .editKeymap: Keys.edit(owner: window)
         case .reloadKeymap: Keys.reload(owner: window)
         default: visibleTerminal.perform(command)
@@ -779,6 +814,11 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
         case UINT(WM_CLOSE):
             if shell.confirmQuit() { DestroyWindow(window) }
             return 0
+        case UINT(WM_SETTINGCHANGE):
+            if let area = UnsafePointer<UInt16>(bitPattern: Int(lParam)), String(decodingCString: area, as: UTF16.self) == "ImmersiveColorSet" {
+                shell.systemAppearanceChanged()
+            }
+            return DefWindowProcW(window, message, wParam, lParam)
         case WinKeyHook.commandMessage:
             if let command = NativeMenu.Command(rawValue: Int(wParam)) { shell.windowCommand(command) }
             return 0
@@ -878,6 +918,18 @@ extension NativeShell: NativeControlHost {
     var fontPoints: Float { settings.fontPoints }
 
     var keymap: ControlKeymap { Keys.keymap.control }
+
+    var appearance: Appearance { settings.appearance }
+
+    var themeCatalog: ThemeCatalog { TerminalAppearance.themes.catalog }
+
+    var systemIsDark: Bool { TerminalAppearance.isDark }
+
+    func setAppearance(_ appearance: Appearance) {
+        settings.appearance = appearance
+        saveSettings()
+        applyAppearance(.init(appearance: appearance, points: shown.points))
+    }
 
     func reloadKeymap() -> Int { Keys.reload(owner: window, quiet: true) }
 

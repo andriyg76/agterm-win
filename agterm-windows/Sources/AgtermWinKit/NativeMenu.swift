@@ -3,7 +3,7 @@
 public enum NativeMenu {
     public enum Command: Int, CaseIterable, Sendable {
         case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, newServerSession, renameSession, restartSession, closeSession, nextSession, previousSession, find, quit,
-             editKeymap, reloadKeymap
+             editKeymap, reloadKeymap, settings
 
         public var title: String {
             switch self {
@@ -25,6 +25,7 @@ public enum NativeMenu {
             case .quit: "Quit"
             case .editKeymap: "Edit Keymap…"
             case .reloadKeymap: "Reload Keymap"
+            case .settings: "Settings…"
             }
         }
 
@@ -47,6 +48,7 @@ public enum NativeMenu {
             case .previousSession: "Ctrl+Shift+Tab"
             case .find: "Ctrl+Shift+F"
             case .quit: "Alt+F4"
+            case .settings: "Ctrl+,"
             case .editKeymap, .reloadKeymap: ""
             }
         }
@@ -147,7 +149,7 @@ public enum NativeMenu {
         sessions(profiles: profiles, defaultProfile: defaultProfile, server: server, serverConnected: serverConnected, canCloseSession: canCloseSession,
                  sessionCount: sessionCount, canRenameSession: canRenameSession, canRestartSession: canRestartSession, shortcuts: shortcuts)
             + [.separator, .command(.find, shortcuts)] + terminal(hasSelection: hasSelection, canPaste: canPaste, shortcuts: shortcuts)
-            + [.separator, .command(.editKeymap), .command(.reloadKeymap), .separator, .command(.quit)]
+            + [.separator, .command(.settings), .command(.editKeymap), .command(.reloadKeymap), .separator, .command(.quit)]
     }
 
     /// closeQuestion is what closing an agterm-server session asks: it ends that session's programs on the server.

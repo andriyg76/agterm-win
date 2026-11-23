@@ -71,6 +71,15 @@ int32_t nt_row_runes(nt_terminal *terminal, int32_t x, int32_t y, uint32_t *rune
 void nt_clear_scrollback(nt_terminal *terminal);
 // nt_set_font_size remeasures the cell; the caller resizes to get the grid that now fits.
 void nt_set_font_size(nt_terminal *terminal, float points);
+// nt_set_font_family switches to `family`, else Cascadia Mono, else Consolas, and remeasures like nt_set_font_size.
+void nt_set_font_family(nt_terminal *terminal, const uint16_t *family);
+// nt_set_theme sets the default colors as 0xRRGGBB; a value above 0xFFFFFF keeps that one's built-in default.
+// `palette` is 256 such values, or NULL for the built-in palette.
+void nt_set_theme(nt_terminal *terminal, uint32_t foreground, uint32_t background, uint32_t cursor, uint32_t cursor_text,
+                  uint32_t selection, const uint32_t *palette);
+// nt_monospace_fonts writes the installed monospaced families, each ended by a newline, when `capacity` holds them all;
+// it returns their length in UTF-16 units.
+int32_t nt_monospace_fonts(uint16_t *out, int32_t capacity);
 
 // The sidebar: a dark Win32 tree whose items carry a caller's tag.
 void *nt_tree_create(void *parent, uint32_t dpi);
