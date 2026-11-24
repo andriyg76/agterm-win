@@ -55,7 +55,43 @@ jobs:
       - run: swift test --skip-build
       - run: ./scripts/stage.ps1 -Output "$env:RUNNER_TEMP\agterm-win"
       - run: ./scripts/msix.ps1 -Version "$(Get-Content AGTERM_VERSION -TotalCount 1).0" -Arch ${{ matrix.arch }} -Stage "$env:RUNNER_TEMP\agterm-win" -Output "$env:RUNNER_TEMP\msix"
-      - run: ./tests/integration/run.ps1 -App "$env:RUNNER_TEMP\agterm-win" -Results "$env:RUNNER_TEMP\results"
+      - name: Silence the privacy settings screen
+        # windows-11-arm raises "Choose privacy settings for your device" over the desktop, where screen snapshots
+        # catch it. The runner is SYSTEM, so the policy goes to every loaded profile, not only its own HKCU
+        run: |
+          $hives = @("HKLM:") + (Get-ChildItem Registry::HKEY_USERS | ? { $_.PSChildName -notmatch "_Classes$" } |
+                                 % { "Registry::HKEY_USERS\$($_.PSChildName)" })
+          foreach ($hive in $hives) {
+            $key = "$hive\SOFTWARE\Policies\Microsoft\Windows\OOBE"
+            New-Item -Force $key | Out-Null
+            Set-ItemProperty $key DisablePrivacyExperience 1 -Type DWord
+            if ($hive -ne "HKLM:") {
+              $key = "$hive\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement"
+              New-Item -Force $key | Out-Null
+              Set-ItemProperty $key ScoobeSystemSettingEnabled 0 -Type DWord
+            }
+          }
+      - name: Integration
+        run: |
+          # the screen can still come back mid-run; nothing under test uses its hosts, so they are closed on sight
+          $sweeper = Start-Job {
+            while ($true) {
+              Get-Process WWAHost, CloudExperienceHostBroker -ErrorAction SilentlyContinue | % {
+                "$(Get-Date -Format HH:mm:ss) closed $($_.ProcessName) $($_.Id) '$($_.MainWindowTitle)'"
+                Stop-Process $_ -Force -ErrorAction SilentlyContinue
+              }
+              Start-Sleep -Seconds 2
+            }
+          }
+          try {
+            ./tests/integration/run.ps1 -App "$env:RUNNER_TEMP\agterm-win" -Results "$env:RUNNER_TEMP\results"
+            $code = $LASTEXITCODE
+          } finally {
+            Stop-Job $sweeper
+            Receive-Job $sweeper | Write-Host
+            Remove-Job $sweeper -Force
+          }
+          exit $code
       - if: always()
         uses: actions/upload-artifact@v7
         with:
