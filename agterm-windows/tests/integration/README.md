@@ -1,7 +1,7 @@
 # agterm-win integration tests
 
 The cases launch the real window and read the terminal's text back, so they need an interactive desktop.
-Build, fetch, and stage a self-contained app folder first (libghostty-vt requires Zig 0.17):
+Build, fetch, and stage a self-contained app folder first:
 
 ```powershell
 cd agterm-windows
