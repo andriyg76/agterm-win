@@ -79,6 +79,7 @@ final class NativeShell {
         var state: NativeOverlay
         let frame: OverlayFrame
         let job: String
+        var exitCode: Int?
         var terminal: NativeTerminal { frame.terminal }
     }
 
@@ -1070,6 +1071,8 @@ final class NativeShell {
         guard server.remote.store.prepareReplicaOverlay(overlay, forSession: sessionID, closed: { [weak server] closedJob in
             server?.remote.answerPresentation(sessionID, .overlayClosed(PresentationOverlayChange(job: closedJob)))
         }) else { return false }
+        server.remote.store.markViewerProgramOverlay(forSession: sessionID, command: command, sizePercent: overlay.sizePercent,
+                                                   wait: overlay.wait)
         openServerReplicaOverlay(sessionID, job: job, command: command, wait: overlay.wait, sizePercent: overlay.sizePercent,
                                  background: NativeOverlay.background(overlay.backgroundColor))
         if overlay.follow { select(sessionID) }
@@ -1101,9 +1104,20 @@ final class NativeShell {
     }
 
     private func serverOverlayExited(_ id: Foundation.UUID, frame: OverlayFrame, code: Int) {
-        guard let slot = serverOverlays[id], slot.frame === frame else { return }
+        guard var slot = serverOverlays[id], slot.frame === frame else { return }
         log("native shell: replica overlay of [\(id)] exited \(code)")
-        if !slot.state.wait { removeServerOverlay(id, frame: frame, notifyOrigin: true) }
+        let hasReplica = server(of: id)?.remote.session(id)?.overlayReplica != nil
+        if slot.state.wait {
+            slot.exitCode = code
+            serverOverlays[id] = slot
+            server(of: id)?.remote.session(id)?.overlayExitCode = code
+        } else {
+            removeServerOverlay(id, frame: frame, notifyOrigin: hasReplica == true)
+        }
+    }
+
+    private func serverOverlayOriginNotify(_ id: Foundation.UUID) -> Bool {
+        server(of: id)?.remote.session(id)?.overlayReplica != nil
     }
 
     private func closeServerReplicaOverlay(_ id: Foundation.UUID, change: PresentationOverlayChange) {
@@ -1116,7 +1130,9 @@ final class NativeShell {
         guard var slot = serverOverlays[id], slot.job == change.job else { return }
         slot.state.sizePercent = change.sizePercent
         serverOverlays[id] = slot
+        server(of: id)?.remote.session(id)?.overlaySizePercent = change.sizePercent
         placeOverlays()
+        rebuild()
     }
 
     private func clearServerReplicaOverlay(_ id: Foundation.UUID, notifyOrigin: Bool) {
@@ -1129,9 +1145,13 @@ final class NativeShell {
         guard let slot = serverOverlays[id], slot.frame === frame else { return }
         let focused = hasFocus(id)
         serverOverlays.removeValue(forKey: id)
-        server(of: id)?.remote.store.clearReplicaOverlay(forSession: id, notifyClosed: notifyOrigin)
+        if let server = server(of: id) {
+            server.remote.store.clearReplicaOverlay(forSession: id, notifyClosed: notifyOrigin)
+            server.remote.store.clearViewerProgramOverlay(forSession: id, exitCode: slot.exitCode)
+        }
         frame.destroy()
         placeOverlays()
+        rebuild()
         if focused { focus() }
     }
 
@@ -1874,6 +1894,17 @@ extension NativeShell: NativeControlHost {
 
     func isServerSession(_ id: Foundation.UUID) -> Bool { serverSession(id) != nil }
 
+    func isConnectedServerSession(_ id: Foundation.UUID) -> Bool { serverConnected(id) }
+
+    func serverOverlayState(for id: Foundation.UUID) -> (overlay: NativeOverlay?, exitCode: Int?)? {
+        guard serverSession(id) != nil else { return nil }
+        if let slot = serverOverlays[id] { return (slot.state, slot.exitCode) }
+        guard let session = server(of: id)?.remote.session(id), session.overlayActive else { return (nil, nil) }
+        var overlay = NativeOverlay(sizePercent: session.overlaySizePercent, wait: session.overlayWait)
+        overlay.hidden = session.overlayHidden
+        return (overlay, session.overlayExitCode)
+    }
+
     func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> Foundation.UUID? {
         let customName = name.flatMap(SessionNaming.customName)
         if let command {
@@ -1994,6 +2025,10 @@ extension NativeShell: NativeControlHost {
     }
 
     func openOverlay(_ id: Foundation.UUID, _ open: NativeOverlay.Open) {
+        if serverSession(id) != nil {
+            openServerCtlOverlay(id, open)
+            return
+        }
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         if selected != id { select(id) }
         let focused = hasFocus(id)
@@ -2023,18 +2058,51 @@ extension NativeShell: NativeControlHost {
         if focused { focus() }
     }
 
+    private func openServerCtlOverlay(_ id: Foundation.UUID, _ open: NativeOverlay.Open) {
+        guard serverConnected(id), serverOverlays[id] == nil, let server = server(of: id), let session = server.remote.session(id) else { return }
+        let launch = SessionSidebar.launch(for: session, hostLabel: server.label)
+        guard case .command(let sessionCommand) = launch else { return }
+        let started = NativeOverlay.launch(open.command, sessionCommandLine: sessionCommand, cwd: open.cwd, directory: session.effectiveCwd)
+        server.remote.store.markViewerProgramOverlay(forSession: id, command: open.command, sizePercent: open.sizePercent, wait: open.wait)
+        openServerReplicaOverlay(id, job: "ctl", command: started.commandLine, wait: open.wait, sizePercent: open.sizePercent, background: open.background)
+        rebuild()
+        log("native shell: ctl overlay over server session [\(id)]: \(started.commandLine)")
+    }
+
     func closeOverlay(_ id: Foundation.UUID) {
+        if let slot = serverOverlays[id] {
+            removeServerOverlay(id, frame: slot.frame, notifyOrigin: serverOverlayOriginNotify(id))
+            return
+        }
         guard let frame = locals.first(where: { $0.id == id })?.overlay?.frame else { return }
         removeOverlay(id, frame: frame)
     }
 
     func resizeOverlay(_ id: Foundation.UUID, sizePercent: Int?) {
+        if var slot = serverOverlays[id] {
+            slot.state.sizePercent = sizePercent
+            serverOverlays[id] = slot
+            server(of: id)?.remote.session(id)?.overlaySizePercent = sizePercent
+            placeOverlays()
+            rebuild()
+            return
+        }
         guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay != nil else { return }
         locals[index].overlay?.state.sizePercent = sizePercent
         placeOverlays()
     }
 
     func setOverlayHidden(_ id: Foundation.UUID, _ hidden: Bool) {
+        if var slot = serverOverlays[id] {
+            let focused = hasFocus(id)
+            slot.state.hidden = hidden
+            serverOverlays[id] = slot
+            server(of: id)?.remote.session(id)?.overlayHidden = hidden
+            placeOverlays()
+            if focused { focus() }
+            rebuild()
+            return
+        }
         guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay != nil else { return }
         let focused = hasFocus(id)
         locals[index].overlay?.state.hidden = hidden
@@ -2043,11 +2111,11 @@ extension NativeShell: NativeControlHost {
     }
 
     func overlayScreen(of id: Foundation.UUID) -> (lines: [String], rows: Int)? {
-        locals.first { $0.id == id }?.overlay?.terminal.screen
+        serverOverlays[id]?.terminal.screen ?? locals.first { $0.id == id }?.overlay?.terminal.screen
     }
 
     func overlaySelection(of id: Foundation.UUID) -> String? {
-        locals.first { $0.id == id }?.overlay?.terminal.selection
+        serverOverlays[id]?.terminal.selection ?? locals.first { $0.id == id }?.overlay?.terminal.selection
     }
 }
 
