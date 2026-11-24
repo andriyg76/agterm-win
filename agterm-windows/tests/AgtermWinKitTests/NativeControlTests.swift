@@ -294,6 +294,12 @@ struct NativeControlTests {
         #expect(await handle(ControlRequest(cmd: .sessionText, args: ControlArgs(lines: 1)), host).result?.text == "out")
     }
 
+    @Test func unwrittenCellsReadAsBlanksThatTextTrims() {
+        let runes: [UInt32] = [0x61, 0, 0x62, 0x4E2D, UInt32.max, 0, 0]
+        #expect(NativeControl.line(runes) == "a b中  ")
+        #expect(NativeControl.text([NativeControl.line(runes)], rows: 1, all: false, last: nil) == "a b中")
+    }
+
     @Test func fontCommandsStepThePointSize() async {
         let host = FakeHost()
         _ = await handle(ControlRequest(cmd: .fontInc), host)

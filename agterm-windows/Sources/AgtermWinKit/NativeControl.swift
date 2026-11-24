@@ -294,6 +294,12 @@ public enum NativeControl {
         return tree
     }
 
+    /// line is a row's text from its cells' runes: a cell nothing wrote (rune 0) is a blank, so `text` trims it, and a wide
+    /// character's spacer (no scalar) is dropped.
+    public nonisolated static func line(_ runes: [UInt32]) -> String {
+        String(String.UnicodeScalarView(runes.compactMap { $0 == 0 ? " " : Unicode.Scalar($0) }))
+    }
+
     /// text is what `session.text` reads: the screen by default, every line with `all`, or the last `last` lines once
     /// trailing blank lines are dropped. Lines lose their trailing blanks, as a terminal's copy does.
     public nonisolated static func text(_ lines: [String], rows: Int, all: Bool, last: Int?) -> String {

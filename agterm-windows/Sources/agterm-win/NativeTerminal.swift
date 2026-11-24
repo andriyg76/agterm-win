@@ -590,7 +590,7 @@ final class NativeTerminal {
             let count = nt_line_runes(terminal, line, nil, 0)
             var runes = [UInt32](repeating: 0, count: Int(count))
             nt_line_runes(terminal, line, &runes, count)
-            return String(String.UnicodeScalarView(runes.compactMap(Unicode.Scalar.init)))
+            return NativeControl.line(runes)
         }
         return (lines, Int(grid.rows))
     }
