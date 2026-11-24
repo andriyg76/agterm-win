@@ -34,11 +34,9 @@ if (Test-Path (Join-Path $zmx "zmx.exe")) {
     Write-Warning "no vendor\zmx\zmx.exe (scripts\fetch-zmx.ps1); staged without zmx, so --local falls back to the source tree"
 }
 $ghosttyVT = Join-Path $root "vendor\ghostty-vt"
-if (-not (Test-Path (Join-Path $ghosttyVT "bin\ghostty-vt.dll"))) {
+if (-not (Test-Path (Join-Path $ghosttyVT "LICENSE"))) {
     throw "no vendor\ghostty-vt (scripts\fetch-ghostty-vt.ps1); the native terminal core is required"
 }
-Copy-Item (Join-Path $ghosttyVT "bin\ghostty-vt.dll") $Output
-if (Test-Path (Join-Path $ghosttyVT "bin\ghostty-vt.pdb")) { Copy-Item (Join-Path $ghosttyVT "bin\ghostty-vt.pdb") $Output }
 Copy-Item (Join-Path $ghosttyVT "LICENSE") (Join-Path $Output "libghostty-vt-LICENSE")
 New-Item -ItemType Directory (Join-Path $Output "licenses") | Out-Null
 Copy-Item -Recurse (Join-Path $ghosttyVT "licenses") (Join-Path $Output "licenses\libghostty-vt")
