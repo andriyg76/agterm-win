@@ -1,3 +1,5 @@
+// Hosted Swift uses an older clang than the VS 2026 STL on windows-11-arm runners.
+#define _ALLOW_COMPILER_AND_STL_VERSION_MISMATCH
 #include "NativeShim.h"
 
 #include <WebView2.h>
@@ -114,7 +116,7 @@ void ensureHostClass() {
   wc.lpfnWndProc = pageHostProc;
   wc.hInstance = GetModuleHandleW(nullptr);
   wc.lpszClassName = L"agterm-page";
-  wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+  wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));  // IDC_ARROW, narrow without UNICODE
   RegisterClassExW(&wc);
   registered = true;
 }
