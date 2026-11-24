@@ -242,7 +242,7 @@ extension ControlDispatcher {
         let reject = { (error: String) in OverlayContent.rejected(ControlResponse(ok: false, error: error)) }
         let flags = [args?.wait, args?.javascript, args?.chromeless, args?.persistent, args?.browse]
         if args?.cwd != nil || flags.contains(true) { return reject(OverlayHtmlError.markdownOptions) }
-        guard path.hasPrefix("/") else { return reject(OverlayHtmlError.markdownNotAbsolute) }
+        guard HtmlOverlay.isAbsolutePath(path) else { return reject(OverlayHtmlError.markdownNotAbsolute) }
         let url = URL(fileURLWithPath: path).standardizedFileURL
         guard LinkPolicy.markdownExtensions.contains(url.pathExtension.lowercased()) else {
             return reject(OverlayHtmlError.markdownType)
@@ -254,7 +254,7 @@ extension ControlDispatcher {
         let reject = { (error: String) in OverlayContent.rejected(ControlResponse(ok: false, error: error)) }
         let flags = [args?.wait, args?.navigation, args?.javascript, args?.chromeless, args?.persistent, args?.browse]
         if args?.cwd != nil || flags.contains(true) { return reject(OverlayHtmlError.textOptions) }
-        guard path.hasPrefix("/") else { return reject(OverlayHtmlError.textNotAbsolute) }
+        guard HtmlOverlay.isAbsolutePath(path) else { return reject(OverlayHtmlError.textNotAbsolute) }
         if let line = args?.line, line < 1 { return reject(OverlayHtmlError.lineNotPositive) }
         if args?.tail != nil || args?.followFile == true, args?.line != nil { return reject(OverlayHtmlError.tailWithLine) }
         if let tail = args?.tail, !(1...TextPage.maxTail).contains(tail) { return reject(OverlayHtmlError.tailRange) }
