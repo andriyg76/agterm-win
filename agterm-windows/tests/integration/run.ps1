@@ -27,6 +27,9 @@ function ShellCaseSkipReason([string]$Name) {
     if ($Name -eq "overlay-keys" -and $native -eq "ARM64") {
         return "arm64: Ctrl+Shift+W closes the session under a program overlay instead of dismissing the overlay (x64 passes; SendChord/GetFocus on windows-11-arm). Re-enable when fixed."
     }
+    if ($Name -eq "overlay-server-program") {
+        return "stage B not implemented: server program overlay (docs/plans/20261124-server-program-overlay.md)."
+    }
     return $null
 }
 

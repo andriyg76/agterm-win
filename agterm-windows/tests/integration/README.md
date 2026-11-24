@@ -50,6 +50,7 @@ passed and are recorded in `cases.json` under `skipped`.
 | Case | Where | Issue |
 |------|--------|--------|
 | `overlay-keys` | native **ARM64** (`windows-11-arm`) | After `SendChord` sends Ctrl+Shift+W to the overlay terminal, the session under the overlay is closed instead of dismissing the overlay only. The same case passes on x64. Suspect focus / duplicate Close Session delivery on the arm64 runner. Track in PR/overlay work; remove the skip when arm64 matches x64. |
+| `overlay-server-program` | always (until stage B) | Reserved for server program overlay; see `docs/plans/20261124-server-program-overlay.md`. |
 
 Sandbox needs the `Containers-DisposableClientVM` feature, a restart, and one manual start from Start to finish
 installing its client. Each case leaves `screen.txt`, its state directory (`agterm-win.log`, `crash.log`) and
