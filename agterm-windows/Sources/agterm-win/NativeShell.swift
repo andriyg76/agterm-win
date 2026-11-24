@@ -206,8 +206,8 @@ final class NativeShell {
         let distributions = profiles.compactMap { $0.name.hasPrefix("WSL ") ? String($0.name.dropFirst(4)) : nil }
         SettingsWindow.show(owner: window, values: .init(appearance: settings.appearance, points: settings.fontPoints,
                                                          notifications: settings.notifications, general: settings.general),
-                            distributions: distributions,
                             themes: TerminalAppearance.themes.catalog.names, fonts: TerminalAppearance.monospaceFonts,
+                            distributions: distributions,
                             preview: { [unowned self] in applyAppearance($0) },
                             finish: { [unowned self] kept in
                                 guard let kept else { return }
