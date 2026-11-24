@@ -32,13 +32,12 @@ requests one.
 | **Integration** | Case `overlay-server-program` — remove SKIP in `run.ps1`; run against a live agterm-server when CI has WSL+server, else gate script / manual `remote-linux-gate` step. |
 | **Gate** | `docs/remote-linux-gate.md` program overlay row on Windows viewer when B is done. |
 
-Until B is implemented, integration `overlay-server-program` is listed but **SKIP** in `run.ps1`.
-
 ## Progress
 
 - [x] `presents: true` and presentation effect wiring
 - [x] Server-session overlay state in `NativeShell`
 - [x] Job helper launch over WSL
 - [x] Remove `serverRefusal` for connected sessions
-- [ ] Unit + integration gates green on x64
+- [x] Unit (`NativeControlTests`, `RemotePresentationClientTests`) + integration smoke `overlay-server-program`
+- [ ] Full `overlay-server-program` gate with live WSL (`AGTERM_WIN_GATE_WSL`; see `docs/remote-linux-gate.md`)
 - [ ] Remove arm64 skip only if a keys case is added for server overlays
