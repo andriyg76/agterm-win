@@ -206,7 +206,7 @@ extension AppStore {
 
     /// closeReplicaPages takes down every page `session` shows for its origin: with the stream gone the origin
     /// has ended them, and nothing could reach it from them.
-    func closeReplicaPages(of session: Session) {
+    public func closeReplicaPages(of session: Session) {
         for slot in session.replicaPages {
             // a page companion's own page is the row: its close released it, and closing it again closes the row again
             if slot.pane == nil, session.content == .page { continue }

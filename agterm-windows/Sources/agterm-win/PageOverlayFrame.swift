@@ -40,7 +40,7 @@ final class PageOverlayFrame {
     func load(file path: String) {
         guard let page else { return }
         let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
-        Array((normalized as NSString).utf16) + [0].withUnsafeBufferPointer {
+        Array(normalized.utf16) + [0].withUnsafeBufferPointer {
             nt_page_navigate_file(page, $0.baseAddress)
         }
     }
@@ -71,7 +71,7 @@ final class PageOverlayFrame {
         var buffer = [UInt16](repeating: 0, count: 256)
         let length = nt_page_title(page, &buffer, Int32(buffer.count))
         guard length > 0, length < buffer.count else { return nil }
-        return String(decoding: buffer.prefix(length), as: UTF16.self)
+        return String(decoding: buffer.prefix(Int(length)), as: UTF16.self)
     }
 
     func destroy() {

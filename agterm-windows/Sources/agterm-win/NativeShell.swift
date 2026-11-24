@@ -1055,6 +1055,7 @@ final class NativeShell {
         GetClientRect(window, &client)
         let top = titleBar.height
         let area = NativeOverlay.Rect(x: sidebarWidth, y: top, width: max(client.right - sidebarWidth, 1), height: max(client.bottom - top, 1))
+        var remoteEnabled = true
         for session in locals {
             refreshPageOverlayState(session)
             if let page = session.pageOverlay {
@@ -1096,7 +1097,6 @@ final class NativeShell {
             MoveWindow(hud.panel, x, y, width, height, true)
             ShowWindow(hud.panel, shown ? SW_SHOW : SW_HIDE)
         }
-        var remoteEnabled = true
         if let running, let overlay = serverOverlays[running], selected == running, !overlay.state.hidden { remoteEnabled = false }
         EnableWindow(remoteTerminal.window, remoteEnabled)
         // the find bar and the palette stay above an overlay placed after them
