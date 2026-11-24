@@ -72,15 +72,19 @@ function Wait-Until([scriptblock]$Condition, [int]$Seconds = 20) {
     $null
 }
 
-# Start-Shell launches the window on a fresh state directory, after `$Prepare` seeds it, and waits for its socket.
-function Start-Shell([string]$Name, [scriptblock]$Prepare) {
+# Start-Shell launches the window on a fresh state directory, after `$Prepare` seeds it, with `$Launch`'s arguments, and
+# waits for its socket unless `$Launch` says the case does: a modal dialog at launch holds every control request.
+function Start-Shell([string]$Name, [scriptblock]$Prepare, $Launch) {
     $dir = Join-Path $Results $Name
     $state = Join-Path $dir "state"
     New-Item -ItemType Directory -Force $state | Out-Null
     if ($Prepare) { & $Prepare $state }
     $env:AGTERM_WIN_STATE_DIR = $state
-    try { $process = Start-Process -FilePath $exe -PassThru } finally { Remove-Item Env:AGTERM_WIN_STATE_DIR }
-    $ready = Wait-Until { (Invoke-Ctl $state @("tree")).ok } 30
+    try {
+        $process = if ($Launch.Arguments) { Start-Process -FilePath $exe -ArgumentList $Launch.Arguments -PassThru }
+                   else { Start-Process -FilePath $exe -PassThru }
+    } finally { Remove-Item Env:AGTERM_WIN_STATE_DIR }
+    $ready = if ($Launch.CaseWaits) { $true } else { Wait-Until { (Invoke-Ctl $state @("tree")).ok } 30 }
     [pscustomobject]@{ Dir = $dir; State = $state; Process = $process; Ready = [bool]$ready }
 }
 
@@ -232,6 +236,10 @@ $shellPreparations = @{
         Set-Content (Join-Path $state "config\keymap.conf") "map ctrl+alt+t new_session"
     }
 }
+# what a case's window is started with, when not the bare window
+$shellLaunches = @{}
+
+. (Join-Path $PSScriptRoot "wsl-cases.ps1")
 
 # Note marks a step in the log, so a case that stops shows where.
 function Note([string]$Text) { Write-Host ("  {0:HH:mm:ss} {1}" -f (Get-Date), $Text) }
@@ -241,7 +249,7 @@ function Note([string]$Text) { Write-Host ("  {0:HH:mm:ss} {1}" -f (Get-Date), $
 $ShellCaseSeconds = 180
 
 function Invoke-ShellCase([string]$Name) {
-    $shell = Start-Shell $Name $shellPreparations[$Name]
+    $shell = Start-Shell $Name $shellPreparations[$Name] $shellLaunches[$Name]
     Note "$Name started"
     $watchdog = Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -PassThru -ArgumentList @("-NoProfile", "-Command",
         "Start-Sleep -Seconds $ShellCaseSeconds; Stop-Process -Id $($shell.Process.Id) -Force -ErrorAction SilentlyContinue")

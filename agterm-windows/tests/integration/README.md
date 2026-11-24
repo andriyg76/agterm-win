@@ -39,4 +39,5 @@ and reads the outcome back; a unit test of its logic alone does not cover it.
 Sandbox needs the `Containers-DisposableClientVM` feature, a restart, and one manual start from Start to finish
 installing its client. Each case leaves `screen.txt`, its state directory (`agterm-win.log`, `crash.log`) and
 `cases.json` under the results folder.
-WSL and remote cases run only on the desktop: Sandbox has no WSL.
+`wsl-cases.ps1` start a distribution no machine has, so they need no WSL and run in Sandbox and on CI too: they read
+back what was started, asked and saved, never a connected server.

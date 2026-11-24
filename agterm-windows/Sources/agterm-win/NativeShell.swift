@@ -422,7 +422,14 @@ final class NativeShell {
     private func discoverProfiles(then requested: [String]) {
         let powerShell7 = Self.powerShell7()
         DispatchQueue.global().async {
-            let listing = (try? HiddenProcess(commandLine: "wsl.exe --list --quiet", captureErrors: false))?.readToEnd() ?? Data()
+            // without WSL, or with no distribution, wsl.exe prints why on stdout and fails; that text names none
+            var listing = Data()
+            if let wsl = try? HiddenProcess(commandLine: "wsl.exe --list --quiet", captureErrors: false) {
+                wsl.closeInput()
+                let output = wsl.readToEnd()
+                wsl.waitUntilExit()
+                if wsl.terminationStatus == 0 { listing = output }
+            }
             let distributions = LaunchProfiles.distributions(fromWSLList: listing)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
