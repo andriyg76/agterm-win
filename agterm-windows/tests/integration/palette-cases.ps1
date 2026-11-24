@@ -25,6 +25,10 @@ public static class AgtermInput {
     [DllImport("user32.dll")] static extern bool GetKeyboardState(byte[] state);
     [DllImport("user32.dll")] static extern bool SetKeyboardState(byte[] state);
     [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr window);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string className, string title);
+
+    // Child finds a child by class whether it is shown or not: the list shows only once its rows arrive.
+    public static IntPtr Child(IntPtr parent, string className) { return FindWindowExW(parent, IntPtr.Zero, className, null); }
 
     // SendChord is Chord for a window Windows will not put in front: attached to its thread, the case holds Ctrl (and
     // Shift) in their shared key state and sends the key to the window with focus, whose own GetKeyState then reads
@@ -131,8 +135,8 @@ function Get-Palette([IntPtr]$Window) {
     if (-not $panel) { return $null }
     [pscustomobject]@{
         Panel = $panel
-        Edit = [AgtermWin32]::VisibleChildren($panel, "Edit") | Select-Object -First 1
-        List = [AgtermWin32]::VisibleChildren($panel, "ListBox") | Select-Object -First 1
+        Edit = [AgtermInput]::Child($panel, "Edit")
+        List = [AgtermInput]::Child($panel, "ListBox")
     }
 }
 
@@ -189,6 +193,7 @@ $shellCases["palettes"] = {
     Note "Ctrl+P"
     $palette = Open-Palette $window $false
     if (-not $palette) { return @("Ctrl+P opened no palette") }
+    Wait-Until { @(Get-Rows $palette).Count -ge 3 } 5 | Out-Null
     $rows = Get-Rows $palette
     if (($rows -join "|") -ne "alpha-api|beta-web|gamma-db") { $failures += "Ctrl+P lists '$($rows -join "|")', not the sessions A to Z" }
     if ([AgtermInput]::Highlight($palette.List) -ne 0) { $failures += "Ctrl+P opened without the first row highlighted" }
@@ -231,6 +236,7 @@ $shellCases["palettes"] = {
     Note "Ctrl+Shift+P"
     $palette = Open-Palette $window $true
     if (-not $palette) { return $failures + @("Ctrl+Shift+P opened no palette") }
+    Wait-Until { @(Get-Rows $palette).Count -gt 5 } 5 | Out-Null
     $rows = Get-Rows $palette
     foreach ($title in @("Find…", "Quit", "Go to Session…", "New Session › Windows PowerShell")) {
         if ($rows -notcontains $title) { $failures += "Ctrl+Shift+P lacks '$title'" }
