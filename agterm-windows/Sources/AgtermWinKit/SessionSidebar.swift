@@ -35,6 +35,11 @@ public enum SessionSidebar {
         }
     }
 
+    /// server is one agterm-server's group: its label over its tree, so every server's sessions read the same way.
+    public static func server(id: UUID, label: String, workspaces: [Workspace], unseen: [UUID: Int] = [:]) -> Item {
+        Item(id: id, title: label, isWorkspace: true, ended: false, children: items(workspaces, unseen: unseen))
+    }
+
     private static func sessionItems(_ sessions: [Session], unseen: [UUID: Int]) -> [Item] {
         let ids = Set(sessions.map(\.id))
         return sessions.filter { $0.parentID.map { !ids.contains($0) } ?? true }.map { parent in

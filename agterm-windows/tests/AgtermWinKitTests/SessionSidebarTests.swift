@@ -22,6 +22,13 @@ struct SessionSidebarTests {
         #expect(items[1].children.isEmpty)
     }
 
+    @Test func aServerGroupHoldsItsTreeUnderItsLabel() {
+        let api = session("api"), group = UUID()
+        let item = SessionSidebar.server(id: group, label: "WSL Ubuntu", workspaces: [Workspace(name: "", sessions: [api], isRoot: true)])
+        #expect(item.id == group && item.title == "WSL Ubuntu" && item.isWorkspace)
+        #expect(item.children.map(\.title) == ["api"])
+    }
+
     @Test func selectionKeepsAPresentSessionAndOtherwiseTakesTheFirstLiveOne() {
         let gone = session("gone", ended: true), live = session("live")
         let workspaces = [Workspace(name: "a", sessions: [gone]), Workspace(name: "b", sessions: [live])]

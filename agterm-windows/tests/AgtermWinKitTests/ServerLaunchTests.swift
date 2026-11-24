@@ -3,9 +3,8 @@ import Testing
 
 struct ServerLaunchTests {
     @Test func onlyTheChoiceToStartAtLaunchStartsIt() {
-        #expect(!ServerLaunch.startsAtLaunch(nil))
-        #expect(!ServerLaunch.startsAtLaunch(.manual))
-        #expect(ServerLaunch.startsAtLaunch(.atLaunch))
+        #expect(ServerLaunch.atLaunch(["Ubuntu": .atLaunch, "Debian": .manual, "alpine": .atLaunch]) == ["alpine", "Ubuntu"])
+        #expect(ServerLaunch.atLaunch([:]).isEmpty)
     }
 
     @Test func startingAsksUntilSomethingIsChosen() {
@@ -21,9 +20,15 @@ struct ServerLaunchTests {
         #expect(ServerLaunch.Answer.allCases.map(\.title) == ["Yes, start it at launch", "No", "No, and don't ask again"])
     }
 
-    @Test func clearingStartAtLaunchIsAChoice() {
-        #expect(ServerLaunch.toggled(nil) == .atLaunch)
-        #expect(ServerLaunch.toggled(.manual) == .atLaunch)
-        #expect(ServerLaunch.toggled(.atLaunch) == .manual)
+    @Test func settingsTickStartsAtLaunchAndUntickNeverAsks() {
+        let before: [String: ServerLaunch] = ["Ubuntu": .atLaunch, "Debian": .manual]
+        let after = ServerLaunch.choices(before, checked: ["Debian", "Arch"], listed: ["Ubuntu", "Debian", "Arch", "Fedora"])
+        #expect(after == ["Ubuntu": .manual, "Debian": .atLaunch, "Arch": .atLaunch])
+        #expect(ServerLaunch.asks(after["Fedora"]))
+    }
+
+    @Test func settingsListAStartAtLaunchDistributionWSLNoLongerHas() {
+        #expect(ServerLaunch.listed(available: ["Ubuntu"], choices: ["Old": .atLaunch, "Gone": .manual]) == ["Ubuntu", "Old"])
+        #expect(ServerLaunch.listed(available: ["Ubuntu"], choices: ["Ubuntu": .atLaunch]) == ["Ubuntu"])
     }
 }

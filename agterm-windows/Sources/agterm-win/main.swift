@@ -10,7 +10,7 @@ import agtermCore
 //   agterm-win.exe --local [<name>]
 //   agterm-win.exe -- <command line>
 //
-// agterm-server in WSL starts only on `--wsl`, `--install-server`, the menu, or the choice to start it at launch.
+// A distribution's agterm-server starts only on `--wsl`, `--install-server`, the menu, or the choice to start it at launch.
 // `--native` is accepted as a compatibility no-op for commands written while the implementation was introduced.
 // AGTERM_WIN_STATE_DIR isolates a test or second instance; AGTERM_WIN_TEST_SCREEN makes a command window write its
 // terminal text there when the program exits, then close.
@@ -88,14 +88,14 @@ MainActor.assumeIsolated {
         NativeTerminal.open(commandLine: command.isEmpty ? "powershell.exe" : command)
     } else {
         let flag = arguments.firstIndex(of: "--wsl")
-        let distribution = flag.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? "Ubuntu"
+        let installServer = arguments.contains("--install-server")
+        // --install-server names its distribution with --wsl, Ubuntu when it does not
+        let server = flag.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? (installServer ? "Ubuntu" : nil)
         let profiles = arguments.indices
             .filter { arguments[$0] == "--profile" && $0 + 1 < arguments.count }
             .map { arguments[$0 + 1] }
-        NativeShell.open(remote: RemoteWindow(host: WSLHost(distribution: distribution), stateDirectory: stateDirectory),
-                         settings: stateDirectory.appendingPathComponent("native.json"), profiles: profiles,
-                         version: (try? serverRelease().version) ?? "dev", serverRequested: flag != nil,
-                         installServer: arguments.contains("--install-server"))
+        NativeShell.open(settings: stateDirectory.appendingPathComponent("native.json"), profiles: profiles,
+                         version: (try? serverRelease().version) ?? "dev", server: server, installServer: installServer)
     }
 }
 

@@ -41,7 +41,7 @@ struct NativeMenuTests {
     }
 
     @Test func picksRoundTripThroughMenuIDs() {
-        for pick in NativeMenu.Command.allCases.map(NativeMenu.Pick.command) + [.profile(0), .profile(7)] {
+        for pick in NativeMenu.Command.allCases.map(NativeMenu.Pick.command) + [.profile(0), .profile(7), .defaultProfile(2), .startServer(0), .startServer(5), .serverSession(0), .serverSession(3)] {
             #expect(NativeMenu.Pick(id: pick.id) == pick)
         }
         #expect(NativeMenu.Pick(id: 0) == nil)
@@ -49,7 +49,7 @@ struct NativeMenuTests {
 
     @Test func everyCommandNamesItsShortcut() {
         #expect(NativeMenu.Command.allCases.allSatisfy { !$0.title.isEmpty })
-        #expect(NativeMenu.Command.allCases.filter { $0.shortcut.isEmpty } == [.editKeymap, .reloadKeymap, .startServer, .serverAtLaunch])
+        #expect(NativeMenu.Command.allCases.filter { $0.shortcut.isEmpty } == [.editKeymap, .reloadKeymap])
     }
 
     @Test func fontStepsStayInRange() {
@@ -66,36 +66,26 @@ struct NativeMenuTests {
         #expect(NativeMenu.quitQuestion(runningLocalSessions: 3)?.contains("3 local sessions") == true)
     }
 
-    @Test func newSessionOffersTheServerWhileConnected() {
-        let connected = NativeMenu.sessions(profiles: profiles, server: "WSL Ubuntu", serverState: .init(started: true, connected: true),
-                                            canCloseSession: false, sessionCount: 1)[0].children
-        #expect(connected.last?.title == "WSL Ubuntu (agterm-server)")
-        #expect(connected.last?.pick == .command(.newServerSession) && connected.last?.enabled == true)
-        let offline = NativeMenu.sessions(profiles: profiles, server: "WSL Ubuntu", serverState: .init(started: true, connected: false),
-                                          canCloseSession: false, sessionCount: 1)[0].children
-        #expect(offline.last?.enabled == false)
+    @Test func newSessionOffersEachStartedServerWhileConnected() {
+        let servers = [NativeMenu.Server(label: "WSL Ubuntu", started: true, connected: true, current: true),
+                       NativeMenu.Server(label: "WSL Debian", started: true, connected: false),
+                       NativeMenu.Server(label: "WSL Arch")]
+        let launches = NativeMenu.sessions(profiles: profiles, servers: servers, canCloseSession: false, sessionCount: 1)[0].children
+        let sessions = launches.filter { if case .serverSession = $0.pick { true } else { false } }
+        #expect(sessions.map(\.title) == ["WSL Ubuntu (agterm-server)", "WSL Debian (agterm-server)"])
+        #expect(sessions.map(\.pick) == [.serverSession(0), .serverSession(1)])
+        #expect(sessions.map(\.enabled) == [true, false])
+        #expect(sessions.map(\.shortcut) == ["Ctrl+Shift+N", ""])
         #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: false, sessionCount: 1)[0].children.count == profiles.count)
     }
 
-    @Test func startingTheServerIsEnabledUntilItIsStarted() {
-        func start(_ state: NativeMenu.ServerState) -> NativeMenu.Entry? {
-            NativeMenu.sessions(profiles: profiles, server: "WSL Ubuntu", serverState: state, canCloseSession: false, sessionCount: 1)[0]
-                .children.first { $0.pick == .command(.startServer) }
-        }
-        #expect(start(.init(started: false))?.title == "Start agterm-server in WSL Ubuntu")
-        #expect(start(.init(started: false))?.enabled == true)
-        #expect(start(.init(started: true))?.enabled == false)
-    }
-
-    @Test func startAtLaunchIsCheckedByTheChoice() {
-        func atLaunch(_ checked: Bool) -> NativeMenu.Entry? {
-            NativeMenu.window(profiles: profiles, server: "WSL Ubuntu", serverState: .init(started: false, atLaunch: checked),
-                              canCloseSession: false, sessionCount: 1, hasSelection: false, canPaste: false)
-                .first { $0.pick == .command(.serverAtLaunch) }
-        }
-        #expect(atLaunch(true)?.checked == true && atLaunch(true)?.enabled == true)
-        #expect(atLaunch(false)?.checked == false)
-        #expect(!NativeMenu.sessions(profiles: profiles, canCloseSession: false, sessionCount: 1).contains { $0.pick == .command(.serverAtLaunch) })
+    @Test func startListsEveryServerEnabledUntilItIsStarted() {
+        let servers = [NativeMenu.Server(label: "WSL Ubuntu", started: true), NativeMenu.Server(label: "WSL Debian")]
+        let start = NativeMenu.sessions(profiles: profiles, servers: servers, canCloseSession: false, sessionCount: 1)[0].children.last
+        #expect(start?.title == "Start agterm-server in")
+        #expect(start?.children.map(\.title) == ["WSL Ubuntu", "WSL Debian"])
+        #expect(start?.children.map(\.pick) == [.startServer(0), .startServer(1)])
+        #expect(start?.children.map(\.enabled) == [false, true])
     }
 
     @Test func closingAServerSessionNamesWhatEnds() {

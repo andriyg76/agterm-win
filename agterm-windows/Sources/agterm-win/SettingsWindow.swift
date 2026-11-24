@@ -3,7 +3,8 @@ import Foundation
 import WinSDK
 
 /// SettingsWindow is agterm-win's Settings: its Appearance group picks the theme, the dark-mode theme that follows
-/// Windows' app mode, and the font; its Notifications group what a notification does. An appearance change previews
+/// Windows' app mode, and the font; its Notifications group what a notification does; its agterm-server group the WSL
+/// distributions whose server starts as agterm opens. An appearance change previews
 /// on the terminals at once; OK keeps every change, Cancel and closing put back what was there when the window
 /// opened, as the macOS theme picker previews, commits and cancels.
 @MainActor
@@ -12,6 +13,8 @@ final class SettingsWindow {
         var appearance: Appearance
         var points: Float
         var notifications: NotificationSettings
+        /// serverAtLaunch are the distributions ticked to start their agterm-server at launch.
+        var serverAtLaunch: Set<String> = []
     }
 
     private(set) static var current: SettingsWindow?
@@ -19,6 +22,7 @@ final class SettingsWindow {
     private let original: Values
     private let themes: [String]
     private let fonts: [String]
+    private let distributions: [String]
     private let preview: (Values) -> Void
     private let finish: (Values?) -> Void
     private var window: HWND?
@@ -33,24 +37,29 @@ final class SettingsWindow {
         case theme = 101, follows, darkTheme, fontFamily, size, sizeArrows, banners, sound, unseenCount, flash
     }
 
+    // the agterm-server group's check box for `distributions[index]` has this id plus the index
+    private static let distributionBase: Int32 = 300
+
     /// show opens Settings over `owner`, or brings an open one to the front. `finish` gets the kept values, nil for a
     /// cancel.
-    static func show(owner: HWND?, values: Values, themes: [String], fonts: [String], preview: @escaping (Values) -> Void,
-                     finish: @escaping (Values?) -> Void) {
+    static func show(owner: HWND?, values: Values, themes: [String], fonts: [String], distributions: [String],
+                     preview: @escaping (Values) -> Void, finish: @escaping (Values?) -> Void) {
         if let window = current?.window {
             SetForegroundWindow(window)
             return
         }
-        let settings = SettingsWindow(values: values, themes: themes, fonts: fonts, preview: preview, finish: finish)
+        let settings = SettingsWindow(values: values, themes: themes, fonts: fonts, distributions: distributions, preview: preview,
+                                      finish: finish)
         current = settings
         settings.create(owner: owner)
     }
 
-    private init(values: Values, themes: [String], fonts: [String], preview: @escaping (Values) -> Void,
+    private init(values: Values, themes: [String], fonts: [String], distributions: [String], preview: @escaping (Values) -> Void,
                  finish: @escaping (Values?) -> Void) {
         original = values
         self.themes = themes
         self.fonts = fonts
+        self.distributions = distributions
         self.preview = preview
         self.finish = finish
     }
@@ -73,7 +82,11 @@ final class SettingsWindow {
         }
         let dpi = owner.map { Int32(GetDpiForWindow($0)) } ?? 96
         let scaled = { (value: Int32) in MulDiv(value, dpi, 96) }
-        var frame = RECT(left: 0, top: 0, right: scaled(520), bottom: scaled(650))
+        // two check boxes a row, or the one line saying WSL listed none
+        let serverRows = Int32(max((distributions.count + 1) / 2, 1))
+        let serverGroupHeight = 56 + serverRows * 26
+        let buttonsTop = 604 + serverGroupHeight + 14
+        var frame = RECT(left: 0, top: 0, right: scaled(520), bottom: scaled(buttonsTop + 40))
         let style = DWORD(WS_OVERLAPPED) | DWORD(WS_CAPTION) | DWORD(WS_SYSMENU)
         AdjustWindowRectExForDpi(&frame, style, false, 0, UINT(dpi))
         var ownerFrame = RECT()
@@ -124,8 +137,17 @@ final class SettingsWindow {
                          id: Control.unseenCount.rawValue)
         _ = add("STATIC", "Flash the taskbar button", 0, 272, 480, 220, 18)
         let flash = add("COMBOBOX", "", Int32(CBS_DROPDOWNLIST) | tab, 272, 500, 220, 200, id: Control.flash.rawValue)
-        _ = add("BUTTON", "OK", Int32(BS_DEFPUSHBUTTON) | tab, 316, 610, 92, 28, id: Int32(IDOK))
-        _ = add("BUTTON", "Cancel", Int32(BS_PUSHBUTTON) | tab, 416, 610, 92, 28, id: Int32(IDCANCEL))
+        _ = add("BUTTON", "agterm-server", Int32(BS_GROUPBOX), 12, 604, 496, serverGroupHeight)
+        _ = add("STATIC", "Start agterm-server at launch in", 0, 28, 628, 464, 18)
+        var serverBoxes: [HWND?] = []
+        for (index, distribution) in distributions.enumerated() {
+            let column = Int32(index % 2), row = Int32(index / 2)
+            serverBoxes.append(add("BUTTON", "WSL \(distribution)", checkbox, 28 + column * 244, 650 + row * 26, 220, 22,
+                                   id: Self.distributionBase + Int32(index)))
+        }
+        if distributions.isEmpty { _ = add("STATIC", "WSL lists no distributions.", 0, 28, 650, 464, 18) }
+        _ = add("BUTTON", "OK", Int32(BS_DEFPUSHBUTTON) | tab, 316, buttonsTop, 92, 28, id: Int32(IDOK))
+        _ = add("BUTTON", "Cancel", Int32(BS_PUSHBUTTON) | tab, 416, buttonsTop, 92, 28, id: Int32(IDCANCEL))
 
         let rows = ["Default"] + themes
         for list in [themeList, darkList] { rows.forEach { addString($0, to: list, message: LB_ADDSTRING) } }
@@ -144,6 +166,9 @@ final class SettingsWindow {
         EnableWindow(sound, notifications.banners ? true : false)
         TaskbarFlash.allCases.forEach { addString($0.title, to: flash, message: CB_ADDSTRING) }
         SendMessageW(flash, UINT(CB_SETCURSEL), WPARAM(TaskbarFlash.allCases.firstIndex(of: notifications.flash) ?? 0), 0)
+        for (box, distribution) in zip(serverBoxes, distributions) {
+            SendMessageW(box, UINT(BM_SETCHECK), WPARAM(original.serverAtLaunch.contains(distribution) ? BST_CHECKED : BST_UNCHECKED), 0)
+        }
         loading = false
         ShowWindow(window, SW_SHOW)
         SetFocus(themeList)
@@ -177,8 +202,11 @@ final class SettingsWindow {
         let notifications = NotificationSettings(banners: checked(.banners), sound: checked(.sound),
                                                  flash: TaskbarFlash.allCases.indices.contains(flashRow) ? TaskbarFlash.allCases[flashRow] : .untilFocused,
                                                  unseenCount: checked(.unseenCount))
+        let serverAtLaunch = distributions.enumerated().filter { index, _ in
+            SendMessageW(GetDlgItem(self.window, Self.distributionBase + Int32(index)), UINT(BM_GETCHECK), 0, 0) == LRESULT(BST_CHECKED)
+        }.map(\.element)
         return Values(appearance: appearance, points: min(max(points, NativeMenu.pointRange.lowerBound), NativeMenu.pointRange.upperBound),
-                      notifications: notifications)
+                      notifications: notifications, serverAtLaunch: Set(serverAtLaunch))
     }
 
     fileprivate func command(_ id: Int32, notification: Int32) {
