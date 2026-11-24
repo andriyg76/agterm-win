@@ -5,7 +5,7 @@ on:
     branches: [windows-port]
     paths: ["agterm-windows/**", "agtermCore/**", ".github/workflows/windows.yml"]
   pull_request:
-    branches: [windows-port]
+    branches: [windows-port, feature/presentation-ui]
   workflow_dispatch:
 
 concurrency:
