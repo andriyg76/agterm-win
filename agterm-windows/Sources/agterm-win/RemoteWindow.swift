@@ -15,6 +15,12 @@ final class RemoteWindow: RemoteCatalogEffects {
     var changed: () -> Void = {}
     /// onNotification runs with a notification a server session posted, from its program or a `notify` there.
     var onNotification: (UUID, PresentationNotify) -> Void = { _, _ in }
+    /// onReplicaOverlay shows a program overlay the origin handed over on a catalog session row.
+    var onReplicaOverlay: (@MainActor (UUID, PresentationOverlay) -> Bool)?
+    var onReplicaOverlayClose: (@MainActor (UUID, PresentationOverlayChange) -> Void)?
+    var onReplicaOverlayResize: (@MainActor (UUID, PresentationOverlayChange) -> Void)?
+    /// onPresentationStopped runs when a session's `zmx present` stream is torn down.
+    var onPresentationStopped: (UUID) -> Void = { _ in }
     // a presentation stream per server session, as a Mac's remote window keeps them
     private var presenters: [UUID: RemotePresentationClient] = [:]
     private var ticking: Task<Void, Never>?
@@ -38,6 +44,11 @@ final class RemoteWindow: RemoteCatalogEffects {
     }
 
     var connected: Bool { mirror.state == .connected }
+
+    /// answerPresentation sends one frame upstream on `id`'s presentation stream, for replica overlay close and the like.
+    func answerPresentation(_ id: UUID, _ body: PresentationFrame.Body) {
+        presenters[id]?.answer(body)
+    }
 
     /// perform sends a structural operation to the server; the catalog stream brings back what it changed.
     func perform(_ operation: RemoteOperation) async -> ControlResponse {
@@ -83,9 +94,8 @@ final class RemoteWindow: RemoteCatalogEffects {
 
     // MARK: presentation
 
-    /// startPresentation opens `session`'s `zmx present` stream, which the server sends its notifications to. It stays a
-    /// mirror: agterm-win shows no asks, picks, HUD, pages or server-session overlays yet, and the server keeps them for a viewer that does,
-    /// as it does while no Mac shows the session. Once agterm-win shows them it presents, as a Mac does.
+    /// startPresentation opens `session`'s `zmx present` stream. While the session is shown here, this Mac is a
+    /// presenter: notifications, program overlays the origin hands over, and related replica surfaces arrive here.
     private func startPresentation(_ session: Session) {
         let id = session.id
         guard presenters[id] == nil, session.content == .terminal, let binding = session.remotePresentation?.binding else { return }
@@ -100,9 +110,19 @@ final class RemoteWindow: RemoteCatalogEffects {
             status: { _ in }, snapshotStatus: { _ in }, hud: { _ in },
             notify: { [weak self] in self?.onNotification(id, $0) },
             connection: { log("presentation for \(id): \($0)") },
+            overlayRequest: { [weak self] overlay in
+                guard let self else { return false }
+                return self.onReplicaOverlay?(id, overlay) ?? false
+            },
+            overlayClose: { [weak self] change in
+                self?.onReplicaOverlayClose?(id, change)
+            },
+            overlayResize: { [weak self] change in
+                self?.onReplicaOverlayResize?(id, change)
+            },
             warn: { log("presentation for \(id): \($0)") })
         let client = RemotePresentationClient(argv: argv, presentationVersion: binding.presentationVersion, transport: transport,
-                                              effects: effects, presents: false)
+                                              effects: effects, presents: true)
         presenters[id] = client
         client.start()
         startTicking()
@@ -110,6 +130,7 @@ final class RemoteWindow: RemoteCatalogEffects {
 
     private func stopPresentation(_ id: UUID) {
         presenters.removeValue(forKey: id)?.stop()
+        onPresentationStopped(id)
     }
 
     /// startTicking drives the streams' retries and liveness once a second while any is open.

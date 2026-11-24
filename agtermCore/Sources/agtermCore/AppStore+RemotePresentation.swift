@@ -204,6 +204,25 @@ extension AppStore {
         return true
     }
 
+    /// prepareReplicaOverlay records an origin-handed program overlay on `id` and wires `closed` for when its surface ends.
+    public func prepareReplicaOverlay(_ overlay: PresentationOverlay, forSession id: UUID,
+                                      closed: @escaping @MainActor (String) -> Void) -> Bool {
+        guard let session = session(withID: id), session.remotePresentation != nil else { return false }
+        guard overlay.pane == nil else { return false }
+        guard session.overlayReplica == nil else { return false }
+        session.setOverlayReplica(OverlayReplica(job: overlay.job), pane: nil)
+        session.onReplicaOverlayClosed = closed
+        return true
+    }
+
+    /// clearReplicaOverlay drops the session's replica bookkeeping without tearing down a native surface the caller owns.
+    public func clearReplicaOverlay(forSession id: UUID, notifyClosed: Bool) {
+        guard let session = session(withID: id) else { return }
+        if notifyClosed, let job = session.overlayReplica?.job { session.onReplicaOverlayClosed?(job) }
+        session.overlayReplica = nil
+        session.onReplicaOverlayClosed = nil
+    }
+
     /// Takes down the overlay showing `job`, once its origin closed it.
     public func closeReplicaOverlay(_ job: String, forSession id: UUID) {
         guard let slot = session(withID: id)?.overlayReplicas.first(where: { $0.replica.job == job }) else { return }
