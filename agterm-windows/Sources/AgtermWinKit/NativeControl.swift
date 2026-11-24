@@ -363,10 +363,10 @@ public enum NativeControl {
         let local = locals.isEmpty ? [] : [ControlWorkspaceNode(id: localWorkspace.uuidString, name: "Local",
                                                                 active: locals.contains { $0.active }, sessions: locals)]
         let dashboard = host.dashboard
-        var tree = ControlTree(workspaces: local + host.serverWorkspaces, quickVisible: host.quickShown,
-                               dashboardMembers: dashboard?.members.map(\.controlRef), dashboardHighlighted: dashboard?.highlighted?.controlRef,
-                               dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) },
-                               sidebarWidth: host.sidebarWidthPoints)
+        var tree = ControlTree(workspaces: local + host.serverWorkspaces, sidebarWidth: host.sidebarWidthPoints,
+                               quickVisible: host.quickShown, dashboardMembers: dashboard?.members.map(\.controlRef),
+                               dashboardHighlighted: dashboard?.highlighted?.controlRef, dashboardFontSize: dashboard?.fontSize,
+                               dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
         tree.wslServers = host.wslServers
         return tree
     }
