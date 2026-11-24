@@ -161,6 +161,11 @@ public enum NativeMenu {
         "Close \(name) on \(server)? Its programs on the server end."
     }
 
+    /// closeLocalQuestion is what closing a local session asks while Settings ▸ General asks first.
+    public static func closeLocalQuestion(session name: String) -> String {
+        "Close \(name)? Its program ends."
+    }
+
     /// quitQuestion is what closing the window asks while local sessions still run, nil when nothing would be lost;
     /// agterm-server's sessions keep running on the server.
     public static func quitQuestion(runningLocalSessions count: Int) -> String? {

@@ -75,8 +75,11 @@ MainActor.assumeIsolated {
     Keys.load(configDirectory: configDirectory)
     TerminalAppearance.themes = TerminalThemes(userDirectory: configDirectory.appendingPathComponent("themes"),
                                                bundledDirectory: bundled("themes", source: "Resources/themes"))
-    // a window without the sidebar draws with the saved appearance too
-    TerminalAppearance.use(NativeSettings.load(from: stateDirectory.appendingPathComponent("native.json")).appearance)
+    // a window without the sidebar draws and takes the mouse as Settings say too
+    let saved = NativeSettings.load(from: stateDirectory.appendingPathComponent("native.json"))
+    TerminalAppearance.use(saved.appearance)
+    NativeTerminal.rightClickPastes = saved.general.rightClickPastes
+    NativeTerminal.scrollLines = saved.general.scrollLines
 
     let arguments = CommandLine.arguments
     if let flag = arguments.firstIndex(of: "--local") {
@@ -87,7 +90,7 @@ MainActor.assumeIsolated {
         NativeTerminal.open(commandLine: command.isEmpty ? "powershell.exe" : command)
     } else {
         let flag = arguments.firstIndex(of: "--wsl")
-        let distribution = flag.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? "Ubuntu"
+        let distribution = saved.general.distribution(argument: flag.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil })
         let profiles = arguments.indices
             .filter { arguments[$0] == "--profile" && $0 + 1 < arguments.count }
             .map { arguments[$0 + 1] }

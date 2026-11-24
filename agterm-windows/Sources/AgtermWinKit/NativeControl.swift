@@ -10,7 +10,8 @@ public protocol NativeControlHost: AnyObject {
     /// serverWorkspaces is the catalog's tree, empty while no server is connected.
     var serverWorkspaces: [ControlWorkspaceNode] { get }
     func isServerSession(_ id: UUID) -> Bool
-    func newLocalSession(name: String?, command: String?, select: Bool) -> UUID?
+    /// newLocalSession starts in `cwd` when given, else in the user's home, as a Mac's `session.new` does.
+    func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> UUID?
     func newServerSession() async -> ControlResponse
     func closeSession(_ id: UUID) async -> ControlResponse
     func renameSession(_ id: UUID, to name: String) async -> ControlResponse
@@ -33,6 +34,8 @@ public protocol NativeControlHost: AnyObject {
     var systemIsDark: Bool { get }
     /// setAppearance saves `appearance` and draws every terminal with it.
     func setAppearance(_ appearance: Appearance)
+    /// openSettings shows Settings on `tab`, an open one switching to it.
+    func openSettings(tab: SettingsTab)
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -126,6 +129,14 @@ public enum NativeControl {
                 host.setAppearance(next)
                 return ControlResponse(ok: true, result: themeResult(host, themes: nil))
             }
+        #if os(Windows)
+        case .settingsOpen:
+            guard let tab = SettingsTab.parse(request.args?.name) else {
+                return failure("unknown settings tab: \(request.args?.name ?? "") (\(SettingsTab.acceptedNames))")
+            }
+            host.openSettings(tab: tab)
+            return ControlResponse(ok: true, result: ControlResult(text: tab.rawValue))
+        #endif
         case .keymapList:
             return ControlResponse(ok: true, result: ControlResult(keymap: host.keymap))
         case .keymapReload:
@@ -179,7 +190,7 @@ public enum NativeControl {
             return await host.newServerSession()
         }
         guard args?.command?.isEmpty != true else { return failure("session.new command must not be blank") }
-        guard let id = host.newLocalSession(name: args?.name, command: args?.command, select: args?.noSelect != true) else {
+        guard let id = host.newLocalSession(name: args?.name, command: args?.command, cwd: args?.cwd, select: args?.noSelect != true) else {
             return failure("no launch profile to start a session from")
         }
         return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))

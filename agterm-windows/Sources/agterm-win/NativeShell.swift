@@ -83,6 +83,7 @@ final class NativeShell {
         self.version = version
         settings = NativeSettings.load(from: settingsURL)
         TerminalAppearance.use(settings.appearance)
+        applyGeneral()
     }
 
     private func create(starting requested: [String], installServer: Bool) {
@@ -188,7 +189,7 @@ final class NativeShell {
 
     // what the terminals draw with now: the saved appearance, or Settings' preview while it is open
     private lazy var shown = SettingsWindow.Values(appearance: settings.appearance, points: settings.fontPoints,
-                                                    notifications: settings.notifications)
+                                                    notifications: settings.notifications, general: settings.general)
 
     /// applyAppearance draws every terminal with `values`, without saving them.
     private func applyAppearance(_ values: SettingsWindow.Values) {
@@ -201,16 +202,20 @@ final class NativeShell {
         shown = values
     }
 
-    private func openSettings() {
-        SettingsWindow.show(owner: window, values: .init(appearance: settings.appearance, points: settings.fontPoints,
-                                                         notifications: settings.notifications),
+    private func showSettings(tab: SettingsTab = .general) {
+        let distributions = profiles.compactMap { $0.name.hasPrefix("WSL ") ? String($0.name.dropFirst(4)) : nil }
+        SettingsWindow.show(owner: window, tab: tab, values: .init(appearance: settings.appearance, points: settings.fontPoints,
+                                                         notifications: settings.notifications, general: settings.general),
                             themes: TerminalAppearance.themes.catalog.names, fonts: TerminalAppearance.monospaceFonts,
+                            distributions: distributions,
                             preview: { [unowned self] in applyAppearance($0) },
                             finish: { [unowned self] kept in
                                 guard let kept else { return }
                                 settings.appearance = kept.appearance
                                 settings.fontPoints = kept.points
                                 settings.notifications = kept.notifications
+                                settings.general = kept.general
+                                applyGeneral()
                                 saveSettings()
                                 rebuild()
                             })
@@ -343,7 +348,25 @@ final class NativeShell {
     }
 
     private func newSession(_ profile: LaunchProfile) {
-        startLocal(fallback: fallbackName(for: profile), commandLine: profile.commandLine)
+        startLocal(fallback: fallbackName(for: profile), commandLine: profile.commandLine, directory: newSessionDirectory, placed: true)
+    }
+
+    /// newSessionDirectory is where Settings ▸ General starts a session from the menu or a key.
+    private var newSessionDirectory: String {
+        settings.general.startDirectory(current: locals.first { $0.id == selected }?.directory, home: Self.home, exists: Self.isFolder)
+    }
+
+    private static var home: String { ProcessInfo.processInfo.environment["USERPROFILE"] ?? "C:\\" }
+
+    private static func isFolder(_ path: String) -> Bool {
+        var folder: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &folder) && folder.boolValue
+    }
+
+    /// applyGeneral hands Settings ▸ General's mouse choices to every terminal.
+    private func applyGeneral() {
+        NativeTerminal.rightClickPastes = settings.general.rightClickPastes
+        NativeTerminal.scrollLines = settings.general.scrollLines
     }
 
     private func fallbackName(for profile: LaunchProfile) -> String {
@@ -389,9 +412,10 @@ final class NativeShell {
                                environment: sessionEnvironment(session.id))
     }
 
+    /// startLocal starts a local session; `placed` puts it where Settings ▸ General says, otherwise it goes last.
     @discardableResult
     private func startLocal(fallback: String, customName: String? = nil, commandLine: String, directory: String? = nil,
-                            selecting: Bool = true) -> Foundation.UUID {
+                            selecting: Bool = true, placed: Bool = false) -> Foundation.UUID {
         let session = LocalSession(fallback: fallback, customName: customName, directory: directory, commandLine: commandLine,
                                    terminal: makeTerminal())
         let id = session.id
@@ -399,7 +423,9 @@ final class NativeShell {
         session.terminal.onAttention = { [unowned self] in localAttention(id) }
         session.terminal.onNotification = { [unowned self] in deliver(id, title: $0, body: $1, source: .terminal) }
         session.terminal.onNaming = { [unowned self] in localNaming(id) }
-        locals.append(session)
+        let index = placed ? settings.general.insertionIndex(count: locals.count, selected: locals.firstIndex { $0.id == selected })
+            : locals.count
+        locals.insert(session, at: index)
         layout()
         log("native shell: new \(session.name) session [\(id)]")
         launch(session)
@@ -616,7 +642,13 @@ final class NativeShell {
             closeServerSession(selected)
             return
         }
-        if let selected { closeLocal(selected) }
+        guard let selected, let session = locals.first(where: { $0.id == selected }) else { return }
+        if settings.general.confirmCloseSession, !session.exited {
+            let question = NativeMenu.closeLocalQuestion(session: session.name)
+            guard MessageBoxW(window, Array(question.utf16) + [0], Array("agterm".utf16) + [0],
+                              UINT(MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)) == IDOK else { return }
+        }
+        closeLocal(selected)
     }
 
     private func closeLocal(_ id: Foundation.UUID) {
@@ -653,7 +685,7 @@ final class NativeShell {
         case .sessionPalette: openPalette(.sessions)
         case .commandPalette: openPalette(.commands)
         case .quit: if confirmQuit() { DestroyWindow(window) }
-        case .settings: openSettings()
+        case .settings: showSettings()
         case .editKeymap: Keys.edit(owner: window)
         case .reloadKeymap: Keys.reload(owner: window)
         default: visibleTerminal.perform(command)
@@ -1328,14 +1360,16 @@ extension NativeShell: NativeControlHost {
 
     func isServerSession(_ id: Foundation.UUID) -> Bool { remote.session(id) != nil }
 
-    func newLocalSession(name: String?, command: String?, select: Bool) -> Foundation.UUID? {
+    func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> Foundation.UUID? {
         let customName = name.flatMap(SessionNaming.customName)
         if let command {
-            return startLocal(fallback: "Session \(locals.count + 1)", customName: customName, commandLine: command, selecting: select)
+            return startLocal(fallback: "Session \(locals.count + 1)", customName: customName, commandLine: command, directory: cwd,
+                              selecting: select)
         }
         guard profiles.indices.contains(defaultProfile) else { return nil }
         let profile = profiles[defaultProfile]
-        return startLocal(fallback: fallbackName(for: profile), customName: customName, commandLine: profile.commandLine, selecting: select)
+        return startLocal(fallback: fallbackName(for: profile), customName: customName, commandLine: profile.commandLine, directory: cwd,
+                          selecting: select)
     }
 
     func newServerSession() async -> ControlResponse {
@@ -1401,10 +1435,12 @@ extension NativeShell: NativeControlHost {
 
     var systemIsDark: Bool { TerminalAppearance.isDark }
 
+    func openSettings(tab: SettingsTab) { showSettings(tab: tab) }
+
     func setAppearance(_ appearance: Appearance) {
         settings.appearance = appearance
         saveSettings()
-        applyAppearance(.init(appearance: appearance, points: shown.points, notifications: settings.notifications))
+        applyAppearance(.init(appearance: appearance, points: shown.points, notifications: settings.notifications, general: settings.general))
     }
 
     func reloadKeymap() -> Int { Keys.reload(owner: window, quiet: true) }
