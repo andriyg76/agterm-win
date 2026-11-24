@@ -21,6 +21,18 @@ function Get-ServerProcesses($Shell) {
         ? { $_.CommandLine -match "agtermctl" })
 }
 
+function Get-WSLBootstrapNotices($Shell) {
+    $window = Get-ShellWindow $Shell
+    if (-not $window) { return @() }
+    [AgtermWin32]::VisibleChildren($window, "Static") | ForEach-Object { [AgtermWin32]::TextOf($_) } | ? { $_ }
+}
+
+function Get-AgtermWinLog([string]$State) {
+    $path = Join-Path $State "agterm-win.log"
+    if (-not (Test-Path $path)) { return "" }
+    Get-Content $path -Raw -Encoding UTF8
+}
+
 # with nothing chosen, agterm opens without starting any server or asking
 $shellCases["wsl-not-at-launch"] = {
     param($Shell)
@@ -54,8 +66,15 @@ $shellCases["wsl-at-launch"] = {
     if ($server.connected) { $failures += "$absent reads connected" }
     if ($server.launch -ne "atLaunch") { $failures += "$absent launch is '$($server.launch)'" }
     if ([AgtermWin32]::Visible($Shell.Process.Id, "#32770")) { $failures += "a chosen start asked" }
-    $log = Get-Content (Join-Path $state "agterm-win.log") -Raw
+    $log = Get-AgtermWinLog $state
     if (-not $log.Contains("starting agterm-server in WSL $absent")) { $failures += "the log does not show the start" }
+    if (-not $log.Contains("wsl inspect $absent")) { $failures += "the log does not show wsl inspect before connect" }
+    if (-not $log.Contains("wsl ensure $absent")) { $failures += "the log does not show wsl ensure" }
+    $notice = Wait-Until {
+        $text = (Get-WSLBootstrapNotices $Shell) -join "`n"
+        if ($text -match "not reachable|Checking WSL $absent") { $text }
+    } 20
+    if (-not $notice) { $failures += "the sidebar notice did not show the probe outcome" }
     Save-Snapshot $Shell "started"
 
     $off = Invoke-Ctl $state @("wsl", "launch", $absent, "off")
@@ -105,5 +124,71 @@ $shellCases["wsl-first-start"] = {
     if (-not $server) { $failures += "$absent did not start after the answer" }
     if ($server.launch -ne "manual") { $failures += "wsl list launch is '$($server.launch)', not manual" }
     if ((Get-ServerLaunch $state $absent) -ne "manual") { $failures += "native.json keeps '$(Get-ServerLaunch $state $absent)'" }
+    $failures
+}
+
+# at-launch ensure reports why a missing distribution stays disconnected, without attempting a GitHub download
+$shellPreparations["wsl-ensure-probe"] = {
+    param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$absent`": `"atLaunch`"}}"
+}
+$shellCases["wsl-ensure-probe"] = {
+    param($Shell)
+    $state = $Shell.State
+    $failures = @()
+    $null = Wait-Until { (Invoke-Ctl $state @("tree")).ok } 30
+    $server = Wait-Until { $s = Get-WSLServer $state $absent; if ($s.started) { $s } } 20
+    if (-not $server) { return @("$absent did not start") }
+    if ($server.connected) { $failures += "$absent reads connected for a distribution this machine does not have" }
+    $log = Get-AgtermWinLog $state
+    if (-not $log.Contains("wsl inspect $absent")) { $failures += "log lacks wsl inspect" }
+    if ($log -match "downloading https://github.com/umputun/agterm/releases") { $failures += "ensure tried to download agterm-server for an unreachable distribution" }
+    if (-not ((Get-WSLBootstrapNotices $Shell) -join "`n" -match "not reachable")) {
+        $failures += "sidebar notice does not explain the unreachable distribution"
+    }
+    if (-not $log.Contains("distributionUnreachable") -and -not ($log -match "wsl ensure $absent.*refuse")) {
+        $failures += "log does not record a refused ensure plan"
+    }
+    Save-Snapshot $Shell "ensure-probe"
+    $failures
+}
+
+# wsl start on an already-started server runs ensure again when still disconnected
+$shellPreparations["wsl-ensure-reprobe"] = {
+    param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$absent`": `"atLaunch`"}}"
+}
+$shellCases["wsl-ensure-reprobe"] = {
+    param($Shell)
+    $state = $Shell.State
+    $failures = @()
+    $null = Wait-Until { (Get-WSLServer $state $absent).started } 25
+    Start-Sleep -Seconds 2
+    $before = ([regex]::Matches((Get-AgtermWinLog $state), "wsl inspect $absent")).Count
+    $again = Invoke-Ctl $state @("wsl", "start", $absent)
+    if (-not $again.ok) { $failures += "wsl start replied $($again | ConvertTo-Json -Compress)" }
+    Start-Sleep -Seconds 2
+    $after = ([regex]::Matches((Get-AgtermWinLog $state), "wsl inspect $absent")).Count
+    if ($after -le $before) { $failures += "wsl start did not run another inspect ($before -> $after)" }
+    $failures
+}
+
+# --install-server on an unreachable distribution surfaces install failure in the log and notice instead of hanging
+$shellLaunches["wsl-install-unreachable"] = @{ Arguments = "--wsl $absent --install-server" }
+$shellCases["wsl-install-unreachable"] = {
+    param($Shell)
+    $state = $Shell.State
+    $failures = @()
+    $null = Wait-Until { (Invoke-Ctl $state @("tree")).ok } 30
+    $log = Wait-Until {
+        $text = Get-AgtermWinLog $state
+        if ($text -match "server install failed|install failed") { $text }
+    } 45
+    if (-not $log) { return @("install did not fail visibly on log within 45 s") }
+    $notice = Wait-Until {
+        $text = (Get-WSLBootstrapNotices $Shell) -join "`n"
+        if ($text -match "install failed") { $text }
+    } 5
+    if (-not $notice) { $failures += "sidebar notice does not report install failure" }
+    if ((Get-WSLServer $state $absent).connected) { $failures += "unreachable install left the server connected" }
+    Save-Snapshot $Shell "install-unreachable"
     $failures
 }

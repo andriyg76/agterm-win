@@ -52,4 +52,11 @@ Sandbox needs the `Containers-DisposableClientVM` feature, a restart, and one ma
 installing its client. Each case leaves `screen.txt`, its state directory (`agterm-win.log`, `crash.log`) and
 `cases.json` under the results folder.
 `wsl-cases.ps1` start a distribution no machine has, so they need no WSL and run in Sandbox and on CI too: they read
-back what was started, asked and saved, never a connected server.
+back what was started, asked and saved, and how WSL auto-ensure probes and reports failures. Cases `wsl-ensure-probe`,
+`wsl-ensure-reprobe`, and `wsl-install-unreachable` pin that behaviour; only a live install connects.
+
+On a machine with a working agterm-server in WSL, run the optional gate (not part of CI):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests\integration\wsl-server-gate.ps1 -App $env:TEMP\agterm-win-stage -Results $env:TEMP\wsl-gate -Distribution Ubuntu
+```
