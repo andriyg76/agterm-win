@@ -62,6 +62,22 @@ function Invoke-Ctl([string]$State, [string[]]$Arguments) {
     try { $out | ConvertFrom-Json } catch { [pscustomobject]@{ ok = $false; error = $out } }
 }
 
+# Invoke-CtlInput runs agtermctl with `$Text` as its stdin, exactly: a PowerShell pipe would re-encode it and add a newline
+function Invoke-CtlInput([string]$State, [string]$Text, [string[]]$Arguments) {
+    $in = Join-Path $State "ctl-stdin.txt"
+    $out = Join-Path $State "ctl-stdout.txt"
+    $err = Join-Path $State "ctl-stderr.txt"
+    [IO.File]::WriteAllText($in, $Text, (New-Object System.Text.UTF8Encoding $false))
+    $env:AGTERM_STATE_DIR = $State
+    try {
+        Start-Process -FilePath $ctl -ArgumentList (@($Arguments) + "--json") -NoNewWindow -Wait `
+            -RedirectStandardInput $in -RedirectStandardOutput $out -RedirectStandardError $err
+    } finally { Remove-Item Env:AGTERM_STATE_DIR }
+    $reply = "$(Get-Content $out -Raw)".Trim()
+    if (-not $reply) { $reply = "$(Get-Content $err -Raw)".Trim() }
+    try { $reply | ConvertFrom-Json } catch { [pscustomobject]@{ ok = $false; error = $reply } }
+}
+
 function Wait-Until([scriptblock]$Condition, [int]$Seconds = 20) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     do {
@@ -141,6 +157,28 @@ $shellCases = [ordered]@{
         $node = Wait-Until { $n = Get-Node $state $id; if ($n.cwd -eq "C:\Windows\System32") { $n } } 30
         if (-not $node) { return @("cwd is '$((Get-Node $state $id).cwd)', not C:\Windows\System32") }
         if ($node.name -ne "System32") { @("name is '$($node.name)', not System32") }
+    }
+
+    # session paste --stdin pastes into the session, which runs it on Enter, with ESC and Ctrl-C replaced by spaces;
+    # a pane the session does not have is refused
+    "session-paste" = {
+        param($Shell)
+        $state = $Shell.State
+        $id = New-PowerShellSession $state
+        if (-not $id) { return @("session new failed") }
+        if (-not (Wait-Prompt $state $id)) { return @("the shell never reported a folder: $((Get-Node $state $id) | ConvertTo-Json -Compress)") }
+        $failures = @()
+        $reply = Invoke-CtlInput $state "Write-Output ('pasted-' + 6*7 + '|a$([char]27)b|c$([char]3)d|')" @("session", "paste", "--stdin", "--target", $id)
+        if (-not $reply.ok -or $reply.result.id -ne $id) { $failures += "paste replied $($reply | ConvertTo-Json -Compress)" }
+        Invoke-Ctl $state @("session", "type", "--target", $id, "`r") | Out-Null
+        $ran = Wait-Until { (Invoke-Ctl $state @("session", "text", "--target", $id)).result.text -match '(?m)^pasted-42\|a b\|c d\|$' }
+        Save-Snapshot $Shell "after-paste"
+        if (-not $ran) { $failures += "the paste did not run as 'pasted-42|a b|c d|': $((Invoke-Ctl $state @("session", "text", "--target", $id)).result.text)" }
+        $split = Invoke-CtlInput $state "x" @("session", "paste", "--stdin", "--target", $id, "--pane", "split")
+        if ($split.ok -or $split.error -ne "session has no split pane") { $failures += "--pane split replied $($split | ConvertTo-Json -Compress)" }
+        $token = Invoke-CtlInput $state "x" @("session", "paste", "--stdin", "--target", $id, "--pane-id", "p1")
+        if ($token.ok -or $token.error -ne "unknown pane id: p1") { $failures += "--pane-id p1 replied $($token | ConvertTo-Json -Compress)" }
+        $failures
     }
 
     # notify and a program's OSC 9 count on a session out of view; selecting it clears the count
