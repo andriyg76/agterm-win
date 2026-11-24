@@ -57,7 +57,7 @@ public enum ServerLaunch: String, Codable, Equatable, Sendable {
 
     public static func question(server: String) -> (title: String, text: String) {
         ("Start agterm-server in \(server) whenever agterm opens?",
-         "It starts now either way. You can change this later in Settings ▸ agterm-server.")
+         "It starts now either way. You can change this later in Settings ▸ General.")
     }
 
     public static let notStartedNotice = "No agterm-server is started. Start one from ☰ ▸ New Session ▸ Start agterm-server in."
