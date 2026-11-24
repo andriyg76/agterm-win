@@ -162,7 +162,7 @@ struct WSLHost {
         try HiddenProcess(commandLine: commandLine(line), input: input, captureErrors: captureErrors)
     }
 
-  /// runLine runs one shell line without throwing; probe steps use this so every failure carries stderr.
+    /// runLine runs one shell line without throwing; probe steps use this so every failure carries stderr.
     func runLine(_ line: String) -> (status: Int32, stdout: String, stderr: String) {
         (try? run(line)) ?? (status: -1, stdout: "", stderr: "wsl.exe did not start")
     }

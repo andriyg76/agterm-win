@@ -273,7 +273,7 @@ final class NativeShell {
                 return
             }
             if forceInstall {
-                finish(shell.runServerInstall(host: host, label: label, release: release))
+                finish(Self.runServerInstall(host: host, label: label, release: release))
                 return
             }
             let inspection = host.inspect()
@@ -284,40 +284,31 @@ final class NativeShell {
             case .connect:
                 finish(nil)
             case .startServiceThenConnect:
-                serverDispatchNotice(server, "\(label): starting agterm-server…")
+                Self.dispatchNotice(host.distribution, "\(label): starting agterm-server…")
                 let start = host.startService()
                 if start.ok {
                     finish(nil)
                 } else {
                     log("wsl start service failed: \(start.message)")
-                    finish(shell.runServerInstall(host: host, label: label, release: release,
-                                                  preamble: "Service did not start (\(start.message)). Installing…"))
+                    finish(Self.runServerInstall(host: host, label: label, release: release,
+                                                 preamble: "Service did not start (\(start.message)). Installing…"))
                 }
             case .install(let reason):
-                finish(shell.runServerInstall(host: host, label: label, release: release, preamble: reason))
+                finish(Self.runServerInstall(host: host, label: label, release: release, preamble: reason))
             case .refuse(let reason):
                 finish("\(label): \(reason)")
             }
         }
     }
 
-    private func serverDispatchNotice(_ server: Server, _ text: String) {
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated {
-                server.bootstrapNotice = text
-                shell.layout()
-            }
-        }
-    }
-
     /// runServerInstall performs download, unpack and install.sh, reporting progress in the notice strip.
-    private func runServerInstall(host: WSLHost, label: String, release: (version: String, checksums: String),
-                                  preamble: String? = nil) -> String? {
-        if let preamble { serverDispatchNoticeForDistribution(host.distribution, "\(label): \(preamble)") }
+    nonisolated private static func runServerInstall(host: WSLHost, label: String, release: (version: String, checksums: String),
+                                                        preamble: String? = nil) -> String? {
+        if let preamble { dispatchNotice(host.distribution, "\(label): \(preamble)") }
         do {
             let code = try host.installServer(version: release.version, checksums: release.checksums) { line in
                 log("server install: \(line)")
-                serverDispatchNoticeForDistribution(host.distribution, "\(label): \(line)")
+                dispatchNotice(host.distribution, "\(label): \(line)")
             }
             log("server install exited \(code)")
             return WSLServerEnsure.installOutcome(exitCode: code, error: nil, label: label)
@@ -327,7 +318,7 @@ final class NativeShell {
         }
     }
 
-    private func serverDispatchNoticeForDistribution(_ distribution: String, _ text: String) {
+    nonisolated private static func dispatchNotice(_ distribution: String, _ text: String) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
                 guard let server = shell.server(distribution) else { return }
