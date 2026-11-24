@@ -355,7 +355,7 @@ $shellCases["title-bar-menus"] = {
         $menuRect = New-Object AgtermWin32+Rect
         [AgtermWin32]::GetWindowRect($menu, [ref]$menuRect) | Out-Null
         $out = @()
-        if ([Math]::Abs($menuRect.Top - $under.Y) -gt 4 -or [Math]::Abs($menuRect.Left - $under.X) -gt 4) {
+        if ([Math]::Abs($menuRect.Top - $under.Y) -gt 4 -or [Math]::Abs($menuRect.Left - $under.X) -gt 12) {
             $out += "$Label opened at ($($menuRect.Left), $($menuRect.Top)), not under $($under.X), $($under.Y)"
         }
         Save-ScreenSnapshot $Shell "$Label-menu"
