@@ -114,3 +114,33 @@ sessions: every asserted step passed, exit 0. Masters left by the stopped instan
 Two defects the gate found, both fixed: the server closed a `catalog.subscribe` connection after its ok reply
 (`streamingCommands` lacked it), and a killed master's leftover socket made each replacement `ssh -M` run without
 multiplexing, so the pool now removes it before starting one.
+
+# WSL catalog overlay gate (agterm-win)
+
+CI integration case `overlay-server-program` always runs a disconnected smoke (`agterm-test-absent` started,
+`session.overlay.open` on an unknown id returns `no such session`, `tree` still answers). For the full ctl overlay gate
+on a catalog row, set `AGTERM_WIN_GATE_WSL` to a distribution that starts agterm-server and connects, then run
+`agterm-windows/tests/integration/run.ps1` on a staged build:
+
+```powershell
+$env:AGTERM_WIN_GATE_WSL = 'Ubuntu'   # or another listed distribution with agterm-server installed
+.\tests\integration\run.ps1 -App (Resolve-Path .\scripts\..\installer\Output\agterm-win) -Results $env:TEMP\agw-int
+```
+
+| step | asserted |
+|---|---|
+| connected | `wsl list` reports `connected` for that distribution |
+| presenter | the new server session's `presenters.presenter == true` |
+| program overlay | `session.overlay.open` / `text` / `close`; `tree.overlay` toggles; the session row stays |
+
+# WSL presentation UI gate (agterm-win, stage E)
+
+Stages **E1–E3** (replica ask, pick, HUD) have no CI automation yet. With `AGTERM_WIN_GATE_WSL` set and a connected
+catalog, run a server session script that posts an ask, a `pick.open` bound to that session, or a `hud` while agterm-win
+is the presenter (`tree` → `presenters.presenter == true` for that row).
+
+| surface | manual check |
+|---|---|
+| ask | Task Dialog answers; `askPending` clears from `tree`; origin receives the choice |
+| pick | Command palette lists items; choice reaches the server (`pick.result`) |
+| HUD | passive panel over the remote terminal; `tree` shows overlay/HUD state; dismiss does not end the session row |

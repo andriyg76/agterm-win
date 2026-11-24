@@ -204,6 +204,59 @@ extension AppStore {
         return true
     }
 
+    /// prepareReplicaOverlay records an origin-handed program overlay on `id` and wires `closed` for when its surface ends.
+    public func prepareReplicaOverlay(_ overlay: PresentationOverlay, forSession id: UUID,
+                                      closed: @escaping @MainActor (String) -> Void) -> Bool {
+        guard let session = session(withID: id), session.remotePresentation != nil else { return false }
+        guard overlay.pane == nil else { return false }
+        guard session.overlayReplica == nil else { return false }
+        session.setOverlayReplica(OverlayReplica(job: overlay.job), pane: nil)
+        session.onReplicaOverlayClosed = closed
+        return true
+    }
+
+    /// clearReplicaOverlay drops the session's replica bookkeeping without tearing down a native surface the caller owns.
+    public func clearReplicaOverlay(forSession id: UUID, notifyClosed: Bool) {
+        guard let session = session(withID: id) else { return }
+        if notifyClosed, let job = session.overlayReplica?.job { session.onReplicaOverlayClosed?(job) }
+        session.overlayReplica = nil
+        session.onReplicaOverlayClosed = nil
+    }
+
+    /// markViewerProgramOverlay records a program overlay agterm-win shows over a catalog row, for `tree` and overlay commands.
+    public func markViewerProgramOverlay(forSession id: UUID, command: String, sizePercent: Int?, wait: Bool) {
+        guard let session = session(withID: id) else { return }
+        session.overlayActive = true
+        session.overlayCommand = command
+        session.overlaySizePercent = sizePercent
+        session.overlayWait = wait
+        session.overlayHidden = false
+        session.overlayExitCode = nil
+    }
+
+    /// clearViewerProgramOverlay drops a catalog row's overlay bookkeeping without tearing down its native surface.
+    public func clearViewerProgramOverlay(forSession id: UUID, exitCode: Int? = nil) {
+        guard let session = session(withID: id) else { return }
+        session.overlayActive = false
+        session.overlayCommand = nil
+        session.overlaySizePercent = nil
+        session.overlayWait = false
+        session.overlayHidden = false
+        session.overlayExitCode = exitCode
+    }
+
+    /// markViewerHud records a passive HUD agterm-win draws over a catalog row, for `tree` and overlay read-back.
+    public func markViewerHud(forSession id: UUID, spec: HudSpec) {
+        guard let session = session(withID: id) else { return }
+        session.hudSpec = spec
+        session.overlayActive = true
+        session.overlaySizePercent = HudLayout.clampSizePercent(spec.sizePercent ?? 60, for: spec)
+        session.overlayHidden = false
+        session.overlayCommand = nil
+        session.overlayWait = false
+        scheduleTreeChanged()
+    }
+
     /// Takes down the overlay showing `job`, once its origin closed it.
     public func closeReplicaOverlay(_ job: String, forSession id: UUID) {
         guard let slot = session(withID: id)?.overlayReplicas.first(where: { $0.replica.job == job }) else { return }

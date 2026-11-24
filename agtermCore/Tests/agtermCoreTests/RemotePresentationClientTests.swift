@@ -564,6 +564,17 @@ struct RemotePresentationClientTests {
         #expect(transport.links[0].sent.map(\.body).last == .overlayRejected(PresentationOverlayChange(job: "j1")))
     }
 
+    @Test func anOverlayAClientThatDoesNotPresentRejectsWithoutShowing() {
+        let client = makeClient(presents: false)
+        client.start()
+        connect(client, mode: .presenter)
+
+        transport.deliver(line(.overlayRequest(Self.overlay), rev: 2))
+
+        #expect(transport.links[0].sent.map(\.body).last == .overlayRejected(PresentationOverlayChange(job: "j1")))
+        #expect(recorder.overlays.isEmpty)
+    }
+
     @Test func theOriginsOverlayCloseAndResizeReachTheApp() {
         let client = makeClient()
         client.start()

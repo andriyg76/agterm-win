@@ -375,7 +375,7 @@ public final class SessionPickBook {
     }
 
     /// drain shows the oldest replica queued for `controller`'s window once its modal slot is free.
-    func drain(_ controller: PickController) {
+    public func drain(_ controller: PickController) {
         guard !controller.modalPending,
               let index = queued.firstIndex(where: { PickRegistry.shared.controller(for: $0.replica.window) === controller }) else { return }
         let next = queued.remove(at: index)
