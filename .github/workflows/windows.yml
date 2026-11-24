@@ -20,27 +20,7 @@ env:
   SWIFT_BUILD: 6.4.3-RELEASE
 
 jobs:
-  # agtermCore with its tests must keep compiling for Windows; running them waits on the known failures
-  core:
-    runs-on: windows-2022
-    timeout-minutes: 60
-    defaults:
-      run:
-        shell: pwsh
-        working-directory: agtermCore
-    steps:
-      - uses: actions/checkout@v7
-      - uses: compnerd/gha-setup-swift@v0.5.1
-        with:
-          swift-version: ${{ env.SWIFT_VERSION }}
-          swift-build: ${{ env.SWIFT_BUILD }}
-          cache: true
-      - uses: actions/cache@v6
-        with:
-          path: agtermCore/.build
-          key: core-${{ env.SWIFT_BUILD }}-${{ hashFiles('agtermCore/Package.swift', 'agtermCore/Package.resolved') }}
-      - run: swift build --build-tests
-
+  # agtermCore compiles as a path dependency of agterm-windows; macOS and Linux CI run agtermCore tests.
   # the real window on the runner's interactive desktop, as tests/integration/README.md runs it locally
   app:
     name: app (${{ matrix.arch }})
