@@ -133,7 +133,7 @@ jobs:
           CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $source = 'agterm-windows/packaging/chocolatey'
+          $source = (Resolve-Path 'agterm-windows/packaging/chocolatey').Path
           $out = "agterm-windows/build/package-managers/$env:VERSION/chocolatey"
           New-Item -ItemType Directory -Force "$out/tools" | Out-Null
           $installers = @{}
@@ -156,7 +156,8 @@ jobs:
             $text = [IO.File]::ReadAllText($file.FullName)
             foreach ($name in $tokens.Keys) { $text = $text.Replace("{{$name}}", $tokens[$name]) }
             if ($text -match '\{\{\w+\}\}') { throw "$($file.Name) has an unknown token $($Matches[0])" }
-            $target = Join-Path $out $file.FullName.Substring($source.Length + 1)
+            $relative = $file.FullName.Substring($source.Length).TrimStart('\', '/')
+            $target = Join-Path $out $relative
             New-Item -ItemType Directory -Force (Split-Path -Parent $target) | Out-Null
             [IO.File]::WriteAllText($target, $text, [Text.UTF8Encoding]::new($false))
           }
