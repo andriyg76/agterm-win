@@ -1,6 +1,6 @@
 #include "NativeShim.h"
 
-#include <WebView2.h>
+#include "../../vendor/webview2/include/WebView2.h"
 #include <wrl.h>
 
 #include <shlwapi.h>

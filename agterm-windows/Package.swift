@@ -5,7 +5,8 @@ import PackageDescription
 // scripts/make-icon.sh writes the icon resource from agterm's app icon; it is committed
 let iconResource = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path + "/Resources/agterm.res"
 let webviewArch = ProcessInfo.processInfo.environment["AGTERM_WEBVIEW2_ARCH"] ?? "x64"
-let webviewRoot = "vendor/webview2"
+// SwiftPM on Windows compiles from the repo root when agtermCore is a sibling path dependency.
+let webviewRoot = "agterm-windows/vendor/webview2"
 
 let package = Package(
     name: "agterm-win",
