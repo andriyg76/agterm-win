@@ -17,7 +17,9 @@ let package = Package(
         .target(
             name: "NativeShim",
             dependencies: ["GhosttyVT"],
-            cxxSettings: [.define("GHOSTTY_STATIC"), .headerSearchPath("vendor/webview2/include")],
+            cxxSettings: [.define("GHOSTTY_STATIC"),
+                          // Windows SwiftPM does not yet pass headerSearchPath to the C++ driver.
+                          .unsafeFlags(["-Ivendor/webview2/include"], .when(platforms: [.windows]))],
             linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("dwmapi"), .linkedLibrary("user32"),
                              .linkedLibrary("comctl32"), .linkedLibrary("uxtheme"), .linkedLibrary("gdi32"), .linkedLibrary("bcrypt"),
                              .linkedLibrary("ntdll"), .linkedLibrary("runtimeobject"), .linkedLibrary("advapi32"), .linkedLibrary("shell32"),
