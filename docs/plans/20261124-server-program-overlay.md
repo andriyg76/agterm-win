@@ -36,9 +36,9 @@ Until B is implemented, integration `overlay-server-program` is listed but **SKI
 
 ## Progress
 
-- [ ] `presents: true` and presentation effect wiring
-- [ ] Server-session overlay state in `NativeShell`
-- [ ] Job helper launch over WSL
+- [x] `presents: true` and presentation effect wiring
+- [x] Server-session overlay state in `NativeShell`
+- [x] Job helper launch over WSL
 - [ ] Remove `serverRefusal` for connected sessions
 - [ ] Unit + integration gates green on x64
 - [ ] Remove arm64 skip only if a keys case is added for server overlays
