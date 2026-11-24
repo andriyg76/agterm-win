@@ -124,6 +124,8 @@ final class NativeShell {
     private var hovered: TitleBar.Button?
     private var pressed: TitleBar.Button?
     private var pressedMenuTab: Int?
+    private var pressedAppIcon = false
+    private var appIconHighlight = false
     private var windowActive = true
     private var shownTitle = "agterm"
     var remoteTerminal: NativeTerminal!
@@ -1785,6 +1787,11 @@ final class NativeShell {
 
     private func updateTips() {
         let bar = titleBar
+        let icon = bar.appIcon
+        let systemMenuTip = Array("System menu".utf16) + [0]
+        systemMenuTip.withUnsafeBufferPointer { tip in
+            nt_tooltip_set(tooltip, UnsafeMutableRawPointer(window), 100, icon.left, 0, icon.right, bar.height, tip.baseAddress)
+        }
         for button in TitleBar.Button.allCases where !button.isCaption {
             let span = bar.span(of: button)
             let tip = Array((button.tip(Keys.keymap.shortcuts) ?? "").utf16) + [0]
@@ -1821,7 +1828,7 @@ final class NativeShell {
         case .top: return hitTop
         case .caption: return hitCaption
         case .button(let button): return button.hitCode ?? hitClient
-        case .menuTab: return hitClient
+        case .appIcon, .menuTab: return hitClient
         case .outside: return hitClient
         }
     }
@@ -1869,16 +1876,38 @@ final class NativeShell {
         invalidateTitleBar()
     }
 
+    private func refreshAppIconHighlight(x: Int32, y: Int32) {
+        let lit = titleBar.hit(x: x, y: y, topBorder: 0) == .appIcon || pressedAppIcon
+        guard lit != appIconHighlight else { return }
+        appIconHighlight = lit
+        invalidateTitleBar()
+    }
+
+    private func systemMenu(atClient x: Int32, y: Int32) {
+        var point = POINT(x: x, y: y)
+        ClientToScreen(window, &point)
+        let lParam = LPARAM(Int(bitPattern: (UInt32(UInt16(bitPattern: point.y)) << 16) | UInt32(UInt16(bitPattern: point.x))))
+        systemMenu(lParam)
+    }
+
     fileprivate func mouseMoved(_ lParam: LPARAM) {
         if dragDivider(lParam) { return }
         let (x, y) = titlePoint(lParam)
         refreshMenuBarHighlight(x: x, y: y)
+        refreshAppIconHighlight(x: x, y: y)
         hover(clientButton(lParam), frame: false)
     }
 
     fileprivate func mouseDown(_ lParam: LPARAM, double: Bool = false) {
         if bodyMouseDown(lParam, double: double) { return }
         let (x, y) = titlePoint(lParam)
+        if y < titleBar.height, titleBar.hit(x: x, y: y, topBorder: 0) == .appIcon {
+            pressedAppIcon = true
+            appIconHighlight = true
+            SetCapture(window)
+            invalidateTitleBar()
+            return
+        }
         if y < titleBar.height, let tab = menuTab(at: x, y: y) {
             pressedMenuTab = tab
             menuBarHighlight = tab
@@ -1894,6 +1923,15 @@ final class NativeShell {
 
     fileprivate func mouseUp(_ lParam: LPARAM) {
         if endDividerDrag() { return }
+        if pressedAppIcon {
+            pressedAppIcon = false
+            ReleaseCapture()
+            let (x, y) = titlePoint(lParam)
+            if titleBar.hit(x: x, y: y, topBorder: 0) == .appIcon { systemMenu(atClient: x, y: y) }
+            appIconHighlight = titleBar.hit(x: x, y: y, topBorder: 0) == .appIcon
+            invalidateTitleBar()
+            return
+        }
         if let tab = pressedMenuTab {
             pressedMenuTab = nil
             ReleaseCapture()
@@ -1982,6 +2020,12 @@ final class NativeShell {
         return false
     }
 
+    fileprivate func onAppIcon(_ lParam: LPARAM) -> Bool {
+        var point = POINT(x: Int32(Int16(truncatingIfNeeded: lParam)), y: Int32(Int16(truncatingIfNeeded: lParam >> 16)))
+        ScreenToClient(window, &point)
+        return titleBar.hit(x: point.x, y: point.y, topBorder: 0) == .appIcon
+    }
+
     fileprivate func paint() {
         let bar = titleBar
         let maximized = IsZoomed(window)
@@ -2006,9 +2050,10 @@ final class NativeShell {
             buttons.withUnsafeBufferPointer { buttons in
                 let title = Array(shownTitle.utf16) + [0]
                 title.withUnsafeBufferPointer { title in
-                    nt_title_bar_paint(UnsafeMutableRawPointer(window), dpi, bar.height, title.baseAddress, bar.title.left,
-                                       bar.title.right, buttons.baseAddress, Int32(buttons.count), windowActive ? 1 : 0,
-                                       tabPtr, tabCount)
+                    let iconLit = appIconHighlight || pressedAppIcon
+                    nt_title_bar_paint(UnsafeMutableRawPointer(window), dpi, bar.height, bar.appIcon.right, iconLit ? 1 : 0,
+                                       title.baseAddress, bar.title.left, bar.title.right, buttons.baseAddress,
+                                       Int32(buttons.count), windowActive ? 1 : 0, tabPtr, tabCount)
                 }
             }
         }
@@ -2163,6 +2208,9 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             return 0
         case UINT(WM_CTLCOLOREDIT):
             return shell.editColors(HDC(bitPattern: UInt(wParam)))
+        case UINT(WM_CONTEXTMENU) where !NativeShell.fromKeyboard(lParam) && shell.onAppIcon(lParam):
+            shell.systemMenu(lParam)
+            return 0
         case UINT(WM_CONTEXTMENU) where !NativeShell.fromKeyboard(lParam) && shell.inCaption(lParam):
             shell.systemMenu(lParam)
             return 0
