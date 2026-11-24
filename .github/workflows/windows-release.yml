@@ -88,7 +88,7 @@ jobs:
       - id: upload
         uses: actions/upload-artifact@v7
         with:
-          name: unsigned-installer-${{ matrix.arch }}
+          name: installer-unsigned-${{ matrix.arch }}
           path: agterm-windows/build/release/agterm-win-*-${{ matrix.arch }}-setup.exe
           if-no-files-found: error
       # the artifact configuration signs the one installer inside the uploaded zip:
@@ -118,16 +118,72 @@ jobs:
           path: agterm-windows/build/publish
           if-no-files-found: error
 
-  publish:
+  chocolatey:
     needs: [version, build]
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: installer-[ax]*
+          path: installers
+      - name: Pack Chocolatey package
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = 'agterm-windows/packaging/chocolatey'
+          $out = "agterm-windows/build/package-managers/$env:VERSION/chocolatey"
+          New-Item -ItemType Directory -Force "$out/tools" | Out-Null
+          $installers = @{}
+          foreach ($arch in 'x64', 'arm64') {
+            $setup = Get-ChildItem installers -Recurse -Filter "agterm-win-$env:VERSION-$arch-setup.exe"
+            if (@($setup).Count -ne 1) { throw "expected one $arch installer, found $(@($setup).Count)" }
+            $installers[$arch] = @{
+              Url = "https://github.com/$env:REPOSITORY/releases/download/v$env:VERSION/$($setup.Name)"
+              Sha256 = (Get-FileHash -Algorithm SHA256 $setup.FullName).Hash.ToLowerInvariant()
+            }
+          }
+          $tokens = @{
+            Version = $env:VERSION
+            UrlX64 = $installers.x64.Url
+            Sha256X64 = $installers.x64.Sha256
+            UrlArm64 = $installers.arm64.Url
+            Sha256Arm64 = $installers.arm64.Sha256
+          }
+          foreach ($file in Get-ChildItem $source -Recurse -File) {
+            $text = [IO.File]::ReadAllText($file.FullName)
+            foreach ($name in $tokens.Keys) { $text = $text.Replace("{{$name}}", $tokens[$name]) }
+            if ($text -match '\{\{\w+\}\}') { throw "$($file.Name) has an unknown token $($Matches[0])" }
+            $target = Join-Path $out $file.FullName.Substring($source.Length + 1)
+            New-Item -ItemType Directory -Force (Split-Path -Parent $target) | Out-Null
+            [IO.File]::WriteAllText($target, $text, [Text.UTF8Encoding]::new($false))
+          }
+          choco pack "$out/agterm-win.nuspec" --out "agterm-windows/build/package-managers/$env:VERSION"
+          if ($LASTEXITCODE) { throw 'choco pack failed' }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: chocolatey-package
+          path: agterm-windows/build/package-managers/${{ needs.version.outputs.version }}/agterm-win.${{ needs.version.outputs.version }}.nupkg
+          if-no-files-found: error
+
+  publish:
+    needs: [version, build, chocolatey]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v7
         with:
-          pattern: installer-*
+          pattern: installer-[ax]*
           path: publish
+      - uses: actions/download-artifact@v7
+        with:
+          name: chocolatey-package
+          path: publish/chocolatey
       - name: Publish
         shell: pwsh
         env:
@@ -143,6 +199,8 @@ jobs:
             "$($setup.FullName).sha256"
           }
           if ($assets.Count -ne 4) { throw "expected the x64 and arm64 installers, got $($assets -join ', ')" }
+          $package = Get-Item "publish/chocolatey/agterm-win.$env:VERSION.nupkg"
+          $assets += $package.FullName
           $notes = "agterm-win $env:VERSION, locked to agterm ${agterm}: Windows 10 1809 or later, x64 or arm64, installs per user without admin."
           $notes += if ($signed) { "`n`nFree code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)." } else { "`n`nUnsigned: SmartScreen warns on first run." }
           gh release create "v$env:VERSION" --target $env:GITHUB_SHA @assets --title "agterm-win $env:VERSION" --notes $notes
