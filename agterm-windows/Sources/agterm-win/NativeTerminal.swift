@@ -548,7 +548,14 @@ final class NativeTerminal {
     /// type sends `text` as typed keys, each line ending as Return; false while no program runs.
     func type(_ text: String) -> Bool {
         guard console != nil else { return false }
-        send(TerminalInput.paste(text, bracketed: false))
+        send(TerminalInput.typed(text))
+        return true
+    }
+
+    /// paste sends `text` as the clipboard paste does, bracketed when the program asked; false while no program runs.
+    func paste(_ text: String) -> Bool {
+        guard let terminal, console != nil else { return false }
+        send(TerminalInput.paste(text, bracketed: nt_bracketed_paste(terminal) != 0))
         return true
     }
 

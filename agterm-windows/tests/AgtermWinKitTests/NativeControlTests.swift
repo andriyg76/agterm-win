@@ -55,6 +55,14 @@ private final class FakeHost: NativeControlHost {
         return true
     }
 
+    var pasted: [(String, UUID)] = []
+    var unrealized: Set<UUID> = []
+    func paste(_ text: String, into id: UUID) -> Bool {
+        guard !unrealized.contains(id) else { return false }
+        pasted.append((text, id))
+        return true
+    }
+
     func screen(of id: UUID) -> (lines: [String], rows: Int)? { screens[id] }
     var bannersOff = false
     func notify(_ id: UUID, title: String, body: String) -> String? {
@@ -145,6 +153,43 @@ struct NativeControlTests {
         host.selectedSession = b
         let response = await handle(ControlRequest(cmd: .sessionType, args: ControlArgs(text: "dir\n")), host)
         #expect(response.ok && host.typed.map(\.1) == [b] && host.typed.map(\.0) == ["dir\n"])
+    }
+
+    @Test func pasteTextGoesToTheTargetSessionAndRepliesWithItsID() async {
+        let host = FakeHost()
+        let a = host.add("a")
+        host.selectedSession = host.add("b")
+        let request = ControlRequest(cmd: .sessionPasteText, target: a.uuidString, args: ControlArgs(text: "echo hi\n", pane: "primary"))
+        let response = await handle(request, host)
+        #expect(response.ok && response.result?.id == a.uuidString)
+        #expect(host.pasted.map(\.0) == ["echo hi\n"] && host.pasted.map(\.1) == [a] && host.typed.isEmpty)
+    }
+
+    @Test func pasteTextRefusesWhatAMacRefuses() async {
+        let host = FakeHost()
+        let id = host.add("a")
+        host.selectedSession = id
+        func error(_ args: ControlArgs?, target: String? = nil) async -> String? {
+            await handle(ControlRequest(cmd: .sessionPasteText, target: target, args: args), host).error
+        }
+        #expect(await error(nil) == "session.paste.text requires text")
+        #expect(await error(ControlArgs(text: "")) == "session.paste.text requires text")
+        #expect(await error(ControlArgs(text: "a\0b")) == "text must not contain a NUL byte")
+        #expect(await error(ControlArgs(text: "x", pane: "middle")) == "--pane must be left, right, or scratch")
+        #expect(await error(ControlArgs(text: "x"), target: "ffffffff") == "no such session: ffffffff")
+        #expect(await error(ControlArgs(text: "x", pane: "split")) == "session has no split pane")
+        #expect(await error(ControlArgs(text: "x", pane: "scratch")) == "session has no scratch terminal")
+        #expect(await error(ControlArgs(text: "x", paneID: "p1")) == "unknown pane id: p1")
+        host.unrealized = [id]
+        #expect(await error(ControlArgs(text: "x")) == "session not realized")
+        #expect(host.pasted.isEmpty)
+    }
+
+    @Test func pasteTextFallsBackToTheNamedPaneForAnUnknownPaneID() async {
+        let host = FakeHost()
+        host.selectedSession = host.add("a")
+        #expect(await handle(ControlRequest(cmd: .sessionPasteText, args: ControlArgs(text: "x", pane: "left", paneID: "p1")), host).ok)
+        #expect(host.pasted.map(\.0) == ["x"])
     }
 
     @Test func targetsResolveByUniquePrefixAndRefuseAnUnknownOne() async {

@@ -642,6 +642,9 @@ Windows reply.
   `insertPasted` returns nothing, so the arm checks `isRealized` after the expedite. Not in `waitsOnNetwork`:
   it copies nothing. agterm-server refuses it (`ServerCommandPolicy`) by approved exception: only the daemon's
   terminal knows mode 2004, so parity needs a zmx patch. Read back through `session.text --pane-id`.
+  agterm-win serves it in `NativeControl` with the same refusals: its sessions have one pane and no tokens, so a
+  `--pane` past the first is missing and `--pane-id` is unknown without a `--pane` fallback. `TerminalInput.paste`
+  replaces the same bytes for the clipboard and the control paste alike; `session.type` keeps them.
 - Keep standard SwiftUI Edit routing. `GhosttySurfaceView` implements Copy/Paste/Select All and validation;
   focused text fields retain their behavior, terminal Cut stays absent. Do not replace the combined
   pasteboard command group. Remove the separate Undo/Redo group because Command-Z belongs to Reopen Closed

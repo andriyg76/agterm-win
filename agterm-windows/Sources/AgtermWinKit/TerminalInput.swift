@@ -50,10 +50,22 @@ public enum TerminalInput {
         (alt ? "\u{1b}" : "") + (text == "\u{08}" ? "\u{7f}" : text)
     }
 
-    /// paste turns line breaks into the carriage returns Enter types, bracketed when the program set ?2004.
+    /// typed is text as keys: line breaks become the carriage returns Enter types, control bytes pass through.
+    public static func typed(_ text: String) -> String {
+        text.replacingOccurrences(of: "\r\n", with: "\r").replacingOccurrences(of: "\n", with: "\r")
+    }
+
+    /// pasteStripped are the bytes libghostty's paste encoder replaces with spaces, so pasted text cannot close the
+    /// bracket with ESC[201~ or act as Ctrl-C, Ctrl-Z, Ctrl-U or Ctrl-W.
+    static let pasteStripped: Set<Unicode.Scalar> = ["\u{00}", "\u{03}", "\u{04}", "\u{05}", "\u{08}", "\u{15}", "\u{17}",
+                                                     "\u{1a}", "\u{1b}", "\u{7f}"]
+
+    /// paste is `typed` with `pasteStripped` replaced by spaces, bracketed when the program set ?2004.
     public static func paste(_ text: String, bracketed: Bool) -> String {
-        let typed = text.replacingOccurrences(of: "\r\n", with: "\r").replacingOccurrences(of: "\n", with: "\r")
-        return bracketed ? "\u{1b}[200~\(typed)\u{1b}[201~" : typed
+        var scalars = String.UnicodeScalarView()
+        scalars.append(contentsOf: text.unicodeScalars.map { pasteStripped.contains($0) ? " " : $0 })
+        let pasted = typed(String(scalars))
+        return bracketed ? "\u{1b}[200~\(pasted)\u{1b}[201~" : pasted
     }
 
     /// mouse is one report for a 1-based cell: `button` 0 left, 1 middle, 2 right, 3 none (motion), 64/65 wheel.

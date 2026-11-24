@@ -34,6 +34,15 @@ struct TerminalInputTests {
         #expect(TerminalInput.paste("ls\n", bracketed: true) == "\u{1b}[200~ls\r\u{1b}[201~")
     }
 
+    @Test func pasteSpacesTheBytesThatCouldEscapeTheBracket() {
+        #expect(TerminalInput.paste("a\u{1b}[201~\u{03}b\tc", bracketed: true) == "\u{1b}[200~a [201~ b\tc\u{1b}[201~")
+        #expect(TerminalInput.paste("\u{15}\u{17}\u{1a}\u{08}\u{7f}", bracketed: false) == "     ")
+    }
+
+    @Test func typedKeepsControlBytes() {
+        #expect(TerminalInput.typed("\u{03}a\r\nb\n") == "\u{03}a\rb\r")
+    }
+
     @Test func sgrMouseReports() {
         #expect(TerminalInput.mouse(button: 0, column: 5, row: 2, release: false, sgr: true) == Array("\u{1b}[<0;5;2M".utf8))
         #expect(TerminalInput.mouse(button: 0, column: 5, row: 2, release: true, sgr: true) == Array("\u{1b}[<0;5;2m".utf8))

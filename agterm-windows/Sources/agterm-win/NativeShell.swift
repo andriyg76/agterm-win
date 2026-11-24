@@ -1527,6 +1527,8 @@ extension NativeShell: NativeControlHost {
 
     func type(_ text: String, into id: Foundation.UUID) -> Bool { terminal(of: id)?.type(text) ?? false }
 
+    func paste(_ text: String, into id: Foundation.UUID) -> Bool { terminal(of: id)?.paste(text) ?? false }
+
     func screen(of id: Foundation.UUID) -> (lines: [String], rows: Int)? { terminal(of: id)?.screen }
 
     func notify(_ id: Foundation.UUID, title: String, body: String) -> String? {

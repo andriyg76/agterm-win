@@ -19,6 +19,8 @@ public protocol NativeControlHost: AnyObject {
     func selectSession(_ id: UUID)
     /// type sends `text` to the session's program; false when it has no terminal running here.
     func type(_ text: String, into id: UUID) -> Bool
+    /// paste pastes `text` into the session as the clipboard paste does; false when it has no terminal running here.
+    func paste(_ text: String, into id: UUID) -> Bool
     /// screen is the session's lines, oldest first, and how many of the last ones are on screen; nil when the session
     /// has no terminal here.
     func screen(of id: UUID) -> (lines: [String], rows: Int)?
@@ -105,6 +107,8 @@ public enum NativeControl {
                 host.type(text, into: id) ? ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
                     : failure("session not realized")
             }
+        case .sessionPasteText:
+            return await pasteText(request, host: host)
         case .sessionText:
             let args = request.args
             if args?.all == true, args?.lines != nil { return failure("--all and --lines are exclusive") }
@@ -204,6 +208,29 @@ public enum NativeControl {
             return failure("no launch profile to start a session from")
         }
         return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+    }
+
+    /// pasteText answers `session.paste.text` with a Mac's refusals. A session here has one pane and no pane tokens, so
+    /// `--pane` past the first is missing and `--pane-id` is unknown unless `--pane` names the fallback.
+    private static func pasteText(_ request: ControlRequest, host: NativeControlHost) async -> ControlResponse {
+        let args = request.args
+        guard let text = args?.text, !text.isEmpty else { return failure("session.paste.text requires text") }
+        guard !text.contains("\0") else { return failure("text must not contain a NUL byte") }
+        var pane: StatusPane?
+        if let raw = args?.pane {
+            guard let parsed = StatusPane(controlName: raw) else { return failure("--pane must be left, right, or scratch") }
+            pane = parsed
+        }
+        return await withSession(request.target, host: host) { id in
+            if let token = args?.paneID, pane == nil { return failure("unknown pane id: \(token)") }
+            switch pane {
+            case .right: return failure("session has no split pane")
+            case .scratch: return failure("session has no scratch terminal")
+            case .left, nil: break
+            }
+            return host.paste(text, into: id) ? ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+                : failure("session not realized")
+        }
     }
 
     private static func go(_ to: String, host: NativeControlHost) -> ControlResponse {
