@@ -113,7 +113,7 @@ public struct TitleBar: Equatable, Sendable {
     /// menuBarEnd is the right edge of the last menu tab that fits before `limit`.
     public func menuBarEnd(limit: Int32, dpi: UInt32) -> Int32 {
         let start = span(of: .newSession).right + actionWidth / 4
-        MenuBarLayout.menuSpans(origin: start, limit: limit, dpi: dpi).last?.1.right ?? start
+        return MenuBarLayout.menuSpans(origin: start, limit: limit, dpi: dpi).last?.1.right ?? start
     }
 
     /// menuTab is the menu label index at client x on the title row, if any.
