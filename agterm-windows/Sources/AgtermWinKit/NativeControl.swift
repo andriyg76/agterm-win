@@ -34,6 +34,12 @@ public protocol NativeControlHost: AnyObject {
     var systemIsDark: Bool { get }
     /// setAppearance saves `appearance` and draws every terminal with it.
     func setAppearance(_ appearance: Appearance)
+    /// wslServers are the distributions that can hold an agterm-server, with each one's state and launch choice.
+    var wslServers: [ControlWSLServer] { get }
+    /// startWSLServer starts `distribution`'s server without asking about launch; nil once started, else why not.
+    func startWSLServer(_ distribution: String) -> String?
+    /// setWSLLaunch makes `distribution`'s server start at launch, or be a manual choice that never asks.
+    func setWSLLaunch(_ distribution: String, atLaunch: Bool)
     /// openSettings shows Settings on `tab`, an open one switching to it.
     func openSettings(tab: SettingsTab)
 }
@@ -141,6 +147,10 @@ public enum NativeControl {
             return ControlResponse(ok: true, result: ControlResult(keymap: host.keymap))
         case .keymapReload:
             return ControlResponse(ok: true, result: ControlResult(count: host.reloadKeymap()))
+        #if os(Windows)
+        case .wslList, .wslStart, .wslLaunch:
+            return wsl(request, host: host)
+        #endif
         default:
             return failure("\(request.cmd.rawValue) is not supported on Windows")
         }
@@ -212,6 +222,36 @@ public enum NativeControl {
         return ControlResponse(ok: true, result: ControlResult(id: next.uuidString))
     }
 
+    #if os(Windows)
+    /// wsl answers the `wsl.*` commands with every distribution's state, the one a start or launch change named
+    /// included, so the reply is its own read-back.
+    private static func wsl(_ request: ControlRequest, host: NativeControlHost) -> ControlResponse {
+        let parsed: ControlWSL.Request
+        switch ControlWSL.parse(request) {
+        case .failure(let rejection): return failure(rejection.message)
+        case .success(let request): parsed = request
+        }
+        let named: String
+        switch parsed {
+        case .list:
+            return ControlResponse(ok: true, result: ControlResult(wsl: host.wslServers))
+        case .start(let distribution), .launch(let distribution, _):
+            named = distribution
+        }
+        guard let known = host.wslServers.first(where: { $0.distribution.caseInsensitiveCompare(named) == .orderedSame }) else {
+            return failure("no WSL distribution named \(named)")
+        }
+        switch parsed {
+        case .list: break
+        case .start:
+            if let refusal = host.startWSLServer(known.distribution) { return failure(refusal) }
+        case .launch(_, let atLaunch):
+            host.setWSLLaunch(known.distribution, atLaunch: atLaunch)
+        }
+        return ControlResponse(ok: true, result: ControlResult(wsl: host.wslServers))
+    }
+    #endif
+
     /// tree is the Local group, while it has sessions, ahead of the server's workspaces, as the sidebar shows them.
     public static func tree(_ host: NativeControlHost) -> ControlTree {
         let selected = host.selectedSession
@@ -222,7 +262,9 @@ public enum NativeControl {
         }
         let local = locals.isEmpty ? [] : [ControlWorkspaceNode(id: localWorkspace.uuidString, name: "Local",
                                                                 active: locals.contains { $0.active }, sessions: locals)]
-        return ControlTree(workspaces: local + host.serverWorkspaces)
+        var tree = ControlTree(workspaces: local + host.serverWorkspaces)
+        tree.wslServers = host.wslServers
+        return tree
     }
 
     /// text is what `session.text` reads: the screen by default, every line with `all`, or the last `last` lines once

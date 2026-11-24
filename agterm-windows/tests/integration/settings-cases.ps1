@@ -20,7 +20,7 @@ $settingsIds = @{
     theme = 101; follows = 102; darkTheme = 103; fontFamily = 104; size = 105; sizeArrows = 106
     banners = 107; sound = 108; unseenCount = 109; flash = 110
     directory = 111; customDirectory = 112; placement = 113; confirmClose = 114; rightClickPastes = 115; scrollLines = 116
-    scrollArrows = 117; distribution = 118
+    scrollArrows = 117
 }
 # NativeMenu.Command's raw values, which the shell's command message (WM_APP + 21, Keys.swift) carries
 $commandMessage = 0x8015; $newSessionCommand = 8; $settingsCommand = 19

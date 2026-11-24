@@ -50,14 +50,23 @@ public enum Palette {
         }
     }
 
-    /// sessionRows lists every session in the window A→Z by label, local and the server's alike, each server session
+    /// sessionRows lists every session in the window A→Z by label, local and every server's alike, each server session
     /// followed by its companions, titled `parent › companion`.
     @MainActor
-    public static func sessionRows(locals: [Local], server: [Workspace], serverLabel: String, unseen: [UUID: Int] = [:]) -> [Row] {
+    public static func sessionRows(locals: [Local], servers: [(label: String, workspaces: [Workspace])], unseen: [UUID: Int] = [:]) -> [Row] {
         var groups: [[Row]] = locals.map { local in
             [Row(title: local.name, subtitle: "Local", detail: state(exited: local.exited, ended: false, attention: local.attention, unseen: local.unseen),
                  target: .session(local.id))]
         }
+        for (serverLabel, server) in servers {
+            groups += serverGroups(server, serverLabel: serverLabel, unseen: unseen)
+        }
+        return groups.sorted { $0[0].title.localizedCaseInsensitiveCompare($1[0].title) == .orderedAscending }.flatMap { $0 }
+    }
+
+    @MainActor
+    private static func serverGroups(_ server: [Workspace], serverLabel: String, unseen: [UUID: Int]) -> [[Row]] {
+        var groups: [[Row]] = []
         for workspace in server {
             let subtitle = workspace.isRoot || workspace.name.isEmpty ? serverLabel : "\(serverLabel) · \(workspace.name)"
             let ids = Set(workspace.sessions.map(\.id))
@@ -71,7 +80,7 @@ public enum Palette {
                     + companions.map { row($0, title: "\(parent.displayName) › \($0.displayName)") })
             }
         }
-        return groups.sorted { $0[0].title.localizedCaseInsensitiveCompare($1[0].title) == .orderedAscending }.flatMap { $0 }
+        return groups
     }
 
     private static func state(exited: Bool, ended: Bool, attention: Bool, unseen: Int) -> String {

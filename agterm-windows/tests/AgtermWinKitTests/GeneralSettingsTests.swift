@@ -27,13 +27,6 @@ struct GeneralSettingsTests {
         #expect(general.insertionIndex(count: 3, selected: 7) == 3)
     }
 
-    @Test func theWSLFlagWinsOverTheSetting() {
-        var general = GeneralSettings()
-        #expect(general.distribution(argument: nil) == "Ubuntu")
-        general.serverDistribution = "Debian"
-        #expect(general.distribution(argument: nil) == "Debian" && general.distribution(argument: "Arch") == "Arch")
-    }
-
     @Test func anOlderFileGetsTheDefaultsAndABadScrollIsRefused() throws {
         let decoded = try JSONDecoder().decode(GeneralSettings.self, from: Data(#"{"scrollLines": 40, "newSessionDirectory": "sideways"}"#.utf8))
         #expect(decoded.scrollLines == GeneralSettings.defaultScrollLines && decoded.directory == .home && !decoded.rightClickPastes)

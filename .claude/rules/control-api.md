@@ -252,7 +252,15 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
 above and compiled only under `#if os(Windows)` (the case, its `ControlActions` requirement, the dispatch arm and the
 CLI's `hostSubcommands` entry), so no other build's switch over every command owes it a case. It shows Settings on a
 tab, switching an open one, and answers the tab; `SettingsTab` owns the names and the refusal. It is window chrome
-with no tree read-back, and there is still no command that reads or writes a setting.
+with no tree read-back.
+
+`wsl.list`, `wsl.start` and `wsl.launch` (`agtermctl wsl list|start DIST|launch DIST on|off`) are agterm-win's too,
+compiled the same way. `NativeControl` serves them; `ControlWSL.parse` owns their validation, and the dispatcher arm
+only answers `ControlActionsUnsupported`. `wsl.launch` writes the Settings ▸ General check box for that distribution,
+`off` being a manual choice the first start no longer asks about. Every reply carries the whole `wsl` list, which
+`tree` reports as top-level `wslServers`. `wsl.start` never asks that first-start question: a modal dialog would hold
+the socket's one-at-a-time accept loop. `ControlWSLServer` and both fields compile everywhere, so a Mac decodes a
+Windows reply.
 
 ## Organization commands
 

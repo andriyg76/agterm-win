@@ -1,8 +1,8 @@
 import Foundation
 import agtermCore
 
-/// GeneralSettings are Settings ▸ General: the macOS General choices that apply to agterm-win, and the WSL distribution
-/// whose agterm-server the window shows.
+/// GeneralSettings are Settings ▸ General: the macOS General choices that apply to agterm-win. The tab's agterm-server
+/// check boxes are `NativeSettings.serverLaunch`.
 public struct GeneralSettings: Codable, Equatable, Sendable {
     /// newSessionDirectory is an `AppSettings.NewSessionDirectory` raw value, as macOS stores it; nil is home.
     public var newSessionDirectory: String?
@@ -17,12 +17,9 @@ public struct GeneralSettings: Codable, Equatable, Sendable {
     public var rightClickPastes = false
     /// scrollLines is how far a wheel notch scrolls, macOS's `mouse-scroll-multiplier`.
     public var scrollLines = GeneralSettings.defaultScrollLines
-    /// serverDistribution is the WSL distribution whose agterm-server the window shows; nil is Ubuntu, `--wsl` wins.
-    public var serverDistribution: String?
 
     public static let defaultScrollLines = 3
     public static let scrollLineRange = 1...10
-    public static let defaultDistribution = "Ubuntu"
 
     public init() {}
 
@@ -35,7 +32,6 @@ public struct GeneralSettings: Codable, Equatable, Sendable {
         rightClickPastes = try container.decodeIfPresent(Bool.self, forKey: .rightClickPastes) ?? false
         let lines = try container.decodeIfPresent(Int.self, forKey: .scrollLines) ?? Self.defaultScrollLines
         scrollLines = Self.scrollLineRange.contains(lines) ? lines : Self.defaultScrollLines
-        serverDistribution = try container.decodeIfPresent(String.self, forKey: .serverDistribution)
     }
 
     public var directory: AppSettings.NewSessionDirectory {
@@ -62,10 +58,5 @@ public struct GeneralSettings: Codable, Equatable, Sendable {
     public func insertionIndex(count: Int, selected: Int?) -> Int {
         guard placement == .afterCurrent, let selected, (0..<count).contains(selected) else { return count }
         return selected + 1
-    }
-
-    /// distribution is the one `--wsl` names, else this setting's, else Ubuntu.
-    public func distribution(argument: String?) -> String {
-        argument ?? serverDistribution.flatMap { $0.isEmpty ? nil : $0 } ?? Self.defaultDistribution
     }
 }

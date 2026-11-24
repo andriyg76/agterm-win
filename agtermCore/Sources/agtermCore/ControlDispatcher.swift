@@ -92,6 +92,9 @@ public struct ControlDispatcher {
         case .dashboard:
             return dispatchDashboard(request)
         #if os(Windows)
+        case .wslList, .wslStart, .wslLaunch:
+            // agterm-win's NativeControl serves them; no ControlActions conformer has WSL servers
+            return ControlResponse(ok: false, error: ControlActionsUnsupported.message(request.cmd.rawValue))
         case .settingsOpen:
             guard let tab = SettingsTab.parse(request.args?.name) else {
                 return ControlResponse(ok: false, error: "unknown settings tab: \(request.args?.name ?? "") (\(SettingsTab.acceptedNames))")

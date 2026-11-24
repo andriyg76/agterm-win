@@ -13,15 +13,20 @@ public struct LaunchProfile: Equatable, Sendable {
 
 public enum LaunchProfiles {
     /// available lists what this machine can start, Windows PowerShell first as the default.
-    /// `powerShell7` is pwsh.exe's path when installed; Docker Desktop's distributions hold no shell and are left out.
+    /// `powerShell7` is pwsh.exe's path when installed.
     public static func available(wslDistributions: [String], powerShell7: String?) -> [LaunchProfile] {
         var profiles = [LaunchProfile(name: "Windows PowerShell", commandLine: "powershell.exe -NoLogo")]
         if let powerShell7 { profiles.append(LaunchProfile(name: "PowerShell 7", commandLine: "\"\(powerShell7)\" -NoLogo")) }
         profiles.append(LaunchProfile(name: "Command Prompt", commandLine: "cmd.exe"))
-        profiles += wslDistributions.filter { !$0.hasPrefix("docker-desktop") }.map {
+        profiles += serverDistributions(wslDistributions).map {
             LaunchProfile(name: "WSL \($0)", commandLine: "wsl.exe -d \($0) --cd ~")
         }
         return profiles
+    }
+
+    /// serverDistributions are the distributions that can hold a shell and an agterm-server; Docker Desktop's hold neither.
+    public static func serverDistributions(_ distributions: [String]) -> [String] {
+        distributions.filter { !$0.hasPrefix("docker-desktop") }
     }
 
     /// named finds a profile by name, ignoring case, as `--profile` names one.

@@ -14,11 +14,13 @@ struct PaletteTests {
     @Test func sessionsListLocalAndServerAToZWithTheirWorkspace() {
         let api = session("api"), web = session("Web", ended: true)
         let mine = Palette.Local(id: UUID(), name: "build", exited: true, attention: false)
-        let rows = Palette.sessionRows(locals: [mine], server: [Workspace(name: "", sessions: [web], isRoot: true), Workspace(name: "dev", sessions: [api])],
-                                       serverLabel: "WSL Ubuntu")
-        #expect(rows.map(\.title) == ["api", "build", "Web"])
-        #expect(rows.map(\.subtitle) == ["WSL Ubuntu · dev", "Local", "WSL Ubuntu"])
-        #expect(rows.map(\.detail) == ["", "exited", "ended"])
+        let db = session("db")
+        let rows = Palette.sessionRows(locals: [mine], servers: [("WSL Ubuntu", [Workspace(name: "", sessions: [web], isRoot: true),
+                                                                                Workspace(name: "dev", sessions: [api])]),
+                                                                 ("WSL Debian", [Workspace(name: "", sessions: [db], isRoot: true)])])
+        #expect(rows.map(\.title) == ["api", "build", "db", "Web"])
+        #expect(rows.map(\.subtitle) == ["WSL Ubuntu · dev", "Local", "WSL Debian", "WSL Ubuntu"])
+        #expect(rows.map(\.detail) == ["", "exited", "", "ended"])
         #expect(rows[1].target == .session(mine.id))
     }
 
@@ -33,7 +35,7 @@ struct PaletteTests {
             Issue.record("addCompanion refused")
             return
         }
-        let rows = Palette.sessionRows(locals: [], server: store.workspaces, serverLabel: "WSL Ubuntu")
+        let rows = Palette.sessionRows(locals: [], servers: [("WSL Ubuntu", store.workspaces)])
         #expect(rows.map(\.title) == ["alpha", "zeta", "zeta › logs"])
     }
 
@@ -41,7 +43,7 @@ struct PaletteTests {
         let quiet = Palette.Local(id: UUID(), name: "a", exited: false, attention: true)
         let counted = Palette.Local(id: UUID(), name: "b", exited: false, attention: true, unseen: 3)
         let server = session("c")
-        let rows = Palette.sessionRows(locals: [quiet, counted], server: [Workspace(name: "dev", sessions: [server])], serverLabel: "WSL",
+        let rows = Palette.sessionRows(locals: [quiet, counted], servers: [("WSL", [Workspace(name: "dev", sessions: [server])])],
                                        unseen: [server.id: 120])
         #expect(rows.map(\.detail) == ["●", "● 3", "● 99+"])
     }

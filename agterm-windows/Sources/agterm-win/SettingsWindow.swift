@@ -4,7 +4,7 @@ import WinSDK
 import agtermCore
 
 /// SettingsWindow is agterm-win's Settings, in tabs as macOS agterm's: General (new sessions, closing, the mouse, the
-/// WSL distribution), Appearance (themes and the font) and Notifications. An appearance change previews on the
+/// WSL distributions whose agterm-server starts at launch), Appearance (themes and the font) and Notifications. An appearance change previews on the
 /// terminals at once; OK keeps every change, Cancel and closing put back what was there when the window opened, as the
 /// macOS theme picker previews, commits and cancels.
 @MainActor
@@ -14,6 +14,8 @@ final class SettingsWindow {
         var points: Float
         var notifications: NotificationSettings
         var general: GeneralSettings
+        /// serverAtLaunch are the distributions ticked to start their agterm-server at launch.
+        var serverAtLaunch: Set<String> = []
     }
 
     private(set) static var current: SettingsWindow?
@@ -38,8 +40,11 @@ final class SettingsWindow {
 
     private enum Control: Int32 {
         case theme = 101, follows, darkTheme, fontFamily, size, sizeArrows, banners, sound, unseenCount, flash
-        case directory, customDirectory, placement, confirmClose, rightClickPastes, scrollLines, scrollArrows, distribution
+        case directory, customDirectory, placement, confirmClose, rightClickPastes, scrollLines, scrollArrows
     }
+
+    // the check box for `distributions[index]` has this id plus the index
+    private static let distributionBase: Int32 = 300
 
     private static let directories: [(AppSettings.NewSessionDirectory, String)] = [
         (.home, "Your home folder"), (.currentSession, "The selected session's folder"), (.custom, "This folder"),
@@ -76,9 +81,7 @@ final class SettingsWindow {
         original = values
         self.themes = themes
         self.fonts = fonts
-        let saved = values.general.serverDistribution.map { [$0] } ?? []
-        self.distributions = Array(Set(distributions + saved + [GeneralSettings.defaultDistribution]))
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        self.distributions = distributions
         self.preview = preview
         self.finish = finish
     }
@@ -149,9 +152,13 @@ final class SettingsWindow {
         let lines = add("EDIT", "", Int32(ES_NUMBER) | tab, 28, 278, 60, 24, id: Control.scrollLines.rawValue, exStyle: Int32(WS_EX_CLIENTEDGE))
         let lineArrows = add("msctls_updown32", "", Int32(UDS_SETBUDDYINT) | Int32(UDS_ALIGNRIGHT) | Int32(UDS_ARROWKEYS), 0, 0, 0, 0,
                              id: Control.scrollArrows.rawValue)
-        _ = add("STATIC", "WSL distribution agterm-server runs in", 0, 28, 318, 400, 18)
-        let distribution = add("COMBOBOX", "", list, 28, 338, 300, 200, id: Control.distribution.rawValue)
-        _ = add("STATIC", "A new distribution applies the next time agterm starts; --wsl overrides it.", 0, 28, 370, 464, 36)
+        _ = add("STATIC", "Start agterm-server at launch in", 0, 28, 318, 464, 18)
+        // two a row, as many as the page holds; the menu starts any of them
+        let serverBoxes = distributions.prefix(12).enumerated().map { index, distribution in
+            add("BUTTON", "WSL \(distribution)", checkbox, 28 + Int32(index % 2) * 244, 340 + Int32(index / 2) * 26, 220, 22,
+                id: Self.distributionBase + Int32(index))
+        }
+        if distributions.isEmpty { _ = add("STATIC", "WSL lists no distributions.", 0, 28, 340, 464, 18) }
 
         page = 1
         _ = add("STATIC", "Theme", 0, 28, 48, 220, 18)
@@ -190,9 +197,7 @@ final class SettingsWindow {
         check(rightClick, general.rightClickPastes)
         buddy(lineArrows, lines, range: GeneralSettings.scrollLineRange.lowerBound...GeneralSettings.scrollLineRange.upperBound,
               value: general.scrollLines)
-        distributions.forEach { addString($0, to: distribution, message: CB_ADDSTRING) }
-        let current = general.distribution(argument: nil)
-        SendMessageW(distribution, UINT(CB_SETCURSEL), WPARAM(distributions.firstIndex(of: current) ?? 0), 0)
+        for (box, distribution) in zip(serverBoxes, distributions) { check(box, original.serverAtLaunch.contains(distribution)) }
 
         let rows = ["Default"] + themes
         for box in [themeList, darkList] { rows.forEach { addString($0, to: box, message: LB_ADDSTRING) } }
@@ -284,7 +289,7 @@ final class SettingsWindow {
                                                  flash: TaskbarFlash.allCases.indices.contains(flashRow) ? TaskbarFlash.allCases[flashRow] : .untilFocused,
                                                  unseenCount: checked(.unseenCount))
         var general = original.general
-        let directoryRow = row(.directory), placementRow = row(.placement), distributionRow = row(.distribution)
+        let directoryRow = row(.directory), placementRow = row(.placement)
         general.newSessionDirectory = Self.directories.indices.contains(directoryRow) ? Self.directories[directoryRow].0.rawValue : nil
         let custom = text(.customDirectory).trimmingCharacters(in: .whitespaces)
         general.newSessionCustomDirectory = custom.isEmpty ? nil : custom
@@ -293,9 +298,11 @@ final class SettingsWindow {
         general.rightClickPastes = checked(.rightClickPastes)
         let lines = Int(Int32(truncatingIfNeeded: SendMessageW(item(.scrollArrows), Self.getPosition, 0, 0)))
         general.scrollLines = min(max(lines, GeneralSettings.scrollLineRange.lowerBound), GeneralSettings.scrollLineRange.upperBound)
-        if distributions.indices.contains(distributionRow) { general.serverDistribution = distributions[distributionRow] }
+        let serverAtLaunch = distributions.prefix(12).enumerated().filter { index, _ in
+            SendMessageW(GetDlgItem(self.window, Self.distributionBase + Int32(index)), UINT(BM_GETCHECK), 0, 0) == LRESULT(BST_CHECKED)
+        }.map(\.element)
         return Values(appearance: appearance, points: min(max(points, NativeMenu.pointRange.lowerBound), NativeMenu.pointRange.upperBound),
-                      notifications: notifications, general: general)
+                      notifications: notifications, general: general, serverAtLaunch: Set(serverAtLaunch))
     }
 
     fileprivate func command(_ id: Int32, notification: Int32) {

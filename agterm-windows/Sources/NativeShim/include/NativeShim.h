@@ -122,6 +122,10 @@ intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64
 #define NT_FIND_CLOSE 0x8101
 void *nt_find_bar_create(void *parent, uint32_t dpi);
 void nt_find_bar_set_dpi(void *bar, uint32_t dpi);
+// nt_ask_choice asks with one command button per entry of `buttons` and returns the picked one's index; the dialog
+// has no cancel, so it always returns one.
+int32_t nt_ask_choice(void *owner, const uint16_t *caption, const uint16_t *instruction, const uint16_t *content,
+                      const uint16_t *const *buttons, int32_t count);
 // nt_track_menu shows a popup menu at a screen point and returns the picked command id, 0 when dismissed.
 int32_t nt_track_menu(void *menu, void *owner, int32_t x, int32_t y);
 

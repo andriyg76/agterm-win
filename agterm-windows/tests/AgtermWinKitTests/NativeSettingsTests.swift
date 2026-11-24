@@ -13,6 +13,7 @@ struct NativeSettingsTests {
         settings.localSessions = [.init(title: "build", customName: "api", commandLine: "cmd.exe", directory: #"C:\dev"#), .init(title: "WSL Ubuntu", commandLine: "wsl.exe -d Ubuntu --cd ~")]
         settings.selectedLocal = 1
         settings.defaultProfile = "WSL Ubuntu"
+        settings.serverLaunch = ["Ubuntu": .atLaunch, "Debian": .manual]
         try settings.save(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         #expect(NativeSettings.load(from: url) == settings)
