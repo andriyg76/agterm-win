@@ -24,7 +24,7 @@ let package = Package(
                              .linkedLibrary("comctl32"), .linkedLibrary("uxtheme"), .linkedLibrary("gdi32"), .linkedLibrary("bcrypt"),
                              .linkedLibrary("ntdll"), .linkedLibrary("runtimeobject"), .linkedLibrary("advapi32"), .linkedLibrary("shell32"),
                              .linkedLibrary("ole32"), .linkedLibrary("oleaut32"), .linkedLibrary("shlwapi"), .linkedLibrary("version"),
-                             .unsafeFlags(["-L", "\(webviewRoot)/lib/\(webviewArch)", "-l", "WebView2LoaderStatic"])]
+                             .unsafeFlags(["\(webviewRoot)/lib/\(webviewArch)/WebView2LoaderStatic.lib"])]
         ),
         // the Win32-free logic the native window runs, so `swift test` covers it on any host
         .target(name: "AgtermWinKit", dependencies: [.product(name: "agtermCore", package: "agtermCore")]),
