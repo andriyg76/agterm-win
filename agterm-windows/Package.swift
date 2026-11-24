@@ -22,13 +22,13 @@ let package = Package(
             name: "NativeShim",
             dependencies: ["GhosttyVT"],
             cxxSettings: [.define("GHOSTTY_STATIC"),
-                          // Windows SwiftPM does not yet pass headerSearchPath to the C++ driver.
-                          .unsafeFlags(["-Ivendor/webview2/include"], .when(platforms: [.windows]))],
+                          // Windows SwiftPM compiles from the repo root, not the package directory.
+                          .unsafeFlags(["-I\(webviewInclude)"], .when(platforms: [.windows]))],
             linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("dwmapi"), .linkedLibrary("user32"),
                              .linkedLibrary("comctl32"), .linkedLibrary("uxtheme"), .linkedLibrary("gdi32"), .linkedLibrary("bcrypt"),
                              .linkedLibrary("ntdll"), .linkedLibrary("runtimeobject"), .linkedLibrary("advapi32"), .linkedLibrary("shell32"),
                              .linkedLibrary("ole32"), .linkedLibrary("oleaut32"), .linkedLibrary("shlwapi"), .linkedLibrary("version"),
-                             .unsafeFlags(["-L", "vendor/webview2/lib/\(webviewArch)", "-l", "WebView2LoaderStatic"])]
+                             .unsafeFlags(["-L\(webviewLib)", "-lWebView2LoaderStatic"], .when(platforms: [.windows]))]
         ),
         // the Win32-free logic the native window runs, so `swift test` covers it on any host
         .target(name: "AgtermWinKit", dependencies: [.product(name: "agtermCore", package: "agtermCore")]),
