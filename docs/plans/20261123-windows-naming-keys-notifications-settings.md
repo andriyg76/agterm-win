@@ -109,8 +109,8 @@ on x64; the next stage does not start before that.
 |-------|------|----------------|
 | **A** | Local program overlay | `AgtermWinKitTests`, integration `overlay` / `overlay-keys` |
 | **B** | Server program overlay | `agtermCore` presentation + integration `overlay-server-program` |
-| **E** | Ask, pick, HUD (`presents: true`) | `agtermCore` + integration per surface |
-| **D** | Page overlays (HTML/URL/…) | `agtermCore` + integration `overlay-html` (+ remote gate rows) |
+| **E** | Ask, pick, HUD (`presents: true`) | `agtermCore` + integration `presentation-surfaces` smoke; manual gate with `AGTERM_WIN_GATE_WSL` |
+| **D** | Page overlays (HTML/URL/…) | `agtermCore` + integration `overlay-html` (+ remote gate rows); see `docs/plans/20261124-page-overlays.md` |
 
 ### Stage A — local program overlay (CI green on PR #26, 2026-11-24)
 
