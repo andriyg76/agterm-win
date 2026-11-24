@@ -97,7 +97,7 @@ function Get-Bar([IntPtr]$Window) {
     [pscustomobject]@{
         Height = & $scaled 36; Width = $width; Action = $action; Caption = $caption; Middle = [int]((& $scaled 36) / 2)
         Spans = [ordered]@{
-            menu = @(0, $action); "new session" = @($action, 2 * $action)
+            menu = @(0, $action); "new session" = @($action, (2 * $action))
             find = @(($width - 3 * $caption - $action), ($width - 3 * $caption))
             minimize = @(($width - 3 * $caption), ($width - 2 * $caption)); maximize = @(($width - 2 * $caption), ($width - $caption))
             close = @(($width - $caption), $width)
