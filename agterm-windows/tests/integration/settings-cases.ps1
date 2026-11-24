@@ -78,6 +78,30 @@ function Close-Settings([IntPtr]$Settings, [bool]$Keep) {
 
 function Get-Saved([string]$State) { Get-Content (Join-Path $State "native.json") -Raw | ConvertFrom-Json }
 
+function Find-ComboRow([IntPtr]$Settings, [string]$Name, [string]$Text) {
+    [int][AgtermSettings]::SendMessageW((Get-Control $Settings $Name), 0x0158, [IntPtr]-1, $Text)  # CB_FINDSTRINGEXACT
+}
+
+# Get-TerminalBackground is the colour of the shown terminal near its bottom right, where a short session prints
+# nothing, as rrggbb.
+function Get-TerminalBackground([IntPtr]$Window) {
+    $shot = Get-Shot $Window
+    try {
+        $client = New-Object AgtermWin32+Rect
+        [AgtermWin32]::GetClientRect($Window, [ref]$client) | Out-Null
+        $c = $shot.Bitmap.GetPixel($shot.X + $client.Right - 40, $shot.Y + $client.Bottom - 20)
+        "{0:x2}{1:x2}{2:x2}" -f $c.R, $c.G, $c.B
+    } finally { $shot.Bitmap.Dispose() }
+}
+
+function Test-Colour([string]$Actual, [string]$Expected) {
+    if ($Actual.Length -ne 6) { return $false }
+    foreach ($i in 0, 2, 4) {
+        if ([Math]::Abs([Convert]::ToInt32($Actual.Substring($i, 2), 16) - [Convert]::ToInt32($Expected.Substring($i, 2), 16)) -gt 2) { return $false }
+    }
+    $true
+}
+
 # Settings ▸ General's choices reach native.json and what New Session and notify do; each tab shows only its own
 # controls; an appearance change previews, Cancel puts it back, OK keeps it.
 $shellCases["settings"] = {
@@ -103,6 +127,10 @@ $shellCases["settings"] = {
     Set-Check $settings "rightClickPastes" $true
     Set-Arrows $settings "scrollArrows" 7
     Next-Tab $settings
+    $consolas = Find-ComboRow $settings "fontFamily" "Consolas"
+    if ($consolas -lt 0) { $failures += "the font list lacks Consolas" } else { Set-Row $settings "fontFamily" $consolas }
+    Set-Arrows $settings "sizeArrows" 14
+    Send-Notification $settings "size" 0x0300  # EN_CHANGE
     $appearanceShown = [AgtermWin32]::IsWindowVisible((Get-Control $settings "theme"))
     $generalHidden = -not [AgtermWin32]::IsWindowVisible((Get-Control $settings "directory"))
     if (-not ($appearanceShown -and $generalHidden)) { $failures += "the Appearance tab shows theme $appearanceShown, hides General $generalHidden" }
@@ -122,6 +150,11 @@ $shellCases["settings"] = {
         if ($general.$key -ne $expected[$key]) { $failures += "native.json general.$key is '$($general.$key)', not '$($expected[$key])'" }
     }
     if ($saved.notifications.banners -ne $false) { $failures += "native.json keeps banners '$($saved.notifications.banners)'" }
+    if ($saved.appearance.fontFamily -ne "Consolas" -or $saved.fontPoints -ne 14) {
+        $failures += "native.json keeps font '$($saved.appearance.fontFamily)' at $($saved.fontPoints)"
+    }
+    $sizes = @((Get-SessionNodes $state).fontSize | Select-Object -Unique)
+    if ($sizes.Count -ne 1 -or $sizes[0] -ne 14) { $failures += "tree reports font sizes $($sizes -join ', ')" }
 
     [AgtermSettings]::PostMessageW($window, $commandMessage, [IntPtr]$newSessionCommand, [IntPtr]::Zero) | Out-Null
     $order = Wait-Until { $ids = @((Get-SessionNodes $state).id); if ($ids.Count -eq 3) { , $ids } } 15
@@ -148,6 +181,60 @@ $shellCases["settings"] = {
     Set-Row $settings "theme" (Find-Row $settings "theme" "Dracula") -List
     Close-Settings $settings $true | Out-Null
     if ((Invoke-Ctl $state @("theme", "list")).result.theme -ne "Dracula") { $failures += "OK did not keep Dracula" }
+    $background = Get-TerminalBackground $window
+    if (-not (Test-Colour $background "282a36")) { $failures += "with Dracula kept the terminal is #$background, not #282a36" }
     Save-Snapshot $Shell "settings-kept"
+    $failures
+}
+
+$personalize = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+
+# Set-AppMode switches Windows' app mode and tells the window, as Windows does with WM_SETTINGCHANGE.
+function Set-AppMode([IntPtr]$Window, [bool]$Light) {
+    Set-ItemProperty $personalize -Name AppsUseLightTheme -Value ([int]$Light) -Type DWord
+    [AgtermSettings]::SendMessageW($Window, 0x001A, [IntPtr]::Zero, "ImmersiveColorSet") | Out-Null
+}
+
+# With Follow Windows light and dark mode on, the dark theme draws while Windows is dark and the light one while it is
+# light. It changes the desktop's app mode, so it runs on CI's runner only, putting the mode back after.
+$shellCases["settings-system-theme"] = {
+    param($Shell)
+    if ($env:GITHUB_ACTIONS -ne "true") {
+        Note "skipped: it switches Windows' app mode, which only CI's runner may have changed"
+        return @()
+    }
+    $state = $Shell.State
+    $window = Get-ShellWindow $Shell
+    if (-not $window) { return @("no shell window") }
+    $id = New-PowerShellSession $state
+    if (-not $id -or -not (Wait-Prompt $state $id)) { return @("the session did not start") }
+    $before = (Get-ItemProperty $personalize -Name AppsUseLightTheme -ErrorAction SilentlyContinue).AppsUseLightTheme
+    $failures = @()
+    try {
+        Set-AppMode $window $true
+        $settings = Open-Settings $Shell $window
+        if (-not $settings) { return @("Settings did not open") }
+        Next-Tab $settings
+        Set-Row $settings "theme" (Find-Row $settings "theme" "Dracula") -List
+        Set-Check $settings "follows" $true
+        if (-not [AgtermSettings]::IsWindowEnabled((Get-Control $settings "darkTheme"))) { $failures += "following left the dark theme list disabled" }
+        Set-Row $settings "darkTheme" (Find-Row $settings "darkTheme" "Nord") -List
+        Close-Settings $settings $true | Out-Null
+        $list = (Invoke-Ctl $state @("theme", "list")).result
+        if (-not $list.sync -or $list.light -ne "Dracula" -or $list.dark -ne "Nord" -or $list.theme -ne "Dracula") {
+            $failures += "in light mode theme list is $($list | Select-Object theme, light, dark, sync | ConvertTo-Json -Compress)"
+        }
+        $light = Get-TerminalBackground $window
+        if (-not (Test-Colour $light "282a36")) { $failures += "in light mode the terminal is #$light, not Dracula's #282a36" }
+        Save-Snapshot $Shell "system-light"
+        Set-AppMode $window $false
+        if (-not (Wait-Until { (Invoke-Ctl $state @("theme", "list")).result.theme -eq "Nord" } 10)) { $failures += "dark mode did not make Nord the theme" }
+        Start-Sleep -Milliseconds 500
+        $dark = Get-TerminalBackground $window
+        if (-not (Test-Colour $dark "2e3440")) { $failures += "in dark mode the terminal is #$dark, not Nord's #2e3440" }
+        Save-Snapshot $Shell "system-dark"
+    } finally {
+        if ($null -ne $before) { Set-AppMode $window ([bool]$before) } else { Remove-ItemProperty $personalize -Name AppsUseLightTheme -ErrorAction SilentlyContinue }
+    }
     $failures
 }
