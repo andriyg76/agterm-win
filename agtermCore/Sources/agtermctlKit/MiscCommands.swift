@@ -278,6 +278,25 @@ struct Theme: ParsableCommand {
     }
 }
 
+// MARK: - settings
+
+struct Settings: ParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "Settings window commands (agterm-win).", subcommands: [Open.self])
+
+    struct Open: RequestCommand {
+        static let configuration = CommandConfiguration(abstract: "Show Settings on a tab.")
+        @Argument(help: "Tab: \(SettingsTab.acceptedNames) (default general).") var tab: String?
+        // Settings is app-global, so no `--window` selector.
+        @OptionGroup var options: BasicOptions
+
+        func validate() throws {
+            if SettingsTab.parse(tab) == nil { throw ValidationError("Tab must be one of \(SettingsTab.acceptedNames).") }
+        }
+
+        func makeRequest() throws -> ControlRequest { ControlRequest(cmd: .settingsOpen, args: ControlArgs(name: tab)) }
+    }
+}
+
 // MARK: - quick
 
 struct Quick: ParsableCommand {

@@ -74,6 +74,8 @@ private final class FakeHost: NativeControlHost {
     var themeCatalog = ThemeCatalog(names: ["Dracula", "Nord"])
     var systemIsDark = false
     func setAppearance(_ appearance: Appearance) { self.appearance = appearance }
+    var settingsTabs: [SettingsTab] = []
+    func openSettings(tab: SettingsTab) { settingsTabs.append(tab) }
 }
 
 @MainActor
@@ -135,6 +137,15 @@ struct NativeControlTests {
         #expect(set.result?.theme == "Dracula" && set.result?.light == "Nord" && set.result?.sync == true)
         _ = await handle(ControlRequest(cmd: .themeSet, args: ControlArgs(dark: "none")), host)
         #expect(!host.appearance.followsSystem && host.appearance.activeTheme(dark: true) == "Nord")
+    }
+
+    @Test func settingsOpenShowsTheNamedTab() async {
+        let host = FakeHost()
+        #expect(await handle(ControlRequest(cmd: .settingsOpen, args: ControlArgs(name: "appearance")), host).result?.text == "appearance")
+        #expect(await handle(ControlRequest(cmd: .settingsOpen), host).result?.text == "general")
+        #expect(await handle(ControlRequest(cmd: .settingsOpen, args: ControlArgs(name: "keys")), host).error
+            == "unknown settings tab: keys (general|appearance|notifications)")
+        #expect(host.settingsTabs == [.appearance, .general])
     }
 
     @Test func keymapListAndReloadReachTheHost() async {

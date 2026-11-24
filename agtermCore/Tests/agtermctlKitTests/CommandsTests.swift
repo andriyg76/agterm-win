@@ -1739,6 +1739,12 @@ struct CommandsTests {
         #expect(try request(["theme", "list"]) == ControlRequest(cmd: .themeList))
     }
 
+    @Test func settingsOpenNamesItsTab() throws {
+        #expect(try request(["settings", "open", "appearance"]) == ControlRequest(cmd: .settingsOpen, args: ControlArgs(name: "appearance")))
+        #expect(try request(["settings", "open"]) == ControlRequest(cmd: .settingsOpen, args: ControlArgs()))
+        #expect(throws: (any Error).self) { try Agtermctl.parseAsRoot(["settings", "open", "keys"]) }
+    }
+
     @Test func themeRejectsWindowSelector() {
         #expect(throws: (any Error).self) { try Agtermctl.parseAsRoot(["theme", "set", "Nord", "--window", "w1"]) }
     }

@@ -33,7 +33,7 @@ final class SettingsWindow {
     // UDM_SETBUDDY, UDM_SETRANGE32, UDM_SETPOS32, UDM_GETPOS32; TCM_INSERTITEMW, TCM_GETCURSEL; TCN_SELCHANGE
     private static let setBuddy = UINT(WM_USER + 105), setRange = UINT(WM_USER + 111), setPosition = UINT(WM_USER + 113),
                        getPosition = UINT(WM_USER + 114)
-    private static let insertTab = UINT(0x133E), currentTab = UINT(0x130B)
+    private static let insertTab = UINT(0x133E), currentTab = UINT(0x130B), selectTab = UINT(0x130C)  // TCM_SETCURSEL
     fileprivate static let tabChanged = UINT(bitPattern: -551)
 
     private enum Control: Int32 {
@@ -50,9 +50,10 @@ final class SettingsWindow {
 
     /// show opens Settings over `owner`, or brings an open one to the front. `finish` gets the kept values, nil for a
     /// cancel.
-    static func show(owner: HWND?, values: Values, themes: [String], fonts: [String], distributions: [String],
+    static func show(owner: HWND?, tab: SettingsTab = .general, values: Values, themes: [String], fonts: [String], distributions: [String],
                      preview: @escaping (Values) -> Void, finish: @escaping (Values?) -> Void) {
-        if let window = current?.window {
+        if let open = current, let window = open.window {
+            open.select(tab)
             SetForegroundWindow(window)
             return
         }
@@ -60,6 +61,14 @@ final class SettingsWindow {
                                       finish: finish)
         current = settings
         settings.create(owner: owner)
+        settings.select(tab)
+    }
+
+    /// select shows `tab`, as a click on it does.
+    private func select(_ tab: SettingsTab) {
+        let index = SettingsTab.allCases.firstIndex(of: tab) ?? 0
+        SendMessageW(tabs, Self.selectTab, WPARAM(index), 0)
+        showPage()
     }
 
     private init(values: Values, themes: [String], fonts: [String], distributions: [String], preview: @escaping (Values) -> Void,
@@ -124,7 +133,7 @@ final class SettingsWindow {
         let tab = Int32(WS_TABSTOP), checkbox = Int32(BS_AUTOCHECKBOX) | Int32(WS_TABSTOP)
         let list = Int32(CBS_DROPDOWNLIST) | Int32(WS_VSCROLL) | tab
         tabs = add("SysTabControl32", "", Int32(WS_CLIPSIBLINGS) | tab, 12, 8, 496, 500)
-        for (index, title) in ["General", "Appearance", "Notifications"].enumerated() { addTab(title, at: index) }
+        for (index, tab) in SettingsTab.allCases.enumerated() { addTab(tab.rawValue.capitalized, at: index) }
 
         page = 0
         _ = add("STATIC", "New sessions open in", 0, 28, 48, 300, 18)

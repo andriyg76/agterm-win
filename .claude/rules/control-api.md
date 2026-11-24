@@ -248,6 +248,12 @@ deadline check in the poll loop alone cannot.
 It accepts light/dark, sets `NSApp.appearance`, posts `.agtermSystemAppearanceChanged`, echoes the effective
 side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provide no CLI or skill entry.
 
+`settings.open` (`agtermctl settings open [general|appearance|notifications]`) is agterm-win's, absent from the list
+above: it shows Settings on a tab, switching an open one, and answers the tab. `SettingsTab` owns the names and the
+dispatcher's refusal; macOS answers `ControlActionsUnsupported` through the `ControlActions` default. It is window
+chrome with no tree read-back, and there is still no command that reads or writes a setting; integration tests set
+Settings' controls through Win32.
+
 ## Organization commands
 
 - `workspace.delete` deletes the last named workspace too, leaving the root, and never shows the GUI alert.

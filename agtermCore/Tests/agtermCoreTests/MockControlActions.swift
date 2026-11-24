@@ -79,6 +79,7 @@ final class MockControlActions: ControlActions {
         case notify(target: String?, window: String?, title: String?, body: String)
         case themeSet(String?)
         case themeList
+        case openSettings(SettingsTab)
         case restoreModeRead
         case restoreModeSet(RestoreMode)
         case zmxList
@@ -615,6 +616,11 @@ final class MockControlActions: ControlActions {
     func setTheme(args: ControlArgs?) -> ControlResponse {
         calls.append(.themeSet(args?.name))
         return nextThemeSetResponse
+    }
+
+    func openSettings(tab: SettingsTab) -> ControlResponse {
+        calls.append(.openSettings(tab))
+        return ControlResponse(ok: true, result: ControlResult(text: tab.rawValue))
     }
 
     func listThemes() -> ControlResponse {

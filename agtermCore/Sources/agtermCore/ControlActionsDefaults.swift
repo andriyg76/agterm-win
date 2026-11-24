@@ -15,6 +15,10 @@ public extension ControlActions {
 
     func messageQueued(_: UUID, from _: String?, to _: [MessageRecipient]) {}
 
+    func openSettings(tab _: SettingsTab) -> ControlResponse {
+        ControlResponse(ok: false, error: ControlActionsUnsupported.message("settings.open"))
+    }
+
     func attachCompanionPage(_: String?, window _: String?) -> ControlResponse {
         ControlResponse(ok: false, error: ControlActionsUnsupported.message("session.companion.page.attach"))
     }

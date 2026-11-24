@@ -202,9 +202,9 @@ final class NativeShell {
         shown = values
     }
 
-    private func openSettings() {
+    private func showSettings(tab: SettingsTab = .general) {
         let distributions = profiles.compactMap { $0.name.hasPrefix("WSL ") ? String($0.name.dropFirst(4)) : nil }
-        SettingsWindow.show(owner: window, values: .init(appearance: settings.appearance, points: settings.fontPoints,
+        SettingsWindow.show(owner: window, tab: tab, values: .init(appearance: settings.appearance, points: settings.fontPoints,
                                                          notifications: settings.notifications, general: settings.general),
                             themes: TerminalAppearance.themes.catalog.names, fonts: TerminalAppearance.monospaceFonts,
                             distributions: distributions,
@@ -685,7 +685,7 @@ final class NativeShell {
         case .sessionPalette: openPalette(.sessions)
         case .commandPalette: openPalette(.commands)
         case .quit: if confirmQuit() { DestroyWindow(window) }
-        case .settings: openSettings()
+        case .settings: showSettings()
         case .editKeymap: Keys.edit(owner: window)
         case .reloadKeymap: Keys.reload(owner: window)
         default: visibleTerminal.perform(command)
@@ -1434,6 +1434,8 @@ extension NativeShell: NativeControlHost {
     var themeCatalog: ThemeCatalog { TerminalAppearance.themes.catalog }
 
     var systemIsDark: Bool { TerminalAppearance.isDark }
+
+    func openSettings(tab: SettingsTab) { showSettings(tab: tab) }
 
     func setAppearance(_ appearance: Appearance) {
         settings.appearance = appearance

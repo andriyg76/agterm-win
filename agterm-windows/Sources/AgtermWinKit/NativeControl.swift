@@ -34,6 +34,8 @@ public protocol NativeControlHost: AnyObject {
     var systemIsDark: Bool { get }
     /// setAppearance saves `appearance` and draws every terminal with it.
     func setAppearance(_ appearance: Appearance)
+    /// openSettings shows Settings on `tab`, an open one switching to it.
+    func openSettings(tab: SettingsTab)
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -127,6 +129,12 @@ public enum NativeControl {
                 host.setAppearance(next)
                 return ControlResponse(ok: true, result: themeResult(host, themes: nil))
             }
+        case .settingsOpen:
+            guard let tab = SettingsTab.parse(request.args?.name) else {
+                return failure("unknown settings tab: \(request.args?.name ?? "") (\(SettingsTab.acceptedNames))")
+            }
+            host.openSettings(tab: tab)
+            return ControlResponse(ok: true, result: ControlResult(text: tab.rawValue))
         case .keymapList:
             return ControlResponse(ok: true, result: ControlResult(keymap: host.keymap))
         case .keymapReload:

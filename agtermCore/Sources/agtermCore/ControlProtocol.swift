@@ -133,6 +133,8 @@ public enum Command: String, Codable, Sendable, CaseIterable {
     case configReload = "config.reload"
     case themeSet = "theme.set"
     case themeList = "theme.list"
+    /// settingsOpen shows Settings on a tab (`args.name`); agterm-win serves it.
+    case settingsOpen = "settings.open"
     case pickOpen = "pick.open"
     case pickResult = "pick.result"
     case pickCancel = "pick.cancel"
