@@ -172,6 +172,10 @@ $shellCases["wsl-ensure-reprobe"] = {
 }
 
 # --install-server on an unreachable distribution surfaces install failure in the log and notice instead of hanging
+# a chosen launch keeps the first-start question, which holds the main thread, out of this case
+$shellPreparations["wsl-install-unreachable"] = {
+    param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$absent`": `"manual`"}}"
+}
 $shellLaunches["wsl-install-unreachable"] = @{ Arguments = "--wsl $absent --install-server" }
 $shellCases["wsl-install-unreachable"] = {
     param($Shell)
