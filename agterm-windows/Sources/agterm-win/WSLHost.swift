@@ -3,6 +3,13 @@ import AgtermWinKit
 import NativeShim
 import agtermCore
 
+/// WSLServerInspection is the outcome of probing a distribution before the catalog connects.
+struct WSLServerInspection: Equatable {
+    var health: WSLServerHealth
+    /// detail carries probe stderr or install context for logs and notices.
+    var detail: String
+}
+
 /// An agterm-server inside a WSL distribution, reached through `wsl.exe` where the Mac reaches a host through ssh. The
 /// remote command lines are agtermCore's own: `wsl.exe -e /bin/sh -c LINE` stands in for sshd running the account
 /// shell with LINE, so the last argument of `RemoteSession`'s ssh argv is all this needs.
@@ -24,6 +31,62 @@ struct WSLHost {
             case .reply(let message): message
             }
         }
+    }
+
+    /// inspect probes whether agterm-server is installed, which version runs, and whether its user service is active.
+    func inspect() -> WSLServerInspection {
+        let ping = runLine(":")
+        guard ping.status == 0 else {
+            let detail = ping.stderr.isEmpty ? "exit \(ping.status)" : ping.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            return WSLServerInspection(health: .distributionUnreachable(detail), detail: detail)
+        }
+        let binary = runLine("test -x \"$HOME/.local/bin/agtermctl\" -o -x \"$HOME/.local/lib/agterm-server/agtermctl\"")
+        guard binary.status == 0 else {
+            return WSLServerInspection(health: .missingInstall,
+                                     detail: "no agtermctl in ~/.local/bin or ~/.local/lib/agterm-server")
+        }
+        let versionLine: String
+        do {
+            versionLine = try RemoteSession.controlCommand(host: Self.placeholderHost, arguments: ["version"]).last!
+        } catch {
+            return WSLServerInspection(health: .versionUnknown("invalid probe command"), detail: "\(error)")
+        }
+        let version = runLine(versionLine)
+        guard version.status == 0 else {
+            let detail = version.stderr.isEmpty ? "agtermctl version exited \(version.status)" : version.stderr
+            return WSLServerInspection(health: .versionUnknown(detail), detail: detail)
+        }
+        guard let data = version.stdout.data(using: .utf8),
+              let response = try? JSONDecoder().decode(ControlResponse.self, from: data),
+              response.ok else {
+            let message = version.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            return WSLServerInspection(health: .versionUnknown("not agterm-server"), detail: message)
+        }
+        let installed = response.result?.versions?.server ?? response.result?.app?.version ?? ""
+        guard !installed.isEmpty else {
+            return WSLServerInspection(health: .versionUnknown("version reply had no server number"), detail: version.stdout)
+        }
+        let active = runLine("systemctl --user is-active agterm-server 2>/dev/null").stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        if active == "active" {
+            return WSLServerInspection(health: .ready(installedVersion: installed), detail: installed)
+        }
+        return WSLServerInspection(health: .serviceStopped(installedVersion: installed),
+                                 detail: active.isEmpty ? "service not active" : "systemctl: \(active)")
+    }
+
+    /// startService asks systemd to start the user agterm-server unit and returns whether it became active.
+    func startService() -> (ok: Bool, message: String) {
+        let start = runLine("systemctl --user start agterm-server 2>&1")
+        guard start.status == 0 else {
+            let text = start.stdout.isEmpty ? start.stderr : start.stdout
+            return (false, text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        for _ in 0..<25 {
+            let active = runLine("systemctl --user is-active agterm-server 2>/dev/null")
+            if active.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "active" { return (true, "") }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        return (false, "agterm-server did not become active after start")
     }
 
     func tree() throws -> ControlRemoteTree {
@@ -97,6 +160,11 @@ struct WSLHost {
     /// start runs `line` under `/bin/sh -c` in the distribution, with `input` on its stdin when given.
     func start(_ line: String, input: URL? = nil, captureErrors: Bool) throws -> HiddenProcess {
         try HiddenProcess(commandLine: commandLine(line), input: input, captureErrors: captureErrors)
+    }
+
+    /// runLine runs one shell line without throwing; probe steps use this so every failure carries stderr.
+    func runLine(_ line: String) -> (status: Int32, stdout: String, stderr: String) {
+        (try? run(line)) ?? (status: -1, stdout: "", stderr: "wsl.exe did not start")
     }
 
     /// run runs `line` to completion, with `input` on its stdin, and returns what it printed.

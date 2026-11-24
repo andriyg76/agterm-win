@@ -11,6 +11,7 @@ import agtermCore
 //   agterm-win.exe -- <command line>
 //
 // A distribution's agterm-server starts only on `--wsl`, `--install-server`, the menu, or the choice to start it at launch.
+// Unless `--install-server` is set, agterm-win probes the distribution first and installs or starts agterm-server when needed.
 // `--native` is accepted as a compatibility no-op for commands written while the implementation was introduced.
 // AGTERM_WIN_STATE_DIR isolates a test or second instance; AGTERM_WIN_TEST_SCREEN makes a command window write its
 // terminal text there when the program exits, then close.
