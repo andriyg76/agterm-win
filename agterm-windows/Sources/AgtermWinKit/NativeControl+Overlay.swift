@@ -12,25 +12,33 @@ extension NativeControl {
         case .failure(let refusal): return failure(refusal.message)
         case .success(let resolved): id = resolved
         }
-        if host.isServerSession(id) { return failure(NativeOverlay.serverRefusal) }
-        guard let local = host.localSessions.first(where: { $0.id == id }) else { return failure("no such session: \(id.uuidString)") }
+        let slot: OverlaySlot
+        if host.isServerSession(id) {
+            guard host.isConnectedServerSession(id) else { return failure(NativeOverlay.serverDisconnectedRefusal) }
+            let state = host.serverOverlayState(for: id) ?? (nil, nil)
+            slot = OverlaySlot(overlay: state.overlay, exitCode: state.exitCode)
+        } else if let local = host.localSessions.first(where: { $0.id == id }) {
+            slot = OverlaySlot(overlay: local.overlay, exitCode: local.overlayExitCode)
+        } else {
+            return failure("no such session: \(id.uuidString)")
+        }
         let done = ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
         switch request.cmd {
         case .sessionOverlayOpen:
-            if local.overlay?.hidden == true { return failure(OverlayVisibilityError.hidden) }
-            if local.overlay != nil { return failure("overlay already open") }
+            if slot.overlay?.hidden == true { return failure(OverlayVisibilityError.hidden) }
+            if slot.overlay != nil { return failure("overlay already open") }
             host.openOverlay(id, NativeOverlay.Open(command: args?.command ?? "", cwd: args?.cwd, wait: args?.wait == true,
                                                     sizePercent: args?.sizePercent, background: NativeOverlay.background(args?.color)))
             if args?.follow == true { host.selectSession(id) }
             return done
         case .sessionOverlayResult:
-            if local.overlay != nil { return failure(OverlayResultError.stillRunning) }
-            guard let code = local.overlayExitCode else { return failure(OverlayResultError.noResult) }
+            if slot.overlay != nil { return failure(OverlayResultError.stillRunning) }
+            guard let code = slot.exitCode else { return failure(OverlayResultError.noResult) }
             return ControlResponse(ok: true, result: ControlResult(id: id.uuidString, exitCode: code))
         default:
             break
         }
-        guard let overlay = local.overlay else { return failure("no overlay") }
+        guard let overlay = slot.overlay else { return failure("no overlay") }
         switch request.cmd {
         case .sessionOverlayClose:
             host.closeOverlay(id)
@@ -50,6 +58,11 @@ extension NativeControl {
             break
         }
         return done
+    }
+
+    private struct OverlaySlot {
+        var overlay: NativeOverlay?
+        var exitCode: Int?
     }
 
     /// overlayRefusal checks what needs no session, in the order the Mac's dispatcher does.

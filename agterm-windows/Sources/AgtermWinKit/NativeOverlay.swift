@@ -33,7 +33,7 @@ public struct NativeOverlay: Equatable, Sendable {
         }
     }
 
-    public static let serverRefusal = "overlays on agterm-server sessions are not shown on Windows yet"
+    public static let serverDisconnectedRefusal = "no agterm-server is connected for this session"
     public static let paneRefusal = "--pane is not supported on Windows: its sessions have no split panes"
     public static let pointsRefusal = "--width/--height are not supported on Windows"
     public static let pageRefusal = "session.overlay.open: pages (--html, --url, --image, --markdown, --text) are not supported on Windows"

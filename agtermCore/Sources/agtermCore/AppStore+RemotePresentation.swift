@@ -223,6 +223,28 @@ extension AppStore {
         session.onReplicaOverlayClosed = nil
     }
 
+    /// markViewerProgramOverlay records a program overlay agterm-win shows over a catalog row, for `tree` and overlay commands.
+    public func markViewerProgramOverlay(forSession id: UUID, command: String, sizePercent: Int?, wait: Bool) {
+        guard let session = session(withID: id) else { return }
+        session.overlayActive = true
+        session.overlayCommand = command
+        session.overlaySizePercent = sizePercent
+        session.overlayWait = wait
+        session.overlayHidden = false
+        session.overlayExitCode = nil
+    }
+
+    /// clearViewerProgramOverlay drops a catalog row's overlay bookkeeping without tearing down its native surface.
+    public func clearViewerProgramOverlay(forSession id: UUID, exitCode: Int? = nil) {
+        guard let session = session(withID: id) else { return }
+        session.overlayActive = false
+        session.overlayCommand = nil
+        session.overlaySizePercent = nil
+        session.overlayWait = false
+        session.overlayHidden = false
+        session.overlayExitCode = exitCode
+    }
+
     /// Takes down the overlay showing `job`, once its origin closed it.
     public func closeReplicaOverlay(_ job: String, forSession id: UUID) {
         guard let slot = session(withID: id)?.overlayReplicas.first(where: { $0.replica.job == job }) else { return }

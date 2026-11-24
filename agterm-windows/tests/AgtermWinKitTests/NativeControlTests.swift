@@ -24,6 +24,17 @@ private final class FakeHost: NativeControlHost {
 
     func isServerSession(_ id: UUID) -> Bool { serverWorkspaces.flatMap(\.sessions).contains { $0.id == id.uuidString } }
 
+    var serverConnected = false
+    private var serverOverlays: [UUID: NativeOverlay] = [:]
+    private var serverOverlayExitCodes: [UUID: Int] = [:]
+
+    func isConnectedServerSession(_ id: UUID) -> Bool { serverConnected && isServerSession(id) }
+
+    func serverOverlayState(for id: UUID) -> (overlay: NativeOverlay?, exitCode: Int?)? {
+        guard isServerSession(id) else { return nil }
+        return (serverOverlays[id], serverOverlayExitCodes[id])
+    }
+
     var cwds: [String?] = []
     func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> UUID? {
         cwds.append(cwd)
@@ -104,15 +115,33 @@ private final class FakeHost: NativeControlHost {
 
     func openOverlay(_ id: UUID, _ open: NativeOverlay.Open) {
         opened.append(open)
+        if isServerSession(id) {
+            serverOverlays[id] = NativeOverlay(sizePercent: open.sizePercent, wait: open.wait)
+            serverOverlayExitCodes.removeValue(forKey: id)
+            return
+        }
         editLocal(id) {
             $0.overlay = NativeOverlay(sizePercent: open.sizePercent, wait: open.wait)
             $0.overlayExitCode = nil
         }
     }
 
-    func closeOverlay(_ id: UUID) { editLocal(id) { $0.overlay = nil } }
-    func resizeOverlay(_ id: UUID, sizePercent: Int?) { editLocal(id) { $0.overlay?.sizePercent = sizePercent } }
-    func setOverlayHidden(_ id: UUID, _ hidden: Bool) { editLocal(id) { $0.overlay?.hidden = hidden } }
+    func closeOverlay(_ id: UUID) {
+        if isServerSession(id) {
+            serverOverlays.removeValue(forKey: id)
+            serverOverlayExitCodes.removeValue(forKey: id)
+        } else { editLocal(id) { $0.overlay = nil } }
+    }
+
+    func resizeOverlay(_ id: UUID, sizePercent: Int?) {
+        if var overlay = serverOverlays[id] { overlay.sizePercent = sizePercent; serverOverlays[id] = overlay }
+        else { editLocal(id) { $0.overlay?.sizePercent = sizePercent } }
+    }
+
+    func setOverlayHidden(_ id: UUID, _ hidden: Bool) {
+        if var overlay = serverOverlays[id] { overlay.hidden = hidden; serverOverlays[id] = overlay }
+        else { editLocal(id) { $0.overlay?.hidden = hidden } }
+    }
     func overlayScreen(of id: UUID) -> (lines: [String], rows: Int)? { overlayScreens[id] }
     func overlaySelection(of id: UUID) -> String? { overlaySelections[id] }
 
@@ -122,6 +151,11 @@ private final class FakeHost: NativeControlHost {
             $0.overlay = nil
             $0.overlayExitCode = code
         }
+    }
+
+    func exitServerOverlay(_ id: UUID, code: Int) {
+        serverOverlays.removeValue(forKey: id)
+        serverOverlayExitCodes[id] = code
     }
 }
 
@@ -342,11 +376,22 @@ struct NativeControlTests {
         #expect(host.opened.isEmpty)
     }
 
-    @Test func aServerSessionsOverlayIsRefused() async {
+    @Test func aServerSessionsOverlayNeedsAConnectedServer() async {
         let host = FakeHost()
         let server = ControlSessionNode(id: UUID().uuidString, name: "zsh", cwd: "~", active: false, split: false, backedByZmx: true)
         host.serverWorkspaces = [ControlWorkspaceNode(id: UUID().uuidString, name: "dev", active: false, sessions: [server])]
-        #expect(await overlay(.sessionOverlayOpen, host, target: server.id, ControlArgs(command: "top")).error == NativeOverlay.serverRefusal)
+        #expect(await overlay(.sessionOverlayOpen, host, target: server.id, ControlArgs(command: "top")).error
+            == NativeOverlay.serverDisconnectedRefusal)
+    }
+
+    @Test func aConnectedServerSessionAcceptsAProgramOverlay() async {
+        let host = FakeHost()
+        host.serverConnected = true
+        let server = ControlSessionNode(id: UUID().uuidString, name: "zsh", cwd: "~", active: false, split: false, backedByZmx: true)
+        host.serverWorkspaces = [ControlWorkspaceNode(id: UUID().uuidString, name: "dev", active: false, sessions: [server])]
+        let open = await overlay(.sessionOverlayOpen, host, target: server.id, ControlArgs(command: "top", sizePercent: 50))
+        #expect(open.ok && open.result?.id == server.id)
+        #expect(host.opened == [NativeOverlay.Open(command: "top", cwd: nil, wait: false, sizePercent: 50, background: nil)])
     }
 
     @Test func resultIsRunningWhileOpenThenTheExitCode() async {
@@ -414,13 +459,29 @@ struct NativeControlTests {
         #expect(await overlay(.sessionOverlayResize, host, ControlArgs(sizePercent: 40)).ok && host.localSessions[0].overlay?.sizePercent == 40)
     }
 
-    @Test func everyOverlayCommandRefusesAServerSession() async {
+    @Test func overlayCommandsOnAServerSessionNeedAConnection() async {
         let host = FakeHost()
         let server = ControlSessionNode(id: UUID().uuidString, name: "zsh", cwd: "~", active: false, split: false, backedByZmx: true)
         host.serverWorkspaces = [ControlWorkspaceNode(id: UUID().uuidString, name: "dev", active: false, sessions: [server])]
         for cmd: agtermCore.Command in [.sessionOverlayClose, .sessionOverlayResult, .sessionOverlayText, .sessionOverlayToggle] {
-            #expect(await overlay(cmd, host, target: server.id).error == NativeOverlay.serverRefusal)
+            #expect(await overlay(cmd, host, target: server.id).error == NativeOverlay.serverDisconnectedRefusal)
         }
+    }
+
+    @Test func overlayCommandsOnAConnectedServerSessionMatchLocalOnes() async {
+        let host = FakeHost()
+        host.serverConnected = true
+        let server = ControlSessionNode(id: UUID().uuidString, name: "zsh", cwd: "~", active: false, split: false, backedByZmx: true)
+        host.serverWorkspaces = [ControlWorkspaceNode(id: UUID().uuidString, name: "dev", active: false, sessions: [server])]
+        let id = UUID(uuidString: server.id)!
+        #expect(await overlay(.sessionOverlayResult, host, target: server.id).error == OverlayResultError.noResult)
+        _ = await overlay(.sessionOverlayOpen, host, target: server.id, ControlArgs(command: "exit 2", wait: true))
+        #expect(await overlay(.sessionOverlayResult, host, target: server.id).error == OverlayResultError.stillRunning)
+        host.exitServerOverlay(id, code: 2)
+        let result = await overlay(.sessionOverlayResult, host, target: server.id)
+        #expect(result.ok && result.result?.exitCode == 2)
+        _ = await overlay(.sessionOverlayOpen, host, target: server.id, ControlArgs(command: "top"))
+        #expect(await overlay(.sessionOverlayClose, host, target: server.id).ok)
     }
 
     @Test func anUnknownTargetIsRefusedAsForEveryCommand() async {
