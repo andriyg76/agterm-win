@@ -64,9 +64,6 @@ jobs:
           swift-version: ${{ env.SWIFT_VERSION }}
           swift-build: ${{ env.SWIFT_BUILD }}
           build_arch: ${{ matrix.swift-arch }}
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.17.1
       - name: Inno Setup
         run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
       - name: Build
@@ -88,7 +85,7 @@ jobs:
       - id: upload
         uses: actions/upload-artifact@v7
         with:
-          name: installer-unsigned-${{ matrix.arch }}
+          name: unsigned-installer-${{ matrix.arch }}
           path: agterm-windows/build/release/agterm-win-*-${{ matrix.arch }}-setup.exe
           if-no-files-found: error
       # the artifact configuration signs the one installer inside the uploaded zip:

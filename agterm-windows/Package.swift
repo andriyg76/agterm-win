@@ -19,7 +19,7 @@ let package = Package(
             cxxSettings: [.define("GHOSTTY_STATIC")],
             linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("dwmapi"), .linkedLibrary("user32"),
                              .linkedLibrary("comctl32"), .linkedLibrary("uxtheme"), .linkedLibrary("gdi32"), .linkedLibrary("bcrypt"),
-                             .linkedLibrary("ntdll")]
+                             .linkedLibrary("ntdll"), .linkedLibrary("runtimeobject"), .linkedLibrary("advapi32"), .linkedLibrary("shell32")]
         ),
         // the Win32-free logic the native window runs, so `swift test` covers it on any host
         .target(name: "AgtermWinKit", dependencies: [.product(name: "agtermCore", package: "agtermCore")]),
@@ -31,6 +31,7 @@ let package = Package(
             linkerSettings: [
                 .linkedLibrary("user32"),
                 .linkedLibrary("shell32"),
+                .linkedLibrary("advapi32"),
                 .unsafeFlags(["-Xlinker", "/SUBSYSTEM:WINDOWS", "-Xlinker", "/ENTRY:mainCRTStartup", "-Xlinker", iconResource]),
             ]
         ),

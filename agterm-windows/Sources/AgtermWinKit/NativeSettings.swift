@@ -37,6 +37,9 @@ public struct NativeSettings: Codable, Equatable, Sendable {
     }
 
     public var fontPoints: Float = NativeMenu.defaultPoints
+    public var appearance = Appearance()
+    public var notifications = NotificationSettings()
+    public var general = GeneralSettings()
     /// frame is the window's restored (not maximized) rectangle in screen pixels.
     public var frame: Frame?
     public var maximized = false
@@ -45,6 +48,8 @@ public struct NativeSettings: Codable, Equatable, Sendable {
     public var defaultProfile: String?
     /// selectedLocal indexes `localSessions` when one was in view at quit; nil leaves the selection to the server's.
     public var selectedLocal: Int?
+    /// serverLaunch is the choice made for each WSL distribution's agterm-server, by distribution name.
+    public var serverLaunch: [String: ServerLaunch] = [:]
 
     public init() {}
 
@@ -70,10 +75,14 @@ public struct NativeSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         fontPoints = try container.decodeIfPresent(Float.self, forKey: .fontPoints) ?? NativeMenu.defaultPoints
+        appearance = try container.decodeIfPresent(Appearance.self, forKey: .appearance) ?? Appearance()
+        notifications = try container.decodeIfPresent(NotificationSettings.self, forKey: .notifications) ?? NotificationSettings()
+        general = try container.decodeIfPresent(GeneralSettings.self, forKey: .general) ?? GeneralSettings()
         frame = try container.decodeIfPresent(Frame.self, forKey: .frame)
         maximized = try container.decodeIfPresent(Bool.self, forKey: .maximized) ?? false
         localSessions = try container.decodeIfPresent([LocalSession].self, forKey: .localSessions) ?? []
         selectedLocal = try container.decodeIfPresent(Int.self, forKey: .selectedLocal)
         defaultProfile = try container.decodeIfPresent(String.self, forKey: .defaultProfile)
+        serverLaunch = try container.decodeIfPresent([String: ServerLaunch].self, forKey: .serverLaunch) ?? [:]
     }
 }

@@ -10,7 +10,8 @@ public protocol NativeControlHost: AnyObject {
     /// serverWorkspaces is the catalog's tree, empty while no server is connected.
     var serverWorkspaces: [ControlWorkspaceNode] { get }
     func isServerSession(_ id: UUID) -> Bool
-    func newLocalSession(name: String?, command: String?, select: Bool) -> UUID?
+    /// newLocalSession starts in `cwd` when given, else in the user's home, as a Mac's `session.new` does.
+    func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> UUID?
     func newServerSession() async -> ControlResponse
     func closeSession(_ id: UUID) async -> ControlResponse
     func renameSession(_ id: UUID, to name: String) async -> ControlResponse
@@ -21,12 +22,26 @@ public protocol NativeControlHost: AnyObject {
     /// screen is the session's lines, oldest first, and how many of the last ones are on screen; nil when the session
     /// has no terminal here.
     func screen(of id: UUID) -> (lines: [String], rows: Int)?
-    func notify(_ id: UUID, title: String, body: String)
+    /// notify shows a `notify` for the session and returns why no banner was shown, nil when one was.
+    func notify(_ id: UUID, title: String, body: String) -> String?
     var fontPoints: Float { get }
     func setFontPoints(_ points: Float)
     var keymap: ControlKeymap { get }
     /// reloadKeymap reads keymap.conf again and returns how many problems it found.
     func reloadKeymap() -> Int
+    var appearance: Appearance { get }
+    var themeCatalog: ThemeCatalog { get }
+    var systemIsDark: Bool { get }
+    /// setAppearance saves `appearance` and draws every terminal with it.
+    func setAppearance(_ appearance: Appearance)
+    /// wslServers are the distributions that can hold an agterm-server, with each one's state and launch choice.
+    var wslServers: [ControlWSLServer] { get }
+    /// startWSLServer starts `distribution`'s server without asking about launch; nil once started, else why not.
+    func startWSLServer(_ distribution: String) -> String?
+    /// setWSLLaunch makes `distribution`'s server start at launch, or be a manual choice that never asks.
+    func setWSLLaunch(_ distribution: String, atLaunch: Bool)
+    /// openSettings shows Settings on `tab`, an open one switching to it.
+    func openSettings(tab: SettingsTab)
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -39,15 +54,18 @@ public enum NativeControl {
         public let commandLine: String
         public let exited: Bool
         public let attention: Bool
+        public let unseen: Int
         public let cwd: String
         public let title: String?
 
-        public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, cwd: String = "", title: String? = nil) {
+        public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, unseen: Int = 0, cwd: String = "",
+                    title: String? = nil) {
             self.id = id
             self.name = name
             self.commandLine = commandLine
             self.exited = exited
             self.attention = attention
+            self.unseen = unseen
             self.cwd = cwd
             self.title = title
         }
@@ -99,24 +117,54 @@ public enum NativeControl {
         case .notify:
             guard let body = request.args?.body, !body.isEmpty else { return failure("notify requires a body") }
             return await withSession(request.target, host: host) { id in
-                host.notify(id, title: request.args?.title ?? "agterm", body: body)
-                return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+                let note = host.notify(id, title: request.args?.title ?? "", body: body)
+                return ControlResponse(ok: true, result: ControlResult(id: id.uuidString, text: note))
             }
         case .fontInc, .fontDec, .fontReset:
             let command: NativeMenu.Command = request.cmd == .fontInc ? .fontBigger : request.cmd == .fontDec ? .fontSmaller : .fontReset
             let points = NativeMenu.points(after: command, from: host.fontPoints)
             host.setFontPoints(points)
             return ControlResponse(ok: true, result: ControlResult(text: String(format: "%g", points)))
+        case .themeList:
+            return ControlResponse(ok: true, result: themeResult(host, themes: host.themeCatalog.names))
+        case .themeSet:
+            let args = request.args
+            switch host.appearance.setting(name: args?.name, light: args?.light, dark: args?.dark, catalog: host.themeCatalog) {
+            case .failure(let refusal): return failure(refusal.description)
+            case .success(let next):
+                host.setAppearance(next)
+                return ControlResponse(ok: true, result: themeResult(host, themes: nil))
+            }
+        #if os(Windows)
+        case .settingsOpen:
+            guard let tab = SettingsTab.parse(request.args?.name) else {
+                return failure("unknown settings tab: \(request.args?.name ?? "") (\(SettingsTab.acceptedNames))")
+            }
+            host.openSettings(tab: tab)
+            return ControlResponse(ok: true, result: ControlResult(text: tab.rawValue))
+        #endif
         case .keymapList:
             return ControlResponse(ok: true, result: ControlResult(keymap: host.keymap))
         case .keymapReload:
             return ControlResponse(ok: true, result: ControlResult(count: host.reloadKeymap()))
+        #if os(Windows)
+        case .wslList, .wslStart, .wslLaunch:
+            return wsl(request, host: host)
+        #endif
         default:
             return failure("\(request.cmd.rawValue) is not supported on Windows")
         }
     }
 
     static func failure(_ message: String) -> ControlResponse { ControlResponse(ok: false, error: message) }
+
+    /// themeResult is `theme.list` and `theme.set`'s read-back, the macOS app's shape: the theme on screen, the light and
+    /// dark slots, and whether they follow the system.
+    private static func themeResult(_ host: NativeControlHost, themes: [String]?) -> ControlResult {
+        let appearance = host.appearance
+        return ControlResult(theme: appearance.activeTheme(dark: host.systemIsDark), themes: themes, sync: appearance.followsSystem,
+                             light: appearance.theme, dark: appearance.darkTheme)
+    }
 
     /// resolve maps a target (id, unique prefix, or `active`/none for the selected session) to a session id.
     struct Refusal: Error {
@@ -152,7 +200,7 @@ public enum NativeControl {
             return await host.newServerSession()
         }
         guard args?.command?.isEmpty != true else { return failure("session.new command must not be blank") }
-        guard let id = host.newLocalSession(name: args?.name, command: args?.command, select: args?.noSelect != true) else {
+        guard let id = host.newLocalSession(name: args?.name, command: args?.command, cwd: args?.cwd, select: args?.noSelect != true) else {
             return failure("no launch profile to start a session from")
         }
         return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
@@ -174,17 +222,49 @@ public enum NativeControl {
         return ControlResponse(ok: true, result: ControlResult(id: next.uuidString))
     }
 
+    #if os(Windows)
+    /// wsl answers the `wsl.*` commands with every distribution's state, the one a start or launch change named
+    /// included, so the reply is its own read-back.
+    private static func wsl(_ request: ControlRequest, host: NativeControlHost) -> ControlResponse {
+        let parsed: ControlWSL.Request
+        switch ControlWSL.parse(request) {
+        case .failure(let rejection): return failure(rejection.message)
+        case .success(let request): parsed = request
+        }
+        let named: String
+        switch parsed {
+        case .list:
+            return ControlResponse(ok: true, result: ControlResult(wsl: host.wslServers))
+        case .start(let distribution), .launch(let distribution, _):
+            named = distribution
+        }
+        guard let known = host.wslServers.first(where: { $0.distribution.caseInsensitiveCompare(named) == .orderedSame }) else {
+            return failure("no WSL distribution named \(named)")
+        }
+        switch parsed {
+        case .list: break
+        case .start:
+            if let refusal = host.startWSLServer(known.distribution) { return failure(refusal) }
+        case .launch(_, let atLaunch):
+            host.setWSLLaunch(known.distribution, atLaunch: atLaunch)
+        }
+        return ControlResponse(ok: true, result: ControlResult(wsl: host.wslServers))
+    }
+    #endif
+
     /// tree is the Local group, while it has sessions, ahead of the server's workspaces, as the sidebar shows them.
     public static func tree(_ host: NativeControlHost) -> ControlTree {
         let selected = host.selectedSession
         let locals = host.localSessions.map { local in
             ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: local.id == selected, split: false,
                                backedByZmx: nil, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
-                               unseen: local.attention ? 1 : nil, fontSize: Double(host.fontPoints))
+                               unseen: local.unseen > 0 ? local.unseen : local.attention ? 1 : nil, fontSize: Double(host.fontPoints))
         }
         let local = locals.isEmpty ? [] : [ControlWorkspaceNode(id: localWorkspace.uuidString, name: "Local",
                                                                 active: locals.contains { $0.active }, sessions: locals)]
-        return ControlTree(workspaces: local + host.serverWorkspaces)
+        var tree = ControlTree(workspaces: local + host.serverWorkspaces)
+        tree.wslServers = host.wslServers
+        return tree
     }
 
     /// text is what `session.text` reads: the screen by default, every line with `all`, or the last `last` lines once

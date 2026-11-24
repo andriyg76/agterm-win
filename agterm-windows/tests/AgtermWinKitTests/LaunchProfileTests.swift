@@ -17,6 +17,7 @@ struct LaunchProfileTests {
     @Test func dockerDesktopDistributionsAreLeftOut() {
         let names = LaunchProfiles.available(wslDistributions: ["docker-desktop", "docker-desktop-data", "Ubuntu"], powerShell7: nil).map(\.name)
         #expect(names.last == "WSL Ubuntu" && !names.contains { $0.contains("docker") })
+        #expect(LaunchProfiles.serverDistributions(["docker-desktop", "Ubuntu", "Debian"]) == ["Ubuntu", "Debian"])
     }
 
     @Test func wslListIsUTF16WithCRLFLines() {

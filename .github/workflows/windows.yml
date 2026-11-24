@@ -64,9 +64,6 @@ jobs:
           swift-build: ${{ env.SWIFT_BUILD }}
           build_arch: ${{ matrix.swift-arch }}
           cache: true
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.17.1
       - uses: actions/cache@v6
         with:
           # not .build: its debug link comes back from the cache unreadable, and stage.ps1 copies through it
@@ -83,5 +80,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: integration-results-${{ matrix.arch }}
-          path: ${{ runner.temp }}/results
+          # a window's AF_UNIX socket cannot be read, and the upload stops at the first one
+          path: |
+            ${{ runner.temp }}/results
+            !${{ runner.temp }}/results/**/*.sock
           if-no-files-found: ignore

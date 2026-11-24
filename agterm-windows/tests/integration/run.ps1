@@ -1,6 +1,7 @@
 # Integration cases against a staged agterm-win folder (scripts/stage.ps1). Each case launches the real window with
-# its own state directory and reads the terminal's text back through AGTERM_WIN_TEST_SCREEN. It must run on an
-# interactive desktop: the user's, or Windows Sandbox's through sandbox.ps1. Exit 0 when all pass, 1 otherwise.
+# its own state directory: a command window's case reads the terminal's text back through AGTERM_WIN_TEST_SCREEN, a
+# full window's case (shell-cases.ps1) drives it with agtermctl. It must run on an interactive desktop: the user's, or
+# Windows Sandbox's through sandbox.ps1. Exit 0 when all pass, 1 otherwise.
 param(
     [Parameter(Mandatory)][string]$App,
     [Parameter(Mandatory)][string]$Results,
@@ -12,6 +13,13 @@ if (-not (Test-Path $exe)) { throw "no agterm-win.exe in $App" }
 New-Item -ItemType Directory -Force $Results | Out-Null
 $Results = (Resolve-Path $Results).Path
 $fixtures = Join-Path $PSScriptRoot "fixtures"
+. (Join-Path $PSScriptRoot "shell-cases.ps1")
+
+function Write-Verdict([string]$Name, [string[]]$Failures) {
+    $verdict = if ($Failures) { "FAIL" } else { "PASS" }
+    Write-Host ("{0} {1}{2}" -f $verdict, $Name, $(if ($Failures) { ": " + ($Failures -join "; ") } else { "" }))
+    [pscustomobject]@{ name = $Name; passed = -not $Failures; failures = $Failures }
+}
 
 function Invoke-Case([string]$Name, [string]$Arguments) {
     $dir = Join-Path $Results $Name
@@ -55,10 +63,9 @@ $outcomes = foreach ($case in $cases) {
     else { foreach ($text in $case.Expect) { if (-not $run.Screen.Contains($text)) { $failures += "screen lacks '$text'" } } }
     $crash = Join-Path $run.Dir "state\crash.log"
     if (Test-Path $crash) { $failures += "crash: " + (Get-Content $crash -Raw).Trim() }
-    $verdict = if ($failures) { "FAIL" } else { "PASS" }
-    Write-Host ("{0} {1}{2}" -f $verdict, $case.Name, $(if ($failures) { ": " + ($failures -join "; ") } else { "" }))
-    [pscustomobject]@{ name = $case.Name; passed = -not $failures; failures = $failures }
+    Write-Verdict $case.Name $failures
 }
+$outcomes = @($outcomes) + @(foreach ($name in $shellCases.Keys) { Write-Verdict $name (Invoke-ShellCase $name) })
 $failed = @($outcomes | ? { -not $_.passed }).Count
 Write-Host "$($outcomes.Count - $failed) passed, $failed failed"
 $outcomes | ConvertTo-Json -Depth 3 | Set-Content (Join-Path $Results "cases.json") -Encoding UTF8

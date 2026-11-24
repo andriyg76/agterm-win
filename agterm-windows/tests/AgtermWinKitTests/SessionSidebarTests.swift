@@ -22,6 +22,13 @@ struct SessionSidebarTests {
         #expect(items[1].children.isEmpty)
     }
 
+    @Test func aServerGroupHoldsItsTreeUnderItsLabel() {
+        let api = session("api"), group = UUID()
+        let item = SessionSidebar.server(id: group, label: "WSL Ubuntu", workspaces: [Workspace(name: "", sessions: [api], isRoot: true)])
+        #expect(item.id == group && item.title == "WSL Ubuntu" && item.isWorkspace)
+        #expect(item.children.map(\.title) == ["api"])
+    }
+
     @Test func selectionKeepsAPresentSessionAndOtherwiseTakesTheFirstLiveOne() {
         let gone = session("gone", ended: true), live = session("live")
         let workspaces = [Workspace(name: "a", sessions: [gone]), Workspace(name: "b", sessions: [live])]
@@ -38,6 +45,12 @@ struct SessionSidebarTests {
         #expect(items.map(\.title) == ["loose", "dev"])
         #expect(items.map(\.isWorkspace) == [false, true])
         #expect(items[1].children.map(\.title) == ["held"])
+    }
+
+    @Test func aServerSessionShowsItsUnseenNotifications() {
+        let api = session("api"), web = session("web")
+        let items = SessionSidebar.items([Workspace(name: "", sessions: [api, web], isRoot: true)], unseen: [web.id: 2])
+        #expect(items.map(\.title) == ["api", "● 2 web"])
     }
 
     @Test func launchRunsTheAttachCommand() {
@@ -64,5 +77,7 @@ struct SessionSidebarTests {
         #expect(SessionSidebar.localTitle("PowerShell", exited: false, attention: false) == "PowerShell")
         #expect(SessionSidebar.localTitle("PowerShell", exited: false, attention: true) == "● PowerShell")
         #expect(SessionSidebar.localTitle("cmd", exited: true, attention: true) == "● cmd (exited)")
+        #expect(SessionSidebar.localTitle("cmd", exited: false, attention: true, unseen: 3) == "● 3 cmd")
+        #expect(SessionSidebar.localTitle("cmd", exited: false, attention: true, unseen: 120) == "● 99+ cmd")
     }
 }

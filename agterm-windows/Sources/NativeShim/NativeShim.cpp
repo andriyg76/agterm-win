@@ -6,6 +6,7 @@
 #include <d2d1.h>
 #include <dwmapi.h>
 #include <dwrite.h>
+#include <dwrite_1.h>
 #include <ghostty/vt.h>
 
 #include <math.h>
@@ -264,7 +265,9 @@ struct nt_terminal {
     uint32_t columns = 80, rows = 24;
     int32_t scroll = 0;
     bool focused = true;
-    bool attention = false;  // a bell or notification since nt_take_attention
+    bool attention = false;  // a bell since nt_take_attention
+    bool notified = false;   // an OSC 9 or 777 notification since nt_take_notification, the last one's text below
+    Text notificationTitle, notificationBody;
     bool naming = false;     // the title or the working directory changed since nt_take_naming
     uint32_t selectionColor = 0x264F78;
     bool selecting = false, hasSelection = false;
@@ -272,6 +275,8 @@ struct nt_terminal {
     Point anchor{}, head{};
     Span paintSpan{};  // range() once per frame, not per row
     uint32_t foreground = 0xCCCCCC, background = 0x1E1E1E;
+    uint32_t cursor = 0xCCCCCC;  // the effective cursor color, OSC 12 included
+    uint32_t cursorText = UINT32_MAX;  // a theme's cursor-text; above 0xFFFFFF the background
     Buffer<Cell> grid, history;
     Text title, pwd;
     Buffer<UINT16> glyphs;
@@ -323,10 +328,32 @@ struct nt_terminal {
         return result;
     }
 
+    // loadFont takes `wanted`, else Cascadia Mono, else Consolas; false leaves the faces as they were
+    bool loadFont(const wchar_t *wanted) {
+        Com<IDWriteFontCollection> fonts;
+        dwrite->GetSystemFontCollection(fonts.put());
+        const wchar_t *families[] = {wanted && *wanted ? wanted : nullptr, L"Cascadia Mono", L"Consolas"};
+        for (const wchar_t *candidate : families) {
+            if (!candidate) continue;
+            Com<IDWriteFontFace> regular = face(fonts.Get(), candidate, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL);
+            if (!regular) continue;
+            faces[0] = static_cast<Com<IDWriteFontFace> &&>(regular);
+            faces[1] = face(fonts.Get(), candidate, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL);
+            faces[2] = face(fonts.Get(), candidate, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC);
+            faces[3] = face(fonts.Get(), candidate, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC);
+            family.clear();
+            family.append(candidate, wcslen(candidate));
+            return true;
+        }
+        return false;
+    }
+
     void refreshColors() {
         GhosttyColorRgb fg{}, bg{};
         if (ghostty_terminal_get(emulator, GHOSTTY_TERMINAL_DATA_COLOR_FOREGROUND, &fg) == GHOSTTY_SUCCESS) foreground = rgb(fg);
         if (ghostty_terminal_get(emulator, GHOSTTY_TERMINAL_DATA_COLOR_BACKGROUND, &bg) == GHOSTTY_SUCCESS) background = rgb(bg);
+        GhosttyColorRgb caret{};
+        cursor = ghostty_terminal_get(emulator, GHOSTTY_TERMINAL_DATA_COLOR_CURSOR, &caret) == GHOSTTY_SUCCESS ? rgb(caret) : foreground;
     }
 
     void rowCells(const Info &state, int64_t line, Buffer<Cell> &out) {
@@ -588,7 +615,11 @@ struct nt_terminal {
     }
 
     // the window's title is the shown terminal's; a hidden one keeps its title until it is shown
-    void showTitle() { SetWindowTextW(GetAncestor(window, GA_ROOT), title.empty() ? L"agterm" : terminated(title)); }
+    // only a command window's own title: inside the full window, its title bar names the selected session
+    void showTitle() {
+        if (GetAncestor(window, GA_ROOT) != window) return;
+        SetWindowTextW(window, title.empty() ? L"agterm" : terminated(title));
+    }
 };
 
 namespace {
@@ -602,8 +633,12 @@ void bell(GhosttyTerminal, void *userdata) {
     static_cast<nt_terminal *>(userdata)->attention = true;
 }
 
-void desktopNotification(GhosttyTerminal, void *userdata, const GhosttyTerminalDesktopNotification *) {
-    static_cast<nt_terminal *>(userdata)->attention = true;
+void desktopNotification(GhosttyTerminal, void *userdata, const GhosttyTerminalDesktopNotification *notification) {
+    auto terminal = static_cast<nt_terminal *>(userdata);
+    terminal->notified = true;
+    // borrowed for the callback only
+    widen(terminal->notificationTitle, notification->title.ptr, static_cast<uint32_t>(notification->title.len));
+    widen(terminal->notificationBody, notification->body.ptr, static_cast<uint32_t>(notification->body.len));
 }
 
 bool terminalSize(GhosttyTerminal, void *userdata, GhosttySizeReportSize *size) {
@@ -678,18 +713,7 @@ extern "C" nt_terminal *nt_create(void *window, const uint16_t *font, float poin
                                    reinterpret_cast<IUnknown **>(terminal->dwrite.put())))) {
         return fail(L"Direct2D or DirectWrite did not start", terminal);
     }
-    Com<IDWriteFontCollection> fonts;
-    terminal->dwrite->GetSystemFontCollection(fonts.put());
-    const wchar_t *families[] = {reinterpret_cast<const wchar_t *>(font), L"Cascadia Mono", L"Consolas"};
-    for (const wchar_t *family : families) {
-        if (!family || !(terminal->faces[0] = face(fonts.Get(), family, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL))) continue;
-        terminal->family.append(family, wcslen(family));
-        terminal->faces[1] = face(fonts.Get(), family, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL);
-        terminal->faces[2] = face(fonts.Get(), family, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC);
-        terminal->faces[3] = face(fonts.Get(), family, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC);
-        break;
-    }
-    if (!terminal->faces[0]) return fail(L"no monospace font found", terminal);
+    if (!terminal->loadFont(reinterpret_cast<const wchar_t *>(font))) return fail(L"no monospace font found", terminal);
     terminal->points = points;
     terminal->dpi = static_cast<float>(GetDpiForWindow(terminal->window));
     terminal->measure();
@@ -812,14 +836,15 @@ extern "C" void nt_paint(nt_terminal *terminal) {
         // DECSCUSR: 0-2 block, 3-4 underline, 5-6 bar; blinking variants draw steady
         float stroke = roundf(2 * terminal->scale()) / terminal->scale();
         if (info.cursorShape >= 3 && info.cursorShape <= 4) {
-            terminal->fill(left, bottom - stroke, right, bottom, terminal->foreground);
+            terminal->fill(left, bottom - stroke, right, bottom, terminal->cursor);
         } else if (info.cursorShape >= 5 && info.cursorShape <= 6) {
-            terminal->fill(left, top, left + stroke, bottom, terminal->foreground);
+            terminal->fill(left, top, left + stroke, bottom, terminal->cursor);
         } else if (terminal->focused) {
-            terminal->fill(left, top, right, bottom, terminal->foreground);
-            terminal->drawRow(cell, 1, left, top, &terminal->background);
+            terminal->fill(left, top, right, bottom, terminal->cursor);
+            uint32_t text = terminal->cursorText <= 0xFFFFFF ? terminal->cursorText : terminal->background;
+            terminal->drawRow(cell, 1, left, top, &text);
         } else {
-            terminal->brush->SetColor(color(terminal->foreground));
+            terminal->brush->SetColor(color(terminal->cursor));
             float half = 0.5f / terminal->scale();
             target->DrawRectangle(D2D1::RectF(left + half, top + half, right - half, bottom - half), terminal->brush.Get(),
                                   1 / terminal->scale());
@@ -1014,6 +1039,81 @@ extern "C" int32_t nt_take_attention(nt_terminal *terminal) {
     bool attention = terminal->attention;
     terminal->attention = false;
     return attention;
+}
+
+extern "C" void nt_set_font_family(nt_terminal *terminal, const uint16_t *family) {
+    if (!terminal->loadFont(reinterpret_cast<const wchar_t *>(family))) return;
+    terminal->measure();
+}
+
+extern "C" void nt_set_theme(nt_terminal *terminal, uint32_t foreground, uint32_t background, uint32_t cursor, uint32_t cursorText,
+                             uint32_t selection, const uint32_t *palette) {
+    auto value = [](uint32_t color) { return GhosttyColorRgb{uint8_t(color >> 16), uint8_t(color >> 8), uint8_t(color)}; };
+    GhosttyColorRgb fg = value(foreground <= 0xFFFFFF ? foreground : 0xCCCCCC), bg = value(background <= 0xFFFFFF ? background : 0x1E1E1E);
+    ghostty_terminal_set(terminal->emulator, GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND, &fg);
+    ghostty_terminal_set(terminal->emulator, GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND, &bg);
+    GhosttyColorRgb caret = value(cursor);
+    ghostty_terminal_set(terminal->emulator, GHOSTTY_TERMINAL_OPT_COLOR_CURSOR, cursor <= 0xFFFFFF ? &caret : nullptr);
+    // the built-in palette under the theme's entries, so a theme setting sixteen colors keeps the other 240
+    ghostty_terminal_set(terminal->emulator, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, nullptr);
+    if (palette) {
+        GhosttyColorRgb colors[256]{};
+        ghostty_terminal_get(terminal->emulator, GHOSTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT, colors);
+        for (int index = 0; index < 256; index++) {
+            if (palette[index] <= 0xFFFFFF) colors[index] = value(palette[index]);
+        }
+        ghostty_terminal_set(terminal->emulator, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, colors);
+    }
+    terminal->cursorText = cursorText;
+    terminal->selectionColor = selection <= 0xFFFFFF ? selection : 0x264F78;
+    terminal->refreshColors();
+    InvalidateRect(terminal->window, nullptr, FALSE);
+}
+
+extern "C" int32_t nt_monospace_fonts(uint16_t *out, int32_t capacity) {
+    Com<IDWriteFactory> dwrite;
+    Com<IDWriteFontCollection> fonts;
+    if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown **>(dwrite.put()))) ||
+        FAILED(dwrite->GetSystemFontCollection(fonts.put()))) {
+        return 0;
+    }
+    Text names;
+    for (UINT32 index = 0; index < fonts->GetFontFamilyCount(); index++) {
+        Com<IDWriteFontFamily> family;
+        Com<IDWriteFont> font;
+        Com<IDWriteFont1> described;
+        Com<IDWriteLocalizedStrings> localized;
+        if (FAILED(fonts->GetFontFamily(index, family.put())) ||
+            FAILED(family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, font.put())) ||
+            FAILED(font->QueryInterface(__uuidof(IDWriteFont1), reinterpret_cast<void **>(described.put()))) ||
+            !described->IsMonospacedFont() || FAILED(family->GetFamilyNames(localized.put()))) {
+            continue;
+        }
+        UINT32 locale = 0, length = 0;
+        BOOL exists = FALSE;
+        if (FAILED(localized->FindLocaleName(L"en-us", &locale, &exists)) || !exists) locale = 0;
+        if (FAILED(localized->GetStringLength(locale, &length))) continue;
+        size_t start = names.size();
+        names.resize(start + length + 1);
+        if (FAILED(localized->GetString(locale, names.data() + start, length + 1))) {
+            names.resize(start);
+            continue;
+        }
+        names[start + length] = L'\n';
+    }
+    int32_t count = static_cast<int32_t>(names.size());
+    if (out && capacity >= count && count > 0) memcpy(out, names.data(), names.size() * sizeof(wchar_t));
+    return count;
+}
+
+extern "C" int32_t nt_take_notification(nt_terminal *terminal, uint16_t *title, int32_t title_capacity, int32_t *title_length,
+                                        uint16_t *body, int32_t body_capacity, int32_t *body_length) {
+    *title_length = give(terminal->notificationTitle, title, title_capacity);
+    *body_length = give(terminal->notificationBody, body, body_capacity);
+    if (!title || !body || title_capacity < *title_length || body_capacity < *body_length) return terminal->notified;
+    bool notified = terminal->notified;
+    terminal->notified = false;
+    return notified;
 }
 
 extern "C" int32_t nt_take_naming(nt_terminal *terminal) {

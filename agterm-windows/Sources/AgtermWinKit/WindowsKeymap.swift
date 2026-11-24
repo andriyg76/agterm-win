@@ -10,6 +10,7 @@ public struct WindowsKeymap: Sendable {
         (.newSession, .newSession), (.newServerSession, .newRemoteSession), (.renameSession, .renameSession),
         (.closeSession, .closeSession), (.nextSession, .nextSession), (.previousSession, .previousSession),
         (.find, .toggleSearch), (.fontBigger, .increaseFontSize), (.fontSmaller, .decreaseFontSize), (.fontReset, .resetFontSize),
+        (.sessionPalette, .sessionPalette), (.commandPalette, .commandPalette),
     ]
 
     /// reserved are the fixed chords of commands with no built-in action; a binding on one never fires.
@@ -17,6 +18,7 @@ public struct WindowsKeymap: Sendable {
         Chord(mods: [.control, .shift], key: "c"): .copy, Chord(mods: [.control, .shift], key: "v"): .paste,
         Chord(mods: [.control, .shift], key: "a"): .selectAll, Chord(mods: [.control, .shift], key: "k"): .clearScrollback,
         Chord(mods: [.control, .shift], key: "r"): .restartSession, Chord(mods: [.option], key: "f4"): .quit,
+        Chord(mods: [.control], key: ","): .settings,
     ]
 
     public let keymap: Keymap

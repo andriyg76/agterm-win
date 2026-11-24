@@ -1,6 +1,8 @@
 # agterm-win: session naming, keymap, notifications, settings dialog
 
-Order agreed 2026-11-23: naming → keymap → notifications → settings dialog.
+Order agreed 2026-11-23: naming → keymap → settings (appearance first) → notifications.
+Rule: every feature behaves as it does in agterm on macOS; where agterm-win cannot do part of it yet, it keeps
+agterm's behavior for a viewer that cannot (the server holds what no presenter shows) rather than inventing one.
 The native Windows server port waits until the client reaches parity with the WSL server.
 
 ## 1. Dynamic session naming — done on `claude/nice-einstein-u0a4qh`, not yet verified on Windows
@@ -30,14 +32,59 @@ The native Windows server port waits until the client reaches parity with the WS
 - Check on Windows: Win+T with `map cmd+t new_session`, the Start menu staying closed, a hook-hostile security
   product, and a non-US layout's OEM keys.
 
-## 3. Notifications
+## 3. Notifications — local sessions done, not yet verified on Windows
 
-- Windows toast through `ToastNotificationManager` with an AppUserModelID: MSIX has one; the Inno installer adds
-  a Start Menu shortcut carrying it.
-- Pass the OSC 9/777 title and body from the shim's desktop-notification callback (today only `attention` is set).
-- Deliver under `TerminalNotification.shouldDeliver`; a click selects the session; `agtermctl notify` posts the same.
+- OSC 9/777 carries its title and body out of the shim (`nt_take_notification`); the bell stays a ● marker and a
+  flash, not a notification, as on macOS.
+- NotificationRules: a terminal notification from the session in view with agterm in front is dropped
+  (`TerminalNotification.shouldDeliver`); `notify` never is. Terminal and `notify` banners replace only their own
+  last one (tag), grouped by session.
+- Banners are Windows toasts through the WinRT ABI (`NativeToast.cpp`). An MSIX uses its identity; any other
+  install registers `andriyg76.agterm-win` under `HKCU\Software\Classes\AppUserModelId` with the staged
+  `agterm.png` and sets it as the process AppUserModelID; the Inno shortcut carries the same ID.
+- Clicking a banner brings agterm forward with the session selected; selecting a session clears its ● count and
+  removes its banners from Action Center.
+- Settings ▸ Notifications: banners, sound, the count beside ●, taskbar flash (off / once / until in front,
+  default until in front, the behavior before this setting).
+- `notify` replies with `ControlNotify.bannersOffNote` while banners are off; `tree` reports `unseen`.
+- agterm-server sessions: as on a Mac, every catalog row opens its `zmx present` stream (`RemoteWindow`), which
+  brings the server's `notify`. It is a mirror (`RemotePresentationClient.presents` false) until agterm-win shows
+  asks, picks, HUD, overlays and pages, so the server keeps those waiting as it does while no Mac shows the session. A
+  server program's OSC 9/777 travels as bytes in the attached pane, so it reaches agterm-win only from the session
+  the shared server terminal shows; a background server session's OSC needs a terminal per server session.
 
-## 4. Settings dialog
+## 4. Settings — Appearance done locally, not yet verified on Windows
 
-- Win32 PropertySheet: General, Appearance (font, size), Notifications, Keys (effective bindings, Edit keymap.conf).
-- Backed by `NativeSettings`; every setting stays readable through the control API.
+- ☰ ▸ Settings… (Ctrl+, fixed) opens one window; its Appearance group holds the theme, the dark-mode theme with
+  "Follow Windows light and dark mode", the font family (installed monospaced fonts) and the size.
+  Every change previews on all terminals; OK saves to `native.json`, Cancel and close restore.
+- Themes are ghostty theme files: 34 bundled from iTerm2-Color-Schemes `86a776d` (the commit ghostty's themes
+  release names) plus agterm's own, in `Resources/themes`, staged as `themes\`; `<config>\themes` adds or
+  overrides by name. Names match the macOS app, so `theme = Dracula` means the same on both.
+- The shim sets libghostty-vt's default colors, cursor and palette (unset entries keep the built-in palette);
+  the cursor draws in the effective cursor color, selection in the theme's selection background.
+- `theme.list` / `theme.set NAME | --light L --dark D | --dark none` match the macOS command and read-back.
+- Not yet: the sidebar and window chrome keep their dark colors; selection-foreground is not applied; a Settings
+  window open during `theme.set` keeps showing its own values.
+- Settings is now three tabs, as on macOS: General, Appearance, Notifications.
+- `agtermctl settings open [tab]` (`settings.open`) shows a tab; no command reads or writes a setting (see control-api.md).
+- General, from macOS's General where it applies: where a new session opens (home, the selected session's folder,
+  or a folder), where it goes (end, after the selected one), asking before closing a local session, right-click
+  pastes (off: Windows keeps its menu, Shift+right-click opens it when on), lines a wheel notch scrolls, and the WSL
+  distribution agterm-server runs in (next start; `--wsl` wins). `session new --cwd` now starts there.
+- Not on General yet: restore mode (agterm-win restores fresh shells in their last folder; live would need a local
+  zmx per session, re-run a foreground-command reader) and opening links in an overlay (no overlays yet).
+
+## Later: font ligatures
+
+Deferred 2026-11-23. The renderer maps one codepoint to one glyph (`GetGlyphIndices`, `NativeShim.cpp`), so
+`=>`, `!=`, `->` never join; macOS has them through ghostty (`calt`/`liga` on, `font-feature` to turn off).
+
+- Shape runs of same-style cells with `IDWriteTextAnalyzer::GetGlyphs` and pin each cluster to the cells it
+  covers.
+- Break a ligature the cursor or a selection edge falls inside, as ghostty does.
+- "Font ligatures" in Settings ▸ Appearance, on by default, saved in `native.json`.
+- Shape only changed rows and cache the result; per-frame shaping costs the paint.
+
+The Font list holds only fonts DirectWrite flags monospaced; a monospaced font missing the flag needs a typed
+name, if one turns up.

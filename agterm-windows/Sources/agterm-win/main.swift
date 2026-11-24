@@ -1,3 +1,4 @@
+import AgtermWinKit
 import Foundation
 import NativeShim
 import WinSDK
@@ -9,6 +10,7 @@ import agtermCore
 //   agterm-win.exe --local [<name>]
 //   agterm-win.exe -- <command line>
 //
+// A distribution's agterm-server starts only on `--wsl`, `--install-server`, the menu, or the choice to start it at launch.
 // `--native` is accepted as a compatibility no-op for commands written while the implementation was introduced.
 // AGTERM_WIN_STATE_DIR isolates a test or second instance; AGTERM_WIN_TEST_SCREEN makes a command window write its
 // terminal text there when the program exits, then close.
@@ -69,8 +71,16 @@ MainActor.assumeIsolated {
     try? FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
     nt_install_crash_log(Array(stateDirectory.appendingPathComponent("crash.log").path.utf16) + [0])
     log("agterm-win starting on \(UpdateCheck.hostName)")
-    Keys.load(configDirectory: ConfigPaths.configDirectory(setting: nil, stateDir: stateDirectory.path,
-                                                          home: FileManager.default.homeDirectoryForCurrentUser))
+    let configDirectory = ConfigPaths.configDirectory(setting: nil, stateDir: stateDirectory.path,
+                                                      home: FileManager.default.homeDirectoryForCurrentUser)
+    Keys.load(configDirectory: configDirectory)
+    TerminalAppearance.themes = TerminalThemes(userDirectory: configDirectory.appendingPathComponent("themes"),
+                                               bundledDirectory: bundled("themes", source: "Resources/themes"))
+    // a window without the sidebar draws and takes the mouse as Settings say too
+    let saved = NativeSettings.load(from: stateDirectory.appendingPathComponent("native.json"))
+    TerminalAppearance.use(saved.appearance)
+    NativeTerminal.rightClickPastes = saved.general.rightClickPastes
+    NativeTerminal.scrollLines = saved.general.scrollLines
 
     let arguments = CommandLine.arguments
     if let flag = arguments.firstIndex(of: "--local") {
@@ -81,13 +91,14 @@ MainActor.assumeIsolated {
         NativeTerminal.open(commandLine: command.isEmpty ? "powershell.exe" : command)
     } else {
         let flag = arguments.firstIndex(of: "--wsl")
-        let distribution = flag.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? "Ubuntu"
+        let installServer = arguments.contains("--install-server")
+        // --install-server names its distribution with --wsl, Ubuntu when it does not
+        let server = flag.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? (installServer ? "Ubuntu" : nil)
         let profiles = arguments.indices
             .filter { arguments[$0] == "--profile" && $0 + 1 < arguments.count }
             .map { arguments[$0 + 1] }
-        NativeShell.open(remote: RemoteWindow(host: WSLHost(distribution: distribution), stateDirectory: stateDirectory),
-                         settings: stateDirectory.appendingPathComponent("native.json"), profiles: profiles,
-                         version: (try? serverRelease().version) ?? "dev", installServer: arguments.contains("--install-server"))
+        NativeShell.open(settings: stateDirectory.appendingPathComponent("native.json"), profiles: profiles,
+                         version: (try? serverRelease().version) ?? "dev", server: server, installServer: installServer)
     }
 }
 
@@ -99,6 +110,8 @@ loop: while true {
     if queueHandle != nil, woke == WAIT_OBJECT_0 { drainMainQueue(nil) }
     while PeekMessageW(&message, nil, 0, 0, UINT(PM_REMOVE)) {
         if message.message == UINT(WM_QUIT) { break loop }
+        // Tab, Enter and Esc move through Settings' controls as in a dialog
+        if let settings = MainActor.assumeIsolated({ SettingsWindow.current?.handle }), IsDialogMessageW(settings, &message) { continue }
         TranslateMessage(&message)
         DispatchMessageW(&message)
     }
