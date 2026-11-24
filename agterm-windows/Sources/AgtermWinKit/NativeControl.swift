@@ -12,8 +12,10 @@ public protocol NativeControlHost: AnyObject {
     func isServerSession(_ id: UUID) -> Bool
     /// isConnectedServerSession is whether `id` names a catalog row on a connected agterm-server.
     func isConnectedServerSession(_ id: UUID) -> Bool
-    /// serverOverlayState is the program overlay on a catalog session, when `id` names one.
+    /// serverOverlayState is the overlay on a catalog session, when `id` names one.
     func serverOverlayState(for id: UUID) -> (overlay: NativeOverlay?, exitCode: Int?)?
+    /// serverPageOverlay is the page the shell draws over a catalog session, nil for a program overlay or none.
+    func serverPageOverlay(for id: UUID) -> (page: HtmlOverlay, hidden: Bool)?
     /// newLocalSession starts in `cwd` when given, else in the user's home, as a Mac's `session.new` does.
     func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> UUID?
     func newServerSession() async -> ControlResponse

@@ -230,7 +230,7 @@ extension ControlDispatcher {
         let reject = { (error: String) in OverlayContent.rejected(ControlResponse(ok: false, error: error)) }
         let flags = [args?.wait, args?.navigation, args?.javascript, args?.chromeless, args?.persistent, args?.browse]
         if args?.cwd != nil || flags.contains(true) { return reject(OverlayHtmlError.imageOptions) }
-        guard path.hasPrefix("/") else { return reject(OverlayHtmlError.imageNotAbsolute) }
+        guard HtmlOverlay.isAbsolutePath(path) else { return reject(OverlayHtmlError.imageNotAbsolute) }
         let url = URL(fileURLWithPath: path).standardizedFileURL
         guard LinkPolicy.imageExtensions.contains(url.pathExtension.lowercased()) else {
             return reject(OverlayHtmlError.imageType)

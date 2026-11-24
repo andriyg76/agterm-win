@@ -174,6 +174,16 @@ extern "C" void nt_page_navigate_file(void *page, const uint16_t *path) {
   }
 }
 
+extern "C" void nt_page_navigate_html(void *page, const uint16_t *html) {
+  HWND host = static_cast<HWND>(page);
+  PageView *view = pageOf(host);
+  if (!view || !html) return;
+  view->state = 0;
+  if (view->web) {
+    view->web->NavigateToString(reinterpret_cast<const wchar_t *>(html));
+  }
+}
+
 extern "C" void nt_page_navigate_url(void *page, const uint16_t *url) {
   HWND host = static_cast<HWND>(page);
   PageView *view = pageOf(host);

@@ -15,7 +15,9 @@ extension NativeControl {
         if host.isServerSession(id) {
             guard host.isConnectedServerSession(id) else { return failure(NativeOverlay.serverDisconnectedRefusal) }
             let state = host.serverOverlayState(for: id) ?? (nil, nil)
-            slot = OverlaySlot(program: state.overlay, exitCode: state.exitCode, page: nil, pageHidden: false)
+            let page = host.serverPageOverlay(for: id)
+            slot = OverlaySlot(program: state.overlay, exitCode: state.exitCode, page: page?.page,
+                               pageHidden: page?.hidden ?? false)
         } else if let local = host.localSessions.first(where: { $0.id == id }) {
             slot = OverlaySlot(program: local.overlay, exitCode: local.overlayExitCode, page: local.htmlOverlay, pageHidden: local.pageOverlayHidden)
         } else {
@@ -101,7 +103,7 @@ extension NativeControl {
 
     private static func pageSupported(_ source: HtmlSource) -> Bool {
         switch source {
-        case .file, .url: return true
+        case .file, .url, .image: return true
         default: return false
         }
     }

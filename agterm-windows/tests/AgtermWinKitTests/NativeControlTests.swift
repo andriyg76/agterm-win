@@ -35,6 +35,8 @@ private final class FakeHost: NativeControlHost {
         return (serverOverlays[id], serverOverlayExitCodes[id])
     }
 
+    func serverPageOverlay(for id: UUID) -> (page: HtmlOverlay, hidden: Bool)? { nil }
+
     var cwds: [String?] = []
     func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> UUID? {
         cwds.append(cwd)

@@ -143,7 +143,7 @@ public final class RemotePresentationClient {
     /// The origin pings every 10 seconds, so three missed is a dead link and not a quiet one.
     static let staleAfter: TimeInterval = 30
     /// pagesUnsupported is the refusal a host that shows no handed-over pages answers with.
-    public static let pagesUnsupported = "pages are not shown on this Mac"
+    public static let pagesUnsupported = "pages are not shown on this viewer"
 
     private let argv: [String]
     private let presentationVersion: Int?

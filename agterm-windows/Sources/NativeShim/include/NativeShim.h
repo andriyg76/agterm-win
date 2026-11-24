@@ -183,6 +183,8 @@ void nt_page_destroy(void *page);
 void nt_page_move(void *page, int32_t x, int32_t y, int32_t width, int32_t height);
 void nt_page_navigate_file(void *page, const uint16_t *path);
 void nt_page_navigate_url(void *page, const uint16_t *url);
+/// nt_page_navigate_html loads UTF-16 document HTML in place (NavigateToString).
+void nt_page_navigate_html(void *page, const uint16_t *html);
 int32_t nt_page_state(void *page);
 /// nt_page_title returns the UTF-16 length of the document title; writes it when `capacity` holds it all.
 int32_t nt_page_title(void *page, uint16_t *out, int32_t capacity);

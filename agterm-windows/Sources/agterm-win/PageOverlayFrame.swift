@@ -52,6 +52,11 @@ final class PageOverlayFrame {
         }
     }
 
+    func load(html: String) {
+        guard let page else { return }
+        Array(html.utf16) + [0].withUnsafeBufferPointer { nt_page_navigate_html(page, $0.baseAddress) }
+    }
+
     func loadState() -> HtmlLoadState {
         guard let page else { return .failed }
         switch nt_page_state(page) {

@@ -18,5 +18,5 @@ overlay slot; replica pages follow the same `pageRequest` path as program overla
 
 - [x] D0 scaffold (WebView2 SDK fetch, host HWND, local file + https URL)
 - [x] `--html` / `--url` on local sessions (`ControlOverlayOpen` + `NativeControl+Overlay`)
-- [ ] D1 replica pages on catalog sessions
-- [ ] D2 markdown/text/image
+- [x] D1 replica pages on catalog sessions (file/url/image via page channel; forwarded/markdown/text/document deferred)
+- [ ] D2 markdown/text/image (local + replica content pages)
