@@ -42,6 +42,15 @@ public protocol NativeControlHost: AnyObject {
     func setWSLLaunch(_ distribution: String, atLaunch: Bool)
     /// openSettings shows Settings on `tab`, an open one switching to it.
     func openSettings(tab: SettingsTab)
+    /// openOverlay starts a program overlay over a local session whose slot NativeControl found empty.
+    func openOverlay(_ id: UUID, _ open: NativeOverlay.Open)
+    /// closeOverlay ends a local session's overlay and its program, which then leaves no exit code.
+    func closeOverlay(_ id: UUID)
+    func resizeOverlay(_ id: UUID, sizePercent: Int?)
+    func setOverlayHidden(_ id: UUID, _ hidden: Bool)
+    /// overlayScreen and overlaySelection read the overlay's terminal, as `screen(of:)` reads the session's.
+    func overlayScreen(of id: UUID) -> (lines: [String], rows: Int)?
+    func overlaySelection(of id: UUID) -> String?
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -57,9 +66,13 @@ public enum NativeControl {
         public let unseen: Int
         public let cwd: String
         public let title: String?
+        /// overlay is the program overlay in the session's slot, nil while it is empty.
+        public var overlay: NativeOverlay?
+        /// overlayExitCode is how the last overlay's program exited, until another opens.
+        public var overlayExitCode: Int?
 
         public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, unseen: Int = 0, cwd: String = "",
-                    title: String? = nil) {
+                    title: String? = nil, overlay: NativeOverlay? = nil, overlayExitCode: Int? = nil) {
             self.id = id
             self.name = name
             self.commandLine = commandLine
@@ -68,6 +81,8 @@ public enum NativeControl {
             self.unseen = unseen
             self.cwd = cwd
             self.title = title
+            self.overlay = overlay
+            self.overlayExitCode = overlayExitCode
         }
     }
 
@@ -147,6 +162,9 @@ public enum NativeControl {
             return ControlResponse(ok: true, result: ControlResult(keymap: host.keymap))
         case .keymapReload:
             return ControlResponse(ok: true, result: ControlResult(count: host.reloadKeymap()))
+        case .sessionOverlayOpen, .sessionOverlayClose, .sessionOverlayResize, .sessionOverlayResult, .sessionOverlayText,
+             .sessionOverlayCopy, .sessionOverlayHide, .sessionOverlayShow, .sessionOverlayToggle:
+            return await overlay(request, host: host)
         #if os(Windows)
         case .wslList, .wslStart, .wslLaunch:
             return wsl(request, host: host)
@@ -257,8 +275,10 @@ public enum NativeControl {
         let selected = host.selectedSession
         let locals = host.localSessions.map { local in
             ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: local.id == selected, split: false,
-                               backedByZmx: nil, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
-                               unseen: local.unseen > 0 ? local.unseen : local.attention ? 1 : nil, fontSize: Double(host.fontPoints))
+                               backedByZmx: nil, overlay: local.overlay != nil, overlaySizePercent: local.overlay?.sizePercent,
+                               ended: local.exited ? true : nil, restoreCommand: local.commandLine,
+                               unseen: local.unseen > 0 ? local.unseen : local.attention ? 1 : nil, fontSize: Double(host.fontPoints),
+                               hiddenOverlays: local.overlay?.hidden == true ? ["session"] : nil)
         }
         let local = locals.isEmpty ? [] : [ControlWorkspaceNode(id: localWorkspace.uuidString, name: "Local",
                                                                 active: locals.contains { $0.active }, sessions: locals)]

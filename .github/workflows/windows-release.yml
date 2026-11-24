@@ -130,7 +130,6 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
           REPOSITORY: ${{ github.repository }}
-          CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
           $source = (Resolve-Path 'agterm-windows/packaging/chocolatey').Path
@@ -166,6 +165,8 @@ jobs:
           choco push "agterm-windows/build/package-managers/$env:VERSION/agterm-win.$env:VERSION.nupkg" `
             --source https://push.chocolatey.org/ --api-key $env:CHOCOLATEY_API_KEY
           if ($LASTEXITCODE) { throw 'Chocolatey Community Repository upload failed' }
+        env:
+          CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
       - uses: actions/upload-artifact@v7
         with:
           name: chocolatey-package

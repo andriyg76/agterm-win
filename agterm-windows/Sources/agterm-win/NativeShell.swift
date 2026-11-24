@@ -27,10 +27,18 @@ final class NativeShell {
         var attention = false
         /// unseen counts notifications since the session was last in view.
         var unseen = 0
+        var overlay: Overlay?
+        var overlayExitCode: Int?
 
         var name: String {
             SessionNaming.displayName(customName: customName, title: programTitle, directory: directory, fallback: fallback)
         }
+    }
+
+    private struct Overlay {
+        var state: NativeOverlay
+        let frame: OverlayFrame
+        var terminal: NativeTerminal { frame.terminal }
     }
 
     /// Server is an agterm-server started this launch, under its sidebar group.
@@ -87,6 +95,8 @@ final class NativeShell {
     private var dpi: UInt32 = 96
     private var control: ControlSocket?
     private let version: String
+    /// closeSessionCoalesced swallows a second Close Session chord right after one dismissed an overlay; arm64 can deliver two.
+    private var closeSessionCoalesced: Date?
 
     /// open shows the window; `profiles` name launch profiles to start local sessions from once they are known.
     /// `server` (`--wsl`) starts that distribution's agterm-server as the menu does, installing it first when
@@ -274,7 +284,7 @@ final class NativeShell {
     private func setFontSize(_ points: Float) {
         settings.fontPoints = points
         shown.points = points
-        terminalsShown.forEach { $0.setFontSize(points) }
+        allTerminals.forEach { $0.setFontSize(points) }
         saveSettings()
     }
 
@@ -285,7 +295,7 @@ final class NativeShell {
     /// applyAppearance draws every terminal with `values`, without saving them.
     private func applyAppearance(_ values: SettingsWindow.Values) {
         let refit = TerminalAppearance.use(values.appearance)
-        for terminal in terminalsShown {
+        for terminal in allTerminals {
             terminal.applyTheme()
             if refit { terminal.applyFontFamily() }
             if values.points != shown.points { terminal.setFontSize(values.points) }
@@ -520,7 +530,7 @@ final class NativeShell {
         let session = LocalSession(fallback: fallback, customName: customName, directory: directory, commandLine: commandLine,
                                    terminal: makeTerminal())
         let id = session.id
-        session.terminal.onExit = { [unowned self] in localExited(id) }
+        session.terminal.onExit = { [unowned self] _ in localExited(id) }
         session.terminal.onAttention = { [unowned self] in localAttention(id) }
         session.terminal.onNotification = { [unowned self] in deliver(id, title: $0, body: $1, source: .terminal) }
         session.terminal.onNaming = { [unowned self] in localNaming(id) }
@@ -764,6 +774,7 @@ final class NativeShell {
     private func closeLocal(_ id: Foundation.UUID) {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         let closing = locals.remove(at: index)
+        closing.overlay?.frame.destroy()
         DestroyWindow(closing.terminal.window)
         guard selected == id else {
             rebuild()
@@ -785,7 +796,13 @@ final class NativeShell {
         case .newServerSession: newServerSession(on: currentServer)
         case .renameSession: startRename()
         case .restartSession: restartSelected()
-        case .closeSession: closeSelected()
+        case .closeSession:
+            if let since = closeSessionCoalesced, Date().timeIntervalSince(since) < 0.25 { break }
+            if dismissOverlayForCloseSession() {
+                closeSessionCoalesced = Date()
+            } else {
+                closeSelected()
+            }
         case .nextSession, .previousSession:
             if let next = SessionSidebar.neighbor(of: selected, in: tagged, forward: command == .nextSession) {
                 select(next)
@@ -802,6 +819,76 @@ final class NativeShell {
         }
     }
 
+    // MARK: overlays
+
+    /// placeOverlays lays each overlay over its session's area, shown only for the selected session while not hidden.
+    /// A shown overlay disables the terminal under it, so a click beside a floating panel never reaches the session.
+    private func placeOverlays() {
+        guard let window else { return }
+        var client = RECT()
+        GetClientRect(window, &client)
+        let top = titleBar.height
+        let area = NativeOverlay.Rect(x: sidebarWidth, y: top, width: max(client.right - sidebarWidth, 1), height: max(client.bottom - top, 1))
+        for session in locals {
+            guard let overlay = session.overlay else {
+                EnableWindow(session.terminal.window, true)
+                continue
+            }
+            let shown = session.id == selected && !overlay.state.hidden
+            let floating = (overlay.state.sizePercent ?? 100) < 100
+            overlay.frame.place(NativeOverlay.panel(in: area, sizePercent: overlay.state.sizePercent), border: floating ? scaled(1) : 0, shown: shown)
+            EnableWindow(session.terminal.window, !shown)
+        }
+        // the find bar and the palette stay above an overlay placed after them
+        for panel in [findBar, palette?.assumingMemoryBound(to: HWND__.self)] where panel.map({ IsWindowVisible($0) }) == true {
+            SetWindowPos(panel, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
+        }
+    }
+
+    /// hasFocus is whether the keyboard is in session `id`'s terminal or its overlay, which a change to the overlay
+    /// then hands to whichever of them is in view.
+    private func hasFocus(_ id: Foundation.UUID) -> Bool {
+        guard let session = locals.first(where: { $0.id == id }), let focused = GetFocus() else { return false }
+        return [session.terminal.window, session.overlay?.terminal.window, session.overlay?.frame.window].contains(focused)
+    }
+
+    /// dismissOverlayForCloseSession ends a shown overlay before Close Session touches the session underneath it.
+    @discardableResult
+    private func dismissOverlayForCloseSession() -> Bool {
+        if let focused = GetFocus() {
+            for session in locals {
+                guard let overlay = session.overlay, !overlay.state.hidden else { continue }
+                if focused == overlay.terminal.window || focused == overlay.frame.window {
+                    removeOverlay(session.id, frame: overlay.frame)
+                    return true
+                }
+            }
+        }
+        guard let selected,
+              let overlay = locals.first(where: { $0.id == selected })?.overlay,
+              !overlay.state.hidden
+        else { return false }
+        removeOverlay(selected, frame: overlay.frame)
+        return true
+    }
+
+    private func overlayExited(_ id: Foundation.UUID, frame: OverlayFrame, code: Int) {
+        guard let index = locals.firstIndex(where: { $0.id == id }), let overlay = locals[index].overlay, overlay.frame === frame else { return }
+        locals[index].overlayExitCode = code
+        log("native shell: overlay of [\(id)] exited \(code)")
+        if !overlay.state.wait { removeOverlay(id, frame: frame) }
+    }
+
+    /// removeOverlay ends the overlay `frame` holds, if it is still the session's.
+    private func removeOverlay(_ id: Foundation.UUID, frame: OverlayFrame) {
+        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay?.frame === frame else { return }
+        let focused = hasFocus(id)
+        locals[index].overlay = nil
+        frame.destroy()
+        placeOverlays()
+        if focused { focus() }
+    }
+
     // MARK: sidebar
 
     private var sidebarWidth: Int32 { scaled(240) }
@@ -809,7 +896,17 @@ final class NativeShell {
 
     private var terminalsShown: [NativeTerminal] { [remoteTerminal] + locals.map(\.terminal) }
 
-    private var visibleTerminal: NativeTerminal { locals.first { $0.id == selected }?.terminal ?? remoteTerminal }
+    /// allTerminals adds the overlays' terminals, which draw and size as the sessions' do.
+    private var allTerminals: [NativeTerminal] { terminalsShown + locals.compactMap { $0.overlay?.terminal } }
+
+    /// selectedTerminal is the selected session's own terminal, under any overlay.
+    private var selectedTerminal: NativeTerminal { locals.first { $0.id == selected }?.terminal ?? remoteTerminal }
+
+    /// visibleTerminal is what the keyboard and the terminal commands reach: a shown overlay, else the session.
+    private var visibleTerminal: NativeTerminal {
+        guard let overlay = locals.first(where: { $0.id == selected })?.overlay, !overlay.state.hidden else { return selectedTerminal }
+        return overlay.terminal
+    }
 
     private func layout() {
         guard let window else { return }
@@ -828,6 +925,7 @@ final class NativeShell {
         for terminal in terminalsShown {
             terminal.move(x: width, y: top, width: max(client.right - width, 1), height: max(height - top, 1))
         }
+        placeOverlays()
         let findWidth = min(scaled(280), max(client.right - width - scaled(24), scaled(80)))
         MoveWindow(findBar, client.right - findWidth - scaled(16), top + scaled(8), findWidth, scaled(28), true)
         updateTips()
@@ -906,8 +1004,9 @@ final class NativeShell {
         if toastsReady { nt_toast_remove_group(Array(id.uuidString.utf16) + [0]) }
         if let tree, let item = items[id] { nt_tree_select(tree, item) }
         titleChanged()
-        let shown = visibleTerminal
+        let shown = selectedTerminal
         for terminal in terminalsShown { terminal.setVisible(terminal === shown) }
+        placeOverlays()
         let owner = locals.contains(where: { $0.id == id }) ? nil : server(of: id)
         for other in servers where other !== owner { other.remote.store.selectedSessionID = nil }
         guard let owner, let session = owner.remote.session(id) else { return }
@@ -934,7 +1033,7 @@ final class NativeShell {
         if let tree { nt_tree_set_dpi(tree, dpi) }
         if let findBar { nt_find_bar_set_dpi(UnsafeMutableRawPointer(findBar), dpi) }
         if let palette { nt_palette_set_dpi(palette, dpi) }
-        terminalsShown.forEach { $0.setDPI(dpi) }
+        allTerminals.forEach { $0.setDPI(dpi) }
         SetWindowPos(window, nil, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top,
                      UINT(SWP_NOZORDER | SWP_NOACTIVATE))
         layout()
@@ -1461,7 +1560,7 @@ extension NativeShell: NativeControlHost {
     var localSessions: [NativeControl.Local] {
         locals.map {
             NativeControl.Local(id: $0.id, name: $0.name, commandLine: $0.commandLine, exited: $0.exited, attention: $0.attention, unseen: $0.unseen,
-                                cwd: $0.directory ?? "", title: $0.programTitle)
+                                cwd: $0.directory ?? "", title: $0.programTitle, overlay: $0.overlay?.state, overlayExitCode: $0.overlayExitCode)
         }
     }
 
@@ -1491,8 +1590,12 @@ extension NativeShell: NativeControlHost {
     }
 
     func closeSession(_ id: Foundation.UUID) async -> ControlResponse {
-        if locals.contains(where: { $0.id == id }) {
-            closeLocal(id)
+        if let index = locals.firstIndex(where: { $0.id == id }) {
+            if let overlay = locals[index].overlay, !overlay.state.hidden {
+                removeOverlay(id, frame: overlay.frame)
+            } else {
+                closeLocal(id)
+            }
             return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
         }
         return await perform(.closeSession(id, undoable: true), on: id)
@@ -1572,6 +1675,63 @@ extension NativeShell: NativeControlHost {
     func setWSLLaunch(_ distribution: String, atLaunch: Bool) {
         settings.serverLaunch[distribution] = atLaunch ? .atLaunch : .manual
         saveSettings()
+    }
+
+    func openOverlay(_ id: Foundation.UUID, _ open: NativeOverlay.Open) {
+        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
+        if selected != id { select(id) }
+        let focused = hasFocus(id)
+        let frame = OverlayFrame(parent: window, points: settings.fontPoints, dpi: dpi)
+        let terminal = frame.terminal
+        terminal.onWindowCommand = { [unowned self] in windowCommand($0) }
+        terminal.onFontSize = { [unowned self] in setFontSize($0) }
+        // weak: the frame owns the terminal that holds these
+        terminal.onExit = { [unowned self, weak frame] code in
+            if let frame { overlayExited(id, frame: frame, code: code) }
+        }
+        if open.wait {
+            terminal.onCloseKey = { [unowned self, weak frame] in
+                if let frame { removeOverlay(id, frame: frame) }
+            }
+        }
+        terminal.background = open.background
+        locals[index].overlay = Overlay(state: NativeOverlay(sizePercent: open.sizePercent, wait: open.wait), frame: frame)
+        locals[index].overlayExitCode = nil
+        // placed first, so the program starts at the panel's grid
+        placeOverlays()
+        let session = locals[index]
+        let launch = NativeOverlay.launch(open.command, sessionCommandLine: session.commandLine, cwd: open.cwd, directory: session.directory)
+        log("native shell: overlay over \(session.name) [\(id)]: \(launch.commandLine)")
+        terminal.start(launch.commandLine, directory: launch.directory.flatMap { Self.isFolder($0) ? $0 : nil } ?? Self.home,
+                       environment: sessionEnvironment(id))
+        if focused { focus() }
+    }
+
+    func closeOverlay(_ id: Foundation.UUID) {
+        guard let frame = locals.first(where: { $0.id == id })?.overlay?.frame else { return }
+        removeOverlay(id, frame: frame)
+    }
+
+    func resizeOverlay(_ id: Foundation.UUID, sizePercent: Int?) {
+        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay != nil else { return }
+        locals[index].overlay?.state.sizePercent = sizePercent
+        placeOverlays()
+    }
+
+    func setOverlayHidden(_ id: Foundation.UUID, _ hidden: Bool) {
+        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay != nil else { return }
+        let focused = hasFocus(id)
+        locals[index].overlay?.state.hidden = hidden
+        placeOverlays()
+        if focused { focus() }
+    }
+
+    func overlayScreen(of id: Foundation.UUID) -> (lines: [String], rows: Int)? {
+        locals.first { $0.id == id }?.overlay?.terminal.screen
+    }
+
+    func overlaySelection(of id: Foundation.UUID) -> String? {
+        locals.first { $0.id == id }?.overlay?.terminal.selection
     }
 }
 

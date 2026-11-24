@@ -73,7 +73,100 @@ The native Windows server port waits until the client reaches parity with the WS
   pastes (off: Windows keeps its menu, Shift+right-click opens it when on), lines a wheel notch scrolls, and the WSL
   distribution agterm-server runs in (next start; `--wsl` wins). `session new --cwd` now starts there.
 - Not on General yet: restore mode (agterm-win restores fresh shells in their last folder; live would need a local
-  zmx per session, re-run a foreground-command reader) and opening links in an overlay (no overlays yet).
+  zmx per session, re-run a foreground-command reader) and opening links in an overlay (no page overlays yet).
+
+## Presentation and overlays — Mac parity for agents (2026-11-24)
+
+**Goal:** the same `agtermctl` session and overlay commands work for local sessions and agterm-server (WSL) sessions; agents
+must not special-case Windows. WSL stays transport to the server; the viewer must **present**, not only mirror.
+
+**Order (do not reorder): A → B → E → D.** Each stage is not done until its tests are in CI (or documented skip) and green
+on x64; the next stage does not start before that.
+
+| Stage | What | Primary tests |
+|-------|------|----------------|
+| **A** | Local program overlay | `AgtermWinKitTests`, integration `overlay` / `overlay-keys` |
+| **B** | Server program overlay | `agtermCore` presentation + integration `overlay-server-program` |
+| **E** | Ask, pick, HUD (`presents: true`) | `agtermCore` + integration per surface |
+| **D** | Page overlays (HTML/URL/…) | `agtermCore` + integration `overlay-html` (+ remote gate rows) |
+
+### Stage A — local program overlay (CI green on PR #26, 2026-11-24)
+
+- `session.overlay.open|close|resize|result|text|copy|hide|show|toggle` on a **local** session; `NativeControl+Overlay.swift`
+  owns refusals and read-back (`overlay`, `overlaySizePercent`, `hiddenOverlays`).
+- ConPTY in `OverlayFrame`; full area or floating `--size-percent`; session program keeps running.
+- Launch: `cmd.exe /d /s /c` on Windows profiles; `wsl.exe -d D --cd DIR --exec sh -c` when the **local** session is WSL.
+- Refused until later stages: pages, `--pane`, `--width`/`--height`, **agterm-server catalog sessions** (`serverRefusal`).
+- Not yet: translucent chrome (Mac parity).
+
+**Tests (gate A):**
+
+- **Unit** (`swift test` in `agterm-windows`): `NativeControlTests` overlay commands, refusals, tree projection;
+  `NativeOverlayTests` launch quoting, panel geometry, WSL command lines.
+- **Integration** (`tests/integration/run.ps1` on x64): case `overlay` (ctl open/hide/result/`--wait`); case
+  `overlay-keys` (Close Session dismisses overlay, key closes exited `--wait`).
+- **Integration (arm64):** same cases; `overlay-keys` may be **SKIP** on native ARM64 until focus/chord matches x64
+  (see `tests/integration/README.md` — Architecture skips).
+- **Manual before merge when touching keys/focus:** floating panel over a TUI; DPI with overlay open; Ctrl+Shift+W
+  then second chord closes session only.
+
+### Stage B — server program overlay (next after A merges)
+
+- `RemotePresentationClient.presents = true` for server sessions agterm-win shows; handle `overlayRequest`, run job in
+  the same `OverlayFrame` path as A; answer resize / close / closed on the presentation stream.
+- Remove `serverRefusal` for program overlay when the server is connected; `tree` reports `overlay` on server session nodes.
+- Still refuse asks, picks, HUD and pages until stage E / D.
+
+**Tests (gate B — add with the stage, all required on x64 CI):**
+
+- **Unit (`agtermCore`):** extend `RemotePresentationClientTests` for `presents: true` + `overlayRequest`: job start,
+  resize, explicit close, process exit → `closed` with exit code (reuse fixtures already used with `presents: false`).
+- **Unit (`AgtermWinKit`):** `NativeControlTests` opens overlay on a fake **server** session when host reports connected;
+  refusal when disconnected or unknown id unchanged.
+- **Integration:** new case `overlay-server-program` in `shell-cases.ps1` or `wsl-cases.ps1`: start or attach to an
+  agterm-server workspace session (same constraints as future WSL server CI — when only synthetic WSL is available, gate
+  on ctl + log: `presentation` mode `presenter`, `session.overlay.open` on server id succeeds, `overlay` in tree,
+  `session.overlay.text` reads program output, `session.overlay.close` clears tree; session row remains). Until a live
+  server runs on the runner, keep a **manual** row in `docs/remote-linux-gate.md` mirroring Mac gate overlay lines.
+- **Negative:** overlay on server session while catalog disconnected returns the same errors as Mac, not a hang.
+
+### Stage E — presentation UI: ask, pick, HUD (after B)
+
+Presentation stays on; add viewer surfaces in precedence order (match Mac `AppActions` / pick registry). Program overlay
+from B remains; no HTML yet.
+
+**Tests (gate E — one integration case per sub-milestone, x64 CI):**
+
+| Sub | Behavior | Tests |
+|-----|----------|--------|
+| **E1** | Ask modal; cancel/answer; presentation lost → ctl exit 2 | `agtermCore` ask dispatch; integration `presentation-ask` |
+| **E2** | Pick UI; choice reaches server | `SessionPickTests` patterns; integration `presentation-pick` |
+| **E3** | HUD overlay slot; dismiss does not close session | `agtermCore` HUD messages; integration `presentation-hud` |
+
+- **Tree:** `presentation.state` / mode reads `presenter` while any of the above is active (extend existing WSL/server
+  checks if present).
+- **Regression:** stage A/B integration cases still pass with `presents: true`.
+
+### Stage D — page overlays (after E)
+
+- Local and server sessions: `--html`, `--url`, `--image`, `--markdown-file`, `--text-file` (WebView2 on Windows, same
+  ctl surface as Mac WKWebView); navigation policy and refusals from `agtermCore` first, adapter second.
+- General «open link in overlay» can ship as **D0** (`--url` only) before full markdown/text/log pages.
+
+**Tests (gate D):**
+
+- **Unit (`agtermCore`):** dispatcher + projection for page overlay args (already on Mac); Windows refuses until adapter
+  exists — flip tests from refusal to success per feature.
+- **Integration (`overlay-html`):** local session, `--html` file on disk, visible text in snapshot, `overlay.close`,
+  Command-W / ctl parity smoke.
+- **Integration (`overlay-url`):** optional D0; external https or loopback per security policy (align
+  `docs/remote-linux-gate.md` loopback refusal on server host).
+- **Remote gate:** add rows equivalent to Mac overlay URL/HTML checks when server presentation is live.
+
+### Deferred (not A–D)
+
+- Split `--pane`, `--width`/`--height`, translucent overlay chrome.
+- Font ligatures (below).
 
 ## Later: font ligatures
 
