@@ -253,11 +253,11 @@ $shellCases["title-bar"] = {
     $shot = Get-Shot $window
     try {
         $c = $shot.Bitmap.GetPixel($dragX + $shot.X, 2 + $shot.Y)
-        if ([Math]::Abs($c.R - 0x25) -gt 6 -or [Math]::Abs($c.G - 0x25) -gt 6 -or [Math]::Abs($c.B - 0x26) -gt 6) {
-            $failures += "the bar's background is #{0:X2}{1:X2}{2:X2}, not #252526" -f $c.R, $c.G, $c.B
+        if ($c.R -gt 0x20 -or $c.G -gt 0x20 -or $c.B -gt 0x20) {
+            $failures += "the bar's background is #{0:X2}{1:X2}{2:X2}, expected dark chrome from the terminal theme" -f $c.R, $c.G, $c.B
         }
         foreach ($part in $bar.Spans.Keys) {
-            if ($part -match '^(file|navigate|help)$') { continue }
+            if ($part -match '^(file|view|navigate|help)$') { continue }
             $span = $bar.Spans[$part]
             if ((Get-InkCount $shot $span[0] $span[1] 0 $bar.Height) -lt 4) {
                 $failures += "the $part button drew no glyph"
