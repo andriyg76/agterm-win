@@ -4,8 +4,6 @@
 #include <windows.h>
 #include <commctrl.h>
 
-#include <string>
-
 namespace {
 
 using TaskDialogIndirectFn = HRESULT(WINAPI *)(const TASKDIALOGCONFIG *, int *, int *, BOOL *);
@@ -16,15 +14,23 @@ constexpr char commonControls6[] =
     "<assemblyIdentity type=\"win32\" name=\"Microsoft.Windows.Common-Controls\" version=\"6.0.0.0\" processorArchitecture=\"*\""
     " publicKeyToken=\"6595b64144ccf1df\" language=\"*\"/></dependentAssembly></dependency></assembly>";
 
+// append copies `text` onto the end of `buffer`, of `capacity` units, cutting it short rather than overflowing; no STL,
+// which windows-11-arm's Visual Studio refuses with this clang (windows.yml).
+void append(wchar_t *buffer, size_t capacity, const wchar_t *text) {
+    size_t length = lstrlenW(buffer);
+    while (*text && length + 1 < capacity) buffer[length++] = *text++;
+    buffer[length] = 0;
+}
+
 // TaskDialogIndirect is only in comctl32 6, which agterm-win's manifest-less executable never loads by default: an
 // activation context from a manifest naming it loads that version beside the default one, for the dialog only.
 HANDLE commonControlsContext() {
     static HANDLE context = [] {
-        wchar_t folder[MAX_PATH];
-        DWORD length = GetTempPathW(MAX_PATH, folder);
+        static wchar_t path[MAX_PATH];
+        DWORD length = GetTempPathW(MAX_PATH, path);
         if (length == 0 || length >= MAX_PATH - 32) return INVALID_HANDLE_VALUE;
-        std::wstring path = std::wstring(folder) + L"agterm-comctl6.manifest";
-        HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        append(path, MAX_PATH, L"agterm-comctl6.manifest");
+        HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE) return INVALID_HANDLE_VALUE;
         DWORD written = 0;
         BOOL wrote = WriteFile(file, commonControls6, sizeof(commonControls6) - 1, &written, nullptr);
@@ -32,7 +38,7 @@ HANDLE commonControlsContext() {
         if (!wrote) return INVALID_HANDLE_VALUE;
         ACTCTXW request{};
         request.cbSize = sizeof(request);
-        request.lpSource = path.c_str();
+        request.lpSource = path;
         return CreateActCtxW(&request);
     }();
     return context;
@@ -71,9 +77,11 @@ extern "C" int32_t nt_ask_choice(void *owner, const uint16_t *caption, const uin
     if (result >= 0) return result;
     // comctl32 5: Yes, No and Cancel stand for the first three buttons, named in the text
     if (count < 3) return 0;
-    std::wstring body = std::wstring(text(instruction)) + L"\n\n" + text(content) + L"\n\nYes: " + text(buttons[0]) + L"\nNo: " +
-                        text(buttons[1]) + L"\nCancel: " + text(buttons[2]);
-    switch (MessageBoxW(static_cast<HWND>(owner), body.c_str(), text(caption), MB_YESNOCANCEL | MB_ICONQUESTION)) {
+    wchar_t body[2048] = {};
+    const wchar_t *parts[] = {text(instruction), L"\n\n", text(content), L"\n\nYes: ", text(buttons[0]), L"\nNo: ", text(buttons[1]),
+                              L"\nCancel: ", text(buttons[2])};
+    for (const wchar_t *part : parts) append(body, sizeof(body) / sizeof(body[0]), part);
+    switch (MessageBoxW(static_cast<HWND>(owner), body, text(caption), MB_YESNOCANCEL | MB_ICONQUESTION)) {
     case IDYES: return 0;
     case IDNO: return 1;
     default: return 2;
