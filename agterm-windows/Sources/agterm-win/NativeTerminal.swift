@@ -56,6 +56,8 @@ final class NativeTerminal {
     var onWindowCommand: ((NativeMenu.Command) -> Void)?
     /// onFontSize takes a font command's new size, for a window that sizes all its terminals together.
     var onFontSize: ((Float) -> Void)?
+    /// onFocus runs when the terminal takes the keyboard, so a split session knows which pane has it.
+    var onFocus: (() -> Void)?
 
     /// open runs `commandLine` in a top-level terminal window.
     static func open(commandLine: String) {
@@ -244,6 +246,7 @@ final class NativeTerminal {
 
     fileprivate func focus(_ focused: Bool) {
         if let terminal { nt_set_focus(terminal, focused ? 1 : 0) }
+        if focused { onFocus?() }
     }
 
     private var modifiers: TerminalInput.Modifiers {
@@ -362,8 +365,7 @@ final class NativeTerminal {
         case .fontBigger, .fontSmaller, .fontReset:
             let next = NativeMenu.points(after: command, from: points)
             if let onFontSize { onFontSize(next) } else { setFontSize(next) }
-        case .newSession, .newServerSession, .renameSession, .restartSession, .closeSession, .nextSession, .previousSession, .find, .quit,
-             .editKeymap, .reloadKeymap, .settings, .sessionPalette, .commandPalette:
+        default:
             if let onWindowCommand { onWindowCommand(command) } else if command == .quit { DestroyWindow(window) }
         }
     }

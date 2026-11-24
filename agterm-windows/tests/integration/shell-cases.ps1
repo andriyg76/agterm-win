@@ -281,11 +281,11 @@ $shellCases = [ordered]@{
         $list = Invoke-Ctl $state @("keymap", "list")
         $chord = ($list.result.keymap.actions | ? { $_.action -eq "new_session" }).chord
         if ($chord -ne "ctrl+opt+t") { $failures += "new_session is '$chord', not ctrl+opt+t" }
-        Add-Content (Join-Path $state "config\keymap.conf") "map ctrl+alt+d toggle_split"
+        Add-Content (Join-Path $state "config\keymap.conf") "map ctrl+alt+d toggle_flag"
         $reload = Invoke-Ctl $state @("keymap", "reload")
         if (-not $reload.ok -or $reload.result.count -lt 1) { $failures += "keymap reload replied $($reload | ConvertTo-Json -Compress)" }
         $messages = (Invoke-Ctl $state @("keymap", "list")).result.keymap.diagnostics.message
-        if (-not ($messages -contains "'toggle_split' is not available on Windows")) { $failures += "diagnostics are $($messages -join ' | ')" }
+        if (-not ($messages -contains "'toggle_flag' is not available on Windows")) { $failures += "diagnostics are $($messages -join ' | ')" }
         $failures
     }
 }
@@ -293,6 +293,7 @@ $shellCases = [ordered]@{
 . (Join-Path $PSScriptRoot "title-bar-cases.ps1")
 . (Join-Path $PSScriptRoot "palette-cases.ps1")
 . (Join-Path $PSScriptRoot "settings-cases.ps1")
+. (Join-Path $PSScriptRoot "panes-cases.ps1")
 
 # seeds a case's state directory before its window starts; a keymap problem at launch would open a message box
 $shellPreparations = @{

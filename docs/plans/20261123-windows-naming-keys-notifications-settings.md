@@ -75,6 +75,28 @@ The native Windows server port waits until the client reaches parity with the WS
 - Not on General yet: restore mode (agterm-win restores fresh shells in their last folder; live would need a local
   zmx per session, re-run a foreground-command reader) and opening links in an overlay (no page overlays yet).
 
+## 5. Split panes, scratch, quick terminal, dashboard, title bar — local sessions, not yet verified on Windows
+
+- Split: a local session's second shell, side by side (Alt+Shift+=) or top and bottom (Alt+Shift+-), the same key on a
+  shown split hiding it; Alt+Left/Alt+Right focus a pane (on a hidden split they swap which one is shown); View ▸ Swap
+  Panes and Close Split; drag the divider, double-click it for an even split. A split pane's exit closes it; a primary
+  pane's exit promotes the split, as on a Mac. Splits are saved in `native.json` and start again in their folder.
+- Scratch (Ctrl+Shift+J): a third shell over the panes, kept while hidden; the split key over it hides it.
+- Quick terminal (Ctrl+`, the title bar, `global-hotkey` through RegisterHotKey): one shell for the app in a topmost
+  panel on the pointer's monitor, sized by agtermCore's `QuickTerminalMetrics`; clicking away hides a summoned panel,
+  `quick show` pins it.
+- Dashboard (Ctrl+Shift+G, the title bar): up to nine local panes, most recently used first, in a view-only grid sized
+  by `DashboardLayout`; arrows, Enter or a click jump into a pane, Esc closes, selecting a session leaves it.
+- Title bar: Quick Terminal, Split, Dashboard, Find and Settings beside the caption buttons; one that cannot act now
+  is drawn dimmed.
+- Control: `session.split|split.close|swap|focus|resize|scratch`, `session.type|text --pane left|right|scratch`,
+  `quick show|hide|toggle|type|text`, `dashboard`, read back as on a Mac (`split`, `hasSplit`, `splitAxis`, `splitRatio`,
+  `splitFocused`, `splitCwd`, `scratch`, `scratchCwd`, `quickVisible`, `dashboardMembers|Highlighted|FontSize|FontMode`).
+- Not yet: agterm-server sessions' split and scratch (refused by name: the shared server terminal shows one pane),
+  server sessions as dashboard cells, the quick terminal's size setting, and per-pane overlays (`--pane`).
+- Tests: `NativePanesTests`, `NativeControlTests`; integration `split`, `panes-ui`, `quick`, `dashboard` in
+  `tests/integration/panes-cases.ps1`.
+
 ## Presentation and overlays — Mac parity for agents (2026-11-24)
 
 **Goal:** the same `agtermctl` session and overlay commands work for local sessions and agterm-server (WSL) sessions; agents

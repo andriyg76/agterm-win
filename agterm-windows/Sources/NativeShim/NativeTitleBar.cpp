@@ -15,6 +15,7 @@ constexpr COLORREF closePressed = RGB(0x9F, 0x22, 0x16);
 constexpr COLORREF glyph = RGB(0xCC, 0xCC, 0xCC);
 constexpr COLORREF title = RGB(0xE0, 0xE0, 0xE0);
 constexpr COLORREF inactive = RGB(0x80, 0x80, 0x80);
+constexpr COLORREF disabled = RGB(0x6E, 0x6E, 0x6E);
 
 struct Fonts {
     uint32_t dpi = 0;
@@ -72,14 +73,14 @@ extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, c
         for (int32_t i = 0; i < count; ++i) {
             const nt_title_button &button = buttons[i];
             RECT rect{button.left, 0, button.right, height};
-            if (button.state != 0) {
+            if (button.state == 1 || button.state == 2) {
                 HBRUSH brush = CreateSolidBrush(fill(button));
                 FillRect(memory, &rect, brush);
                 DeleteObject(brush);
             }
             SelectObject(memory, button.kind == 0 ? fonts.icons : fonts.caption);
             bool lit = button.kind == 2 && button.state != 0;
-            SetTextColor(memory, lit ? RGB(0xFF, 0xFF, 0xFF) : active ? glyph : inactive);
+            SetTextColor(memory, lit ? RGB(0xFF, 0xFF, 0xFF) : button.state == 3 ? disabled : active ? glyph : inactive);
             wchar_t character = static_cast<wchar_t>(button.glyph);
             DrawTextW(memory, &character, 1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         }

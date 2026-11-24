@@ -59,6 +59,13 @@ public enum BuiltinAction: String, CaseIterable, Sendable {
         case .resetFontSize: Chord(mods: [.control], key: "0")
         case .sessionPalette: Chord(mods: [.control], key: "p")
         case .commandPalette: Chord(mods: [.control, .shift], key: "p")
+        case .toggleSplit: Chord(mods: [.option, .shift], key: "=")
+        case .toggleHorizontalSplit: Chord(mods: [.option, .shift], key: "-")
+        case .focusLeftPane: Chord(mods: [.option], key: "left")
+        case .focusRightPane: Chord(mods: [.option], key: "right")
+        case .toggleScratch: Chord(mods: [.control, .shift], key: "j")
+        case .quickTerminal: Chord(mods: [.control], key: "`")
+        case .dashboard: Chord(mods: [.control, .shift], key: "g")
         default: nil
         }
     }

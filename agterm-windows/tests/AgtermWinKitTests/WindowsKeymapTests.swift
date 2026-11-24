@@ -57,11 +57,18 @@ struct WindowsKeymapTests {
     }
 
     @Test func whatWindowsLacksIsReported() {
-        let keymap = WindowsKeymap(text: "map ctrl+alt+d toggle_split\ncommand \"git\" ctrl+alt+g lazygit")
+        let keymap = WindowsKeymap(text: "map ctrl+alt+d toggle_flag\ncommand \"git\" ctrl+alt+g lazygit")
         let messages = keymap.diagnostics.map(\.message)
-        #expect(messages.contains("'toggle_split' is not available on Windows"))
+        #expect(messages.contains("'toggle_flag' is not available on Windows"))
         #expect(messages.contains("custom commands are not supported on Windows yet; 1 skipped"))
-        #expect(keymap.control.actions.allSatisfy { $0.action != "toggle_split" } && keymap.control.commands.isEmpty)
+        #expect(keymap.control.actions.allSatisfy { $0.action != "toggle_flag" } && keymap.control.commands.isEmpty)
+    }
+
+    @Test func aGlobalHotkeyBecomesRegisterHotKeysChord() {
+        #expect(WindowsKeymap(text: "global-hotkey ctrl+alt+space").globalHotkey == .init(modifiers: 0x4003, key: 0x20))
+        #expect(WindowsKeymap(text: "global-hotkey ctrl+shift+`").globalHotkey == .init(modifiers: 0x4006, key: 0xC0))
+        #expect(WindowsKeymap(text: "").globalHotkey == nil)
+        #expect(WindowsKeymap.virtualKey("f5") == 0x74 && WindowsKeymap.virtualKey("=") == 0xBB && WindowsKeymap.virtualKey("nope") == nil)
     }
 
     #if os(Windows)
@@ -73,6 +80,13 @@ struct WindowsKeymapTests {
         #expect(press(&keymap, "p", control: true) == .command(.sessionPalette))
         #expect(press(&keymap, "p", control: true, shift: true) == .command(.commandPalette))
         #expect(keymap.shortcuts[.sessionPalette] == "Ctrl+P" && keymap.shortcuts[.commandPalette] == "Ctrl+Shift+P")
+        #expect(press(&keymap, "g", control: true, shift: true) == .command(.dashboard))
+        #expect(press(&keymap, "j", control: true, shift: true) == .command(.toggleScratch))
+        #expect(keymap.press(Chord(mods: [.option, .shift], key: "=")) == .command(.toggleSplit))
+        #expect(keymap.press(Chord(mods: [.option, .shift], key: "-")) == .command(.toggleHorizontalSplit))
+        #expect(keymap.press(Chord(mods: [.option], key: "left")) == .command(.focusLeftPane))
+        #expect(keymap.press(Chord(mods: [.control], key: "`")) == .command(.quickTerminal))
+        for (command, _) in WindowsKeymap.actions { #expect(keymap.shortcuts[command] == command.shortcut) }
     }
 
     @Test func movingAnActionFreesItsDefault() {

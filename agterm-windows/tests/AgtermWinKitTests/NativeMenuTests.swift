@@ -49,7 +49,20 @@ struct NativeMenuTests {
 
     @Test func everyCommandNamesItsShortcut() {
         #expect(NativeMenu.Command.allCases.allSatisfy { !$0.title.isEmpty })
-        #expect(NativeMenu.Command.allCases.filter { $0.shortcut.isEmpty } == [.editKeymap, .reloadKeymap])
+        #expect(NativeMenu.Command.allCases.filter { $0.shortcut.isEmpty } == [.editKeymap, .reloadKeymap, .closeSplit, .swapPanes])
+    }
+
+    @Test func viewHoldsThePanesScratchQuickTerminalAndDashboard() {
+        let window = NativeMenu.window(profiles: profiles, canCloseSession: true, sessionCount: 1, hasSelection: false, canPaste: false,
+                                       view: .init(canSplit: true, hasSplit: false, scratchShown: true, canDashboard: true))
+        let view = window.first { $0.title == "View" }?.children ?? []
+        #expect(view.first { $0.pick == .command(.toggleSplit) }?.enabled == true)
+        #expect(view.first { $0.pick == .command(.toggleSplit) }?.shortcut == "Alt+Shift+=")
+        #expect(view.first { $0.pick == .command(.swapPanes) }?.enabled == false)
+        #expect(view.first { $0.pick == .command(.toggleScratch) }?.checked == true)
+        #expect(view.first { $0.pick == .command(.dashboard) }?.enabled == true)
+        let none = NativeMenu.view(.init())
+        #expect(none.filter { $0.pick != nil && $0.pick != .command(.quickTerminal) }.allSatisfy { !$0.enabled })
     }
 
     @Test func fontStepsStayInRange() {

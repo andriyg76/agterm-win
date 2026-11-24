@@ -98,11 +98,15 @@ function Get-Bar([IntPtr]$Window) {
         Height = & $scaled 36; Width = $width; Action = $action; Caption = $caption; Middle = [int]((& $scaled 36) / 2)
         Spans = [ordered]@{
             menu = @(0, $action); "new session" = @($action, (2 * $action))
-            find = @(($width - 3 * $caption - $action), ($width - 3 * $caption))
+            quick = @(($width - 3 * $caption - 5 * $action), ($width - 3 * $caption - 4 * $action))
+            split = @(($width - 3 * $caption - 4 * $action), ($width - 3 * $caption - 3 * $action))
+            dashboard = @(($width - 3 * $caption - 3 * $action), ($width - 3 * $caption - 2 * $action))
+            find = @(($width - 3 * $caption - 2 * $action), ($width - 3 * $caption - $action))
+            settings = @(($width - 3 * $caption - $action), ($width - 3 * $caption))
             minimize = @(($width - 3 * $caption), ($width - 2 * $caption)); maximize = @(($width - 2 * $caption), ($width - $caption))
             close = @(($width - $caption), $width)
         }
-        Title = @(([Math]::Max(2 * $action, $sidebar) + [Math]::Floor($action / 4)), ($width - 3 * $caption - $action - [Math]::Floor($action / 4)))
+        Title = @(([Math]::Max(2 * $action, $sidebar) + [Math]::Floor($action / 4)), ($width - 3 * $caption - 5 * $action - [Math]::Floor($action / 4)))
     }
 }
 
@@ -203,7 +207,8 @@ $shellCases["title-bar"] = {
     $origin = Get-ScreenPoint $window 0 0
     if ($origin.Y -ne $rect.Top) { $failures += "the client starts $($origin.Y - $rect.Top) px below the window's top: Windows' caption is still there" }
 
-    $expected = [ordered]@{ menu = $hitClient; "new session" = $hitClient; find = $hitClient
+    $expected = [ordered]@{ menu = $hitClient; "new session" = $hitClient; quick = $hitClient; split = $hitClient; dashboard = $hitClient
+                            find = $hitClient; settings = $hitClient
                             minimize = $hitMinimize; maximize = $hitMaximize; close = $hitClose }
     foreach ($part in $expected.Keys) {
         $hit = Get-Hit $window (Get-Centre $bar $part) $bar.Middle
