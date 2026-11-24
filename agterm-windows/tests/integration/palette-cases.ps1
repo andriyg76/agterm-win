@@ -165,15 +165,15 @@ $shellCases["palettes"] = {
 
     # no session has exited, so Restart Session is listed but does nothing
     [AgtermInput]::SetText($palette.Edit, "restart session")
-    if (-not (Wait-Until { (Get-Rows $palette)[0] -eq "Restart Session" } 5)) { $failures += "'restart session' leads with '$((Get-Rows $palette)[0])'" }
+    if (-not (Wait-Until { @(Get-Rows $palette)[0] -eq "Restart Session" } 5)) { $failures += "'restart session' leads with '$(@(Get-Rows $palette)[0])'" }
     Send-Key $palette.Edit 0x0D
     Start-Sleep -Milliseconds 800
     if (-not (Get-Palette $window)) { $failures += "Enter on the disabled Restart Session closed the palette" }
 
     $before = (Get-SessionNodes $state).Count
     [AgtermInput]::SetText($palette.Edit, "new session windows")
-    if (-not (Wait-Until { (Get-Rows $palette)[0] -eq "New Session › Windows PowerShell" } 5)) {
-        $failures += "'new session windows' leads with '$((Get-Rows $palette)[0])'"
+    if (-not (Wait-Until { @(Get-Rows $palette)[0] -eq "New Session › Windows PowerShell" } 5)) {
+        $failures += "'new session windows' leads with '$(@(Get-Rows $palette)[0])'"
     }
     Send-Key $palette.Edit 0x0D
     if (-not (Wait-Until { (Get-SessionNodes $state).Count -eq $before + 1 } 10)) { $failures += "New Session from the palette left $((Get-SessionNodes $state).Count) session(s)" }
@@ -182,7 +182,7 @@ $shellCases["palettes"] = {
     $palette = Open-Palette $window $true
     if ($palette) {
         [AgtermInput]::SetText($palette.Edit, "go to session")
-        Wait-Until { (Get-Rows $palette)[0] -eq "Go to Session…" } 5 | Out-Null
+        Wait-Until { @(Get-Rows $palette)[0] -eq "Go to Session…" } 5 | Out-Null
         Send-Key $palette.Edit 0x0D
         $sessions = Wait-Until { $p = Get-Palette $window; if ($p -and (Get-Rows $p) -contains "alpha-api") { $p } } 5
         Start-Sleep -Milliseconds 800
