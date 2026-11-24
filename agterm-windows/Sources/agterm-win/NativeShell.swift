@@ -46,6 +46,8 @@ final class NativeShell {
     private final class Server {
         let remote: RemoteWindow
         let group = Foundation.UUID()
+        /// bootstrapNotice is shown in the title-bar strip until the catalog connects or install refuses.
+        var bootstrapNotice: String?
 
         init(_ remote: RemoteWindow) { self.remote = remote }
 
@@ -226,12 +228,8 @@ final class NativeShell {
         servers.append(started)
         log("native shell: starting agterm-server in \(started.label)")
         if running == nil { remoteTerminal.show(notice: "") }
-        if installing {
-            installRemoteServer(started)
-        } else {
-            catalogChanged()
-            started.remote.start()
-        }
+        catalogChanged()
+        prepareAndConnect(started, forceInstall: installing)
     }
 
     private func askServerLaunch(_ distribution: String) {
@@ -248,25 +246,93 @@ final class NativeShell {
         log("native shell: agterm-server in \(Self.label(of: distribution)) at launch: \(answer)")
     }
 
-    /// Installs or upgrades `server` off the UI thread, then connects whether installation succeeded or not.
-    private func installRemoteServer(_ server: Server) {
-        if running == nil { remoteTerminal.show(notice: "Installing agterm-server in \(server.label)…") }
+    /// prepareAndConnect probes agterm-server in WSL, installs or starts it when needed, then opens the catalog stream.
+    private func prepareAndConnect(_ server: Server, forceInstall: Bool) {
+        server.bootstrapNotice = "Checking \(server.label)…"
+        layout()
         let host = server.remote.host
+        let label = server.label
         DispatchQueue.global().async {
-            do {
-                let release = try serverRelease()
-                let code = try host.installServer(version: release.version, checksums: release.checksums) {
-                    log("server install: \($0)")
+            let finish: (String?) -> Void = { notice in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        server.bootstrapNotice = notice
+                        shell.layout()
+                        shell.catalogChanged()
+                        server.remote.start()
+                    }
                 }
-                log("server install exited \(code)")
-            } catch {
-                log("server install failed: \(error)")
             }
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    shell.catalogChanged()
-                    server.remote.start()
+            let release: (version: String, checksums: String)
+            do {
+                release = try serverRelease()
+            } catch {
+                log("server release info unavailable: \(error)")
+                let notice = "\(label): this build cannot download agterm-server (\(error)). Install from a release build or run install.sh in WSL."
+                finish(notice)
+                return
+            }
+            if forceInstall {
+                finish(shell.runServerInstall(host: host, label: label, release: release))
+                return
+            }
+            let inspection = host.inspect()
+            log("wsl inspect \(host.distribution): \(inspection.health) — \(inspection.detail)")
+            let action = WSLServerEnsure.plan(health: inspection.health, expectedVersion: release.version)
+            log("wsl ensure \(host.distribution): \(action)")
+            switch action {
+            case .connect:
+                finish(nil)
+            case .startServiceThenConnect:
+                serverDispatchNotice(server, "\(label): starting agterm-server…")
+                let start = host.startService()
+                if start.ok {
+                    finish(nil)
+                } else {
+                    log("wsl start service failed: \(start.message)")
+                    finish(shell.runServerInstall(host: host, label: label, release: release,
+                                                  preamble: "Service did not start (\(start.message)). Installing…"))
                 }
+            case .install(let reason):
+                finish(shell.runServerInstall(host: host, label: label, release: release, preamble: reason))
+            case .refuse(let reason):
+                finish("\(label): \(reason)")
+            }
+        }
+    }
+
+    private func serverDispatchNotice(_ server: Server, _ text: String) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                server.bootstrapNotice = text
+                shell.layout()
+            }
+        }
+    }
+
+    /// runServerInstall performs download, unpack and install.sh, reporting progress in the notice strip.
+    private func runServerInstall(host: WSLHost, label: String, release: (version: String, checksums: String),
+                                  preamble: String? = nil) -> String? {
+        if let preamble { serverDispatchNoticeForDistribution(host.distribution, "\(label): \(preamble)") }
+        do {
+            let code = try host.installServer(version: release.version, checksums: release.checksums) { line in
+                log("server install: \(line)")
+                serverDispatchNoticeForDistribution(host.distribution, "\(label): \(line)")
+            }
+            log("server install exited \(code)")
+            return WSLServerEnsure.installOutcome(exitCode: code, error: nil, label: label)
+        } catch {
+            log("server install failed: \(error)")
+            return WSLServerEnsure.installOutcome(exitCode: 1, error: String(describing: error), label: label)
+        }
+    }
+
+    private func serverDispatchNoticeForDistribution(_ distribution: String, _ text: String) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                guard let server = shell.server(distribution) else { return }
+                server.bootstrapNotice = text
+                shell.layout()
             }
         }
     }
@@ -913,7 +979,10 @@ final class NativeShell {
         var client = RECT()
         GetClientRect(window, &client)
         let width = sidebarWidth, height = client.bottom
-        let notices = servers.compactMap { $0.remote.mirror.state.windowNotice(host: $0.label) }
+        let notices = servers.compactMap { server -> String? in
+            if let bootstrap = server.bootstrapNotice, !bootstrap.isEmpty { return bootstrap }
+            return server.remote.mirror.state.windowNotice(host: server.label)
+        }
         let noticeText = notices.isEmpty ? nil : notices.joined(separator: "\n")
         let top = titleBar.height
         let noticeHeight = scaled(56) * Int32(notices.count)
@@ -934,6 +1003,9 @@ final class NativeShell {
     }
 
     private func catalogChanged() {
+        for server in servers where server.remote.connected {
+            server.bootstrapNotice = nil
+        }
         rebuild()
         layout()
         let workspaces = servers.flatMap { $0.remote.store.workspaces }
@@ -1668,6 +1740,10 @@ extension NativeShell: NativeControlHost {
 
     func startWSLServer(_ distribution: String) -> String? {
         guard !asking.contains(distribution) else { return "agterm-server in \(Self.label(of: distribution)) is asking whether it starts at launch" }
+        if let existing = server(distribution) {
+            if !existing.remote.connected { prepareAndConnect(existing, forceInstall: false) }
+            return nil
+        }
         startServer(distribution, asking: false)
         return nil
     }
