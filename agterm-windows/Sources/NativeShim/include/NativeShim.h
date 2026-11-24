@@ -150,6 +150,18 @@ int32_t nt_palette_query(void *palette, uint16_t *out, int32_t capacity);
 void nt_palette_close(void *palette);
 int32_t nt_palette_visible(void *palette);
 
+typedef struct {
+    uint32_t chrome_bg, chrome_text, chrome_dim, chrome_accent, chrome_border;
+    uint32_t sb_bg, sb_active_text, sb_header_text, sb_dim, sb_highlight;
+    uint32_t pal_bg, pal_border, pal_sel;
+    uint32_t title_hover, title_pressed, close_hover, close_pressed;
+    uint32_t title_inactive, title_disabled, client_bg;
+    int32_t is_dark;
+} nt_chrome_palette;
+void nt_set_chrome_colors(const nt_chrome_palette *palette);
+void nt_tree_apply_colors(void *tree);
+void nt_palette_apply_chrome(void *palette);
+
 // The window's own title bar. A button's `kind` is 0 an action icon, 1 a caption button, 2 close; `state` is 0 at
 // rest, 1 hovered, 2 pressed, 3 disabled; `glyph` is a Segoe MDL2 Assets code point.
 typedef struct {
@@ -158,12 +170,30 @@ typedef struct {
     int32_t kind, state;
 } nt_title_button;
 // nt_title_bar_paint answers the window's WM_PAINT: the bar across the top `height` pixels, the background below it.
+typedef struct {
+    int32_t left, right;
+    const uint16_t *label;
+    int32_t lit;
+} nt_menu_tab;
 void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, const uint16_t *title, int32_t title_left,
-                        int32_t title_right, const nt_title_button *buttons, int32_t count, int32_t active);
+                        int32_t title_right, const nt_title_button *buttons, int32_t count, int32_t active,
+                        const nt_menu_tab *tabs, int32_t tab_count);
 // A tooltip over rectangles of `parent`'s client; nt_tooltip_set with an empty text removes the tool `id`.
 void *nt_tooltip_create(void *parent);
 void nt_tooltip_set(void *tip, void *parent, uintptr_t id, int32_t left, int32_t top, int32_t right, int32_t bottom,
                     const uint16_t *text);
+
+// Page overlays (WebView2) in a child HWND. `state` is 0 loading, 1 loaded, 2 failed.
+void *nt_page_create(void *parent);
+void nt_page_destroy(void *page);
+void nt_page_move(void *page, int32_t x, int32_t y, int32_t width, int32_t height);
+void nt_page_navigate_file(void *page, const uint16_t *path);
+void nt_page_navigate_url(void *page, const uint16_t *url);
+/// nt_page_navigate_html loads UTF-16 document HTML in place (NavigateToString).
+void nt_page_navigate_html(void *page, const uint16_t *html);
+int32_t nt_page_state(void *page);
+/// nt_page_title returns the UTF-16 length of the document title; writes it when `capacity` holds it all.
+int32_t nt_page_title(void *page, uint16_t *out, int32_t capacity);
 
 #ifdef __cplusplus
 }

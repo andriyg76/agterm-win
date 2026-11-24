@@ -73,6 +73,9 @@ public struct NativeSettings: Codable, Equatable, Sendable {
     public var selectedLocal: Int?
     /// serverLaunch is the choice made for each WSL distribution's agterm-server, by distribution name.
     public var serverLaunch: [String: ServerLaunch] = [:]
+    /// sidebarWidthPoints is the stored divider position, the read side of `sidebar.width`.
+    public var sidebarWidthPoints: Double = SidebarWidthLimits.defaultPoints
+    public var sidebarTint: Int = 0
 
     public init() {}
 
@@ -85,6 +88,7 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         if let frame = settings.frame, frame.right <= frame.left || frame.bottom <= frame.top { settings.frame = nil }
         settings.localSessions.removeAll { $0.commandLine.isEmpty }
         if let index = settings.selectedLocal, !settings.localSessions.indices.contains(index) { settings.selectedLocal = nil }
+        settings.sidebarWidthPoints = SidebarWidthLimits.clamp(settings.sidebarWidthPoints)
         return settings
     }
 
@@ -107,5 +111,29 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         selectedLocal = try container.decodeIfPresent(Int.self, forKey: .selectedLocal)
         defaultProfile = try container.decodeIfPresent(String.self, forKey: .defaultProfile)
         serverLaunch = try container.decodeIfPresent([String: ServerLaunch].self, forKey: .serverLaunch) ?? [:]
+        sidebarWidthPoints = try container.decodeIfPresent(Double.self, forKey: .sidebarWidthPoints) ?? SidebarWidthLimits.defaultPoints
+        sidebarTint = try container.decodeIfPresent(Int.self, forKey: .sidebarTint) ?? 0
+        sidebarWidthPoints = SidebarWidthLimits.clamp(sidebarWidthPoints)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fontPoints, forKey: .fontPoints)
+        try container.encode(appearance, forKey: .appearance)
+        try container.encode(notifications, forKey: .notifications)
+        try container.encode(general, forKey: .general)
+        try container.encodeIfPresent(frame, forKey: .frame)
+        try container.encode(maximized, forKey: .maximized)
+        try container.encode(localSessions, forKey: .localSessions)
+        try container.encodeIfPresent(selectedLocal, forKey: .selectedLocal)
+        try container.encodeIfPresent(defaultProfile, forKey: .defaultProfile)
+        try container.encode(serverLaunch, forKey: .serverLaunch)
+        try container.encode(sidebarWidthPoints, forKey: .sidebarWidthPoints)
+        try container.encode(sidebarTint, forKey: .sidebarTint)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fontPoints, appearance, notifications, general, frame, maximized, localSessions, selectedLocal, defaultProfile,
+             serverLaunch, sidebarWidthPoints, sidebarTint
     }
 }
