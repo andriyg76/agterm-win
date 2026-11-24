@@ -17,12 +17,12 @@ let package = Package(
         .target(
             name: "NativeShim",
             dependencies: ["GhosttyVT"],
-            cxxSettings: [.define("GHOSTTY_STATIC"), .headerSearchPath("\(webviewRoot)/include")],
+            cxxSettings: [.define("GHOSTTY_STATIC"), .headerSearchPath("vendor/webview2/include")],
             linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("dwmapi"), .linkedLibrary("user32"),
                              .linkedLibrary("comctl32"), .linkedLibrary("uxtheme"), .linkedLibrary("gdi32"), .linkedLibrary("bcrypt"),
                              .linkedLibrary("ntdll"), .linkedLibrary("runtimeobject"), .linkedLibrary("advapi32"), .linkedLibrary("shell32"),
                              .linkedLibrary("ole32"), .linkedLibrary("oleaut32"), .linkedLibrary("shlwapi"), .linkedLibrary("version"),
-                             .unsafeFlags(["-L", "\(webviewRoot)/lib/\(webviewArch)", "-l", "WebView2LoaderStatic"])]
+                             .unsafeFlags(["-L", "vendor/webview2/lib/\(webviewArch)", "-l", "WebView2LoaderStatic"])]
         ),
         // the Win32-free logic the native window runs, so `swift test` covers it on any host
         .target(name: "AgtermWinKit", dependencies: [.product(name: "agtermCore", package: "agtermCore")]),
