@@ -90,8 +90,9 @@ struct WSLHost {
         commandLine(try RemoteSession.attachCommand(host: Self.placeholderHost, endpoint: endpoint, daemon: daemon).last!)
     }
 
-    private func commandLine(_ line: String) -> String {
-        [Self.wsl, "-d", distribution, "-e", "/bin/sh", "-c", line].map(Self.windowsQuoted).joined(separator: " ")
+    /// commandLine is the Windows command line that runs `remoteShellLine` under `/bin/sh -c` in the distribution.
+    func commandLine(_ remoteShellLine: String) -> String {
+        [Self.wsl, "-d", distribution, "-e", "/bin/sh", "-c", remoteShellLine].map(Self.windowsQuoted).joined(separator: " ")
     }
 
     /// start runs `line` under `/bin/sh -c` in the distribution, with `input` on its stdin when given.

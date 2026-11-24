@@ -41,6 +41,14 @@ final class NativeShell {
         var terminal: NativeTerminal { frame.terminal }
     }
 
+    /// ServerOverlay is a catalog session's program overlay, run in WSL through the job helper the origin handed over.
+    private struct ServerOverlay {
+        var state: NativeOverlay
+        let frame: OverlayFrame
+        let job: String
+        var terminal: NativeTerminal { frame.terminal }
+    }
+
     /// Server is an agterm-server started this launch, under its sidebar group.
     @MainActor
     private final class Server {
@@ -80,6 +88,8 @@ final class NativeShell {
     private var shownTitle = "agterm"
     private var remoteTerminal: NativeTerminal!
     private var locals: [LocalSession] = []
+    /// serverOverlays holds a program overlay per catalog session the presentation stream opened.
+    private var serverOverlays: [Foundation.UUID: ServerOverlay] = [:]
     private var profiles = LaunchProfiles.available(wslDistributions: [], powerShell7: NativeShell.powerShell7())
     private var selected: Foundation.UUID?
     // the server's sessions before New Session on Server, so the one it adds is selected when the catalog shows it
@@ -222,6 +232,19 @@ final class NativeShell {
         started.remote.changed = { [weak self] in self?.catalogChanged() }
         started.remote.onNotification = { [weak self] id, notification in
             self?.deliver(id, title: notification.title, body: notification.body, source: notification.source == "control" ? .control : .terminal)
+        }
+        started.remote.onReplicaOverlay = { [weak self, weak started] id, overlay in
+            guard let self, let started else { return false }
+            return self.showReplicaOverlay(on: started, sessionID: id, overlay: overlay)
+        }
+        started.remote.onReplicaOverlayClose = { [weak self] id, change in
+            self?.closeServerReplicaOverlay(id, change: change)
+        }
+        started.remote.onReplicaOverlayResize = { [weak self] id, change in
+            self?.resizeServerReplicaOverlay(id, change: change)
+        }
+        started.remote.onPresentationStopped = { [weak self] id in
+            self?.clearServerReplicaOverlay(id, notifyOrigin: false)
         }
         servers.append(started)
         log("native shell: starting agterm-server in \(started.label)")
@@ -839,6 +862,14 @@ final class NativeShell {
             overlay.frame.place(NativeOverlay.panel(in: area, sizePercent: overlay.state.sizePercent), border: floating ? scaled(1) : 0, shown: shown)
             EnableWindow(session.terminal.window, !shown)
         }
+        for (sessionID, overlay) in serverOverlays {
+            let shown = sessionID == selected && running == sessionID && !overlay.state.hidden
+            let floating = (overlay.state.sizePercent ?? 100) < 100
+            overlay.frame.place(NativeOverlay.panel(in: area, sizePercent: overlay.state.sizePercent), border: floating ? scaled(1) : 0, shown: shown)
+        }
+        var remoteEnabled = true
+        if let running, let overlay = serverOverlays[running], selected == running, !overlay.state.hidden { remoteEnabled = false }
+        EnableWindow(remoteTerminal.window, remoteEnabled)
         // the find bar and the palette stay above an overlay placed after them
         for panel in [findBar, palette?.assumingMemoryBound(to: HWND__.self)] where panel.map({ IsWindowVisible($0) }) == true {
             SetWindowPos(panel, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
@@ -848,7 +879,11 @@ final class NativeShell {
     /// hasFocus is whether the keyboard is in session `id`'s terminal or its overlay, which a change to the overlay
     /// then hands to whichever of them is in view.
     private func hasFocus(_ id: Foundation.UUID) -> Bool {
-        guard let session = locals.first(where: { $0.id == id }), let focused = GetFocus() else { return false }
+        guard let focused = GetFocus() else { return false }
+        if let overlay = serverOverlays[id] {
+            if [overlay.terminal.window, overlay.frame.window].contains(focused) { return true }
+        }
+        guard let session = locals.first(where: { $0.id == id }) else { return false }
         return [session.terminal.window, session.overlay?.terminal.window, session.overlay?.frame.window].contains(focused)
     }
 
@@ -856,6 +891,12 @@ final class NativeShell {
     @discardableResult
     private func dismissOverlayForCloseSession() -> Bool {
         if let focused = GetFocus() {
+            for (sessionID, overlay) in serverOverlays where !overlay.state.hidden {
+                if focused == overlay.terminal.window || focused == overlay.frame.window {
+                    removeServerOverlay(sessionID, frame: overlay.frame, notifyOrigin: true)
+                    return true
+                }
+            }
             for session in locals {
                 guard let overlay = session.overlay, !overlay.state.hidden else { continue }
                 if focused == overlay.terminal.window || focused == overlay.frame.window {
@@ -863,6 +904,10 @@ final class NativeShell {
                     return true
                 }
             }
+        }
+        if let selected, let overlay = serverOverlays[selected], !overlay.state.hidden {
+            removeServerOverlay(selected, frame: overlay.frame, notifyOrigin: true)
+            return true
         }
         guard let selected,
               let overlay = locals.first(where: { $0.id == selected })?.overlay,
@@ -877,6 +922,89 @@ final class NativeShell {
         locals[index].overlayExitCode = code
         log("native shell: overlay of [\(id)] exited \(code)")
         if !overlay.state.wait { removeOverlay(id, frame: frame) }
+    }
+
+    // MARK: replica overlays (catalog sessions)
+
+    private func showReplicaOverlay(on server: Server, sessionID: Foundation.UUID, overlay: PresentationOverlay) -> Bool {
+        guard overlay.pane == nil, overlay.width == nil, overlay.height == nil else { return false }
+        guard serverOverlays[sessionID] == nil else { return false }
+        let remoteLine: String
+        do {
+            guard let line = try RemoteSession.runJobCommand(host: "wsl", job: overlay.job, token: overlay.token).last else { return false }
+            remoteLine = line
+        } catch {
+            log("native shell: replica overlay for [\(sessionID)]: \(error)")
+            return false
+        }
+        let command = server.remote.host.commandLine(remoteLine)
+        let job = overlay.job
+        guard server.remote.store.prepareReplicaOverlay(overlay, forSession: sessionID, closed: { [weak server] closedJob in
+            server?.remote.answerPresentation(sessionID, .overlayClosed(PresentationOverlayChange(job: closedJob)))
+        }) else { return false }
+        openServerReplicaOverlay(sessionID, job: job, command: command, wait: overlay.wait, sizePercent: overlay.sizePercent,
+                                 background: NativeOverlay.background(overlay.backgroundColor))
+        if overlay.follow { select(sessionID) }
+        rebuild()
+        log("native shell: replica overlay over server session [\(sessionID)]: \(job)")
+        return true
+    }
+
+    private func openServerReplicaOverlay(_ id: Foundation.UUID, job: String, command: String, wait: Bool, sizePercent: Int?, background: UInt32?) {
+        if selected != id { select(id) }
+        let focused = hasFocus(id)
+        let frame = OverlayFrame(parent: window, points: settings.fontPoints, dpi: dpi)
+        let terminal = frame.terminal
+        terminal.onWindowCommand = { [unowned self] in windowCommand($0) }
+        terminal.onFontSize = { [unowned self] in setFontSize($0) }
+        terminal.onExit = { [unowned self, weak frame] code in
+            if let frame { serverOverlayExited(id, frame: frame, code: code) }
+        }
+        if wait {
+            terminal.onCloseKey = { [unowned self, weak frame] in
+                if let frame { removeServerOverlay(id, frame: frame, notifyOrigin: true) }
+            }
+        }
+        terminal.background = background
+        serverOverlays[id] = ServerOverlay(state: NativeOverlay(sizePercent: sizePercent, wait: wait), frame: frame, job: job)
+        placeOverlays()
+        terminal.start(command)
+        if focused { focus() }
+    }
+
+    private func serverOverlayExited(_ id: Foundation.UUID, frame: OverlayFrame, code: Int) {
+        guard let slot = serverOverlays[id], slot.frame === frame else { return }
+        log("native shell: replica overlay of [\(id)] exited \(code)")
+        if !slot.state.wait { removeServerOverlay(id, frame: frame, notifyOrigin: true) }
+    }
+
+    private func closeServerReplicaOverlay(_ id: Foundation.UUID, change: PresentationOverlayChange) {
+        guard let slot = serverOverlays[id], slot.job == change.job else { return }
+        removeServerOverlay(id, frame: slot.frame, notifyOrigin: false)
+        rebuild()
+    }
+
+    private func resizeServerReplicaOverlay(_ id: Foundation.UUID, change: PresentationOverlayChange) {
+        guard var slot = serverOverlays[id], slot.job == change.job else { return }
+        slot.state.sizePercent = change.sizePercent
+        serverOverlays[id] = slot
+        placeOverlays()
+    }
+
+    private func clearServerReplicaOverlay(_ id: Foundation.UUID, notifyOrigin: Bool) {
+        guard let slot = serverOverlays[id] else { return }
+        removeServerOverlay(id, frame: slot.frame, notifyOrigin: notifyOrigin)
+        rebuild()
+    }
+
+    private func removeServerOverlay(_ id: Foundation.UUID, frame: OverlayFrame, notifyOrigin: Bool) {
+        guard let slot = serverOverlays[id], slot.frame === frame else { return }
+        let focused = hasFocus(id)
+        serverOverlays.removeValue(forKey: id)
+        server(of: id)?.remote.store.clearReplicaOverlay(forSession: id, notifyClosed: notifyOrigin)
+        frame.destroy()
+        placeOverlays()
+        if focused { focus() }
     }
 
     /// removeOverlay ends the overlay `frame` holds, if it is still the session's.
@@ -897,13 +1025,16 @@ final class NativeShell {
     private var terminalsShown: [NativeTerminal] { [remoteTerminal] + locals.map(\.terminal) }
 
     /// allTerminals adds the overlays' terminals, which draw and size as the sessions' do.
-    private var allTerminals: [NativeTerminal] { terminalsShown + locals.compactMap { $0.overlay?.terminal } }
+    private var allTerminals: [NativeTerminal] {
+        terminalsShown + locals.compactMap { $0.overlay?.terminal } + serverOverlays.values.map(\.terminal)
+    }
 
     /// selectedTerminal is the selected session's own terminal, under any overlay.
     private var selectedTerminal: NativeTerminal { locals.first { $0.id == selected }?.terminal ?? remoteTerminal }
 
     /// visibleTerminal is what the keyboard and the terminal commands reach: a shown overlay, else the session.
     private var visibleTerminal: NativeTerminal {
+        if let selected, let overlay = serverOverlays[selected], running == selected, !overlay.state.hidden { return overlay.terminal }
         guard let overlay = locals.first(where: { $0.id == selected })?.overlay, !overlay.state.hidden else { return selectedTerminal }
         return overlay.terminal
     }
