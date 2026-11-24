@@ -116,7 +116,7 @@ jobs:
           if-no-files-found: error
 
   chocolatey:
-    needs: [version, build]
+    needs: [version, publish]
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -163,6 +163,15 @@ jobs:
           }
           choco pack "$out/agterm-win.nuspec" --out "agterm-windows/build/package-managers/$env:VERSION"
           if ($LASTEXITCODE) { throw 'choco pack failed' }
+      - name: Attach nupkg to GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release upload "v$env:VERSION" "agterm-windows/build/package-managers/$env:VERSION/agterm-win.$env:VERSION.nupkg" --clobber
+          if ($LASTEXITCODE) { throw 'attaching the nupkg to the release failed' }
       - name: Push Chocolatey package
         shell: pwsh
         env:
@@ -173,30 +182,8 @@ jobs:
           choco push "agterm-windows/build/package-managers/$env:VERSION/agterm-win.$env:VERSION.nupkg" `
             --source https://push.chocolatey.org/ --api-key $env:CHOCOLATEY_API_KEY
           if ($LASTEXITCODE) { throw 'Chocolatey Community Repository upload failed' }
-      - name: Attach nupkg to GitHub release
-        if: steps.pack.outcome == 'success'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $nupkg = "agterm-windows/build/package-managers/$env:VERSION/agterm-win.$env:VERSION.nupkg"
-          if (-not (Test-Path $nupkg)) { exit 0 }
-          $tag = "v$env:VERSION"
-          $deadline = [DateTimeOffset]::UtcNow.AddMinutes(12)
-          while ([DateTimeOffset]::UtcNow -lt $deadline) {
-            gh release view $tag *> $null
-            if ($LASTEXITCODE -eq 0) {
-              gh release upload $tag $nupkg --clobber
-              exit 0
-            }
-            Start-Sleep -Seconds 15
-          }
-          throw "timed out waiting for $tag to attach Chocolatey package"
-        continue-on-error: true
       - uses: actions/upload-artifact@v7
-        if: steps.pack.outcome == 'success'
+        if: always() && steps.pack.outcome == 'success'
         with:
           name: chocolatey-package
           path: agterm-windows/build/package-managers/${{ needs.version.outputs.version }}/agterm-win.${{ needs.version.outputs.version }}.nupkg
@@ -232,25 +219,10 @@ jobs:
           gh release create "v$env:VERSION" --target $env:GITHUB_SHA @assets --title "agterm-win $env:VERSION" --notes $notes
 
   winget:
-    needs: [version, build]
-    runs-on: ubuntu-24.04
+    needs: [version, publish]
+    runs-on: windows-2022
     timeout-minutes: 15
     steps:
-      - name: Wait for GitHub release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $tag = "v$env:VERSION"
-          $deadline = [DateTimeOffset]::UtcNow.AddMinutes(12)
-          while ([DateTimeOffset]::UtcNow -lt $deadline) {
-            gh release view $tag *> $null
-            if ($LASTEXITCODE -eq 0) { "release $tag is live"; exit 0 }
-            Start-Sleep -Seconds 15
-          }
-          throw "timed out waiting for $tag (publish job may still be running)"
       - name: Submit WinGet update
         shell: pwsh
         env:
