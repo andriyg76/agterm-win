@@ -108,8 +108,55 @@ $shellCases["wsl-first-start"] = {
     $failures
 }
 
-# Stage B: overlay on an agterm-server session (presentation + job helper). run.ps1 SKIPs until implemented.
+$localWorkspace = "00000000-0000-0000-0000-00000000000A"
+
+$shellPreparations["overlay-server-program"] = {
+    param($state)
+    $dist = if ($env:AGTERM_WIN_GATE_WSL) { $env:AGTERM_WIN_GATE_WSL } else { $absent }
+    Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$($dist -replace '"','\"')`": `"atLaunch`"}}"
+}
+
+# Stage B: ctl overlay on a catalog session when connected; smoke on synthetic WSL when not (docs/plans/20261124-server-program-overlay.md).
 $shellCases["overlay-server-program"] = {
     param($Shell)
-    @("overlay-server-program should be skipped by run.ps1 until stage B ships")
+    $state = $Shell.State
+    $dist = if ($env:AGTERM_WIN_GATE_WSL) { $env:AGTERM_WIN_GATE_WSL } else { $absent }
+    $failures = @()
+    $server = Wait-Until { $s = Get-WSLServer $state $dist; if ($s.started) { $s } } 20
+    if (-not $server) { return @("$dist did not start: $((Get-WSLServer $state $dist) | ConvertTo-Json -Compress)") }
+
+    $bogus = "00000000-0000-0000-0000-000000000011"
+    $refusal = Invoke-Ctl $state @("session", "overlay", "open", "echo smoke", "--target", $bogus)
+    if ($refusal.error -ne "no such session: $bogus") { $failures += "missing session replied $($refusal | ConvertTo-Json -Compress)" }
+    if (-not (Wait-Until { (Invoke-Ctl $state @("tree")).ok } 5)) { $failures += "tree stopped answering after overlay refusal" }
+
+    if (-not $env:AGTERM_WIN_GATE_WSL) {
+        if ($server.connected) { $failures += "$absent reads connected on the smoke path" }
+        return $failures
+    }
+
+    $connected = Wait-Until { $s = Get-WSLServer $state $dist; if ($s.connected) { $s } } 120
+    if (-not $connected) { return $failures + @("AGTERM_WIN_GATE_WSL=$dist never reached connected") }
+
+    $tree = (Invoke-Ctl $state @("tree")).result.tree
+    $workspace = @($tree.workspaces | Where-Object { $_.id -ne $localWorkspace } | Select-Object -First 1)
+    if (-not $workspace) { return $failures + @("no server workspace in tree") }
+    $row = (Invoke-Ctl $state @("session", "new", "--workspace", $workspace.id))
+    if (-not $row.ok) { return $failures + @("session new on server replied $($row | ConvertTo-Json -Compress)") }
+    $id = $row.result.id
+    Invoke-Ctl $state @("session", "select", "--target", $id) | Out-Null
+    $node = Wait-Until { Get-Node $state $id }
+    if (-not $node) { return $failures + @("new server session $id is missing from tree") }
+    if ($node.presenters.presenter -ne $true) { $failures += "presenter is not true: $($node.presenters | ConvertTo-Json -Compress)" }
+
+    $mark = "overlay-server-gate"
+    Invoke-Ctl $state @("session", "overlay", "open", "echo $mark", "--target", $id) | Out-Null
+    $node = Wait-Until { $n = Get-Node $state $id; if ($n.overlay) { $n } } 30
+    if (-not $node) { return $failures + @("tree never reported overlay on $id") }
+    if (-not (Wait-Until { (Invoke-Ctl $state @("session", "overlay", "text", "--target", $id)).result.text -match $mark } 30)) {
+        $failures += "overlay text is '$((Invoke-Ctl $state @("session", "overlay", "text", "--target", $id)).result.text)'"
+    }
+    Invoke-Ctl $state @("session", "overlay", "close", "--target", $id) | Out-Null
+    if (-not (Wait-Until { -not (Get-Node $state $id).overlay } 15)) { $failures += "overlay stayed on tree after close" }
+    $failures
 }
