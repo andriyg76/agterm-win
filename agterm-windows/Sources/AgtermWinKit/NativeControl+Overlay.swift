@@ -29,7 +29,7 @@ extension NativeControl {
             if slot.pageHidden || slot.program?.hidden == true { return failure(OverlayVisibilityError.hidden) }
             if slot.occupied { return failure("overlay already open") }
             switch ControlOverlayOpen.parse(command: args?.command ?? "", args: args) {
-            case .failure(let reason): return failure(reason)
+            case .failure(let reason): return failure(reason.message)
             case .success(let source):
                 if let source {
                     guard !host.isServerSession(id) else { return failure(NativeOverlay.serverRefusal) }
