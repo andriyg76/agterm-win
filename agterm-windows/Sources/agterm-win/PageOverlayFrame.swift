@@ -18,7 +18,7 @@ final class PageOverlayFrame {
 
     init(parent: HWND?) {
         let instance = GetModuleHandleW(nil)
-        let className = Array("agterm-overlay".utf16) + [0]
+        let className = Self.nullTerminatedUTF16("agterm-overlay")
         className.withUnsafeBufferPointer { name in
             var windowClass = WNDCLASSEXW()
             windowClass.cbSize = UINT(MemoryLayout<WNDCLASSEXW>.size)
