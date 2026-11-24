@@ -13,6 +13,8 @@ public enum Palette {
     public enum Target: Equatable, Sendable {
         case session(UUID)
         case pick(NativeMenu.Pick)
+        /// pickChoice is one row of a session-bound replica pick.
+        case pickChoice(String)
     }
 
     public struct Row: Equatable, Sendable {

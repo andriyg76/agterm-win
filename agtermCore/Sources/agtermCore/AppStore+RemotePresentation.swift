@@ -245,6 +245,18 @@ extension AppStore {
         session.overlayExitCode = exitCode
     }
 
+    /// markViewerHud records a passive HUD agterm-win draws over a catalog row, for `tree` and overlay read-back.
+    public func markViewerHud(forSession id: UUID, spec: HudSpec) {
+        guard let session = session(withID: id) else { return }
+        session.hudSpec = spec
+        session.overlayActive = true
+        session.overlaySizePercent = HudLayout.clampSizePercent(spec.sizePercent ?? 60, for: spec)
+        session.overlayHidden = false
+        session.overlayCommand = nil
+        session.overlayWait = false
+        scheduleTreeChanged()
+    }
+
     /// Takes down the overlay showing `job`, once its origin closed it.
     public func closeReplicaOverlay(_ job: String, forSession id: UUID) {
         guard let slot = session(withID: id)?.overlayReplicas.first(where: { $0.replica.job == job }) else { return }

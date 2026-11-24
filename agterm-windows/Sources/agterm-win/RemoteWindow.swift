@@ -23,6 +23,12 @@ final class RemoteWindow: RemoteCatalogEffects {
     var onReplicaAsk: (@MainActor (UUID, PresentationAsk) -> Bool)?
     /// onReplicaAskDismiss takes down an ask the origin ended without an answer.
     var onReplicaAskDismiss: (@MainActor (UUID, PresentationAskRef) -> Void)?
+    /// onReplicaPick shows a session pick the origin handed over on a catalog session row.
+    var onReplicaPick: (@MainActor (UUID, PresentationPick) -> Bool)?
+    /// onReplicaPickDismiss takes down a pick the origin ended without an answer.
+    var onReplicaPickDismiss: (@MainActor (UUID, PresentationPickRef) -> Void)?
+    /// onReplicaHud shows, updates, or clears the HUD the origin mirrors on a catalog session row.
+    var onReplicaHud: (@MainActor (UUID, PresentationHud?) -> Void)?
     /// onPresentationStopped runs when a session's `zmx present` stream is torn down.
     var onPresentationStopped: (UUID) -> Void = { _ in }
     // a presentation stream per server session, as a Mac's remote window keeps them
@@ -130,6 +136,16 @@ final class RemoteWindow: RemoteCatalogEffects {
             },
             askDismiss: { [weak self] ref in
                 self?.onReplicaAskDismiss?(id, ref)
+            },
+            pickRequest: { [weak self] pick in
+                guard let self else { return false }
+                return self.onReplicaPick?(id, pick) ?? false
+            },
+            pickDismiss: { [weak self] ref in
+                self?.onReplicaPickDismiss?(id, ref)
+            },
+            hud: { [weak self] hud in
+                self?.onReplicaHud?(id, hud)
             },
             warn: { log("presentation for \(id): \($0)") })
         let client = RemotePresentationClient(argv: argv, presentationVersion: binding.presentationVersion, transport: transport,
