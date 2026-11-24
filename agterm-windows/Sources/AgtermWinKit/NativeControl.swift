@@ -365,9 +365,9 @@ public enum NativeControl {
         let dashboard = host.dashboard
         var tree = ControlTree(workspaces: local + host.serverWorkspaces, quickVisible: host.quickShown,
                                dashboardMembers: dashboard?.members.map(\.controlRef), dashboardHighlighted: dashboard?.highlighted?.controlRef,
-                               dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
+                               dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) },
+                               sidebarWidth: host.sidebarWidthPoints)
         tree.wslServers = host.wslServers
-        tree.sidebarWidth = host.sidebarWidthPoints
         return tree
     }
 
