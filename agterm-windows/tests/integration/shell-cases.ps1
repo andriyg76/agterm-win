@@ -22,11 +22,15 @@ function Save-Bitmap([System.Drawing.Bitmap]$Bitmap, [string]$Path) {
     try { $Bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png) } finally { $Bitmap.Dispose() }
 }
 
-# Save-Snapshot draws the window itself, PW_RENDERFULLCONTENT taking Direct2D's content even where something covers it.
-function Save-Snapshot($Shell, [string]$Label) {
+# Save-Snapshot draws the shell's window, or `$Window` when given, itself: PW_RENDERFULLCONTENT takes Direct2D's content
+# even where something covers it.
+function Save-Snapshot($Shell, [string]$Label, [IntPtr]$Window = [IntPtr]::Zero) {
     try {
-        $Shell.Process.Refresh()
-        $window = $Shell.Process.MainWindowHandle
+        $window = $Window
+        if ($window -eq [IntPtr]::Zero) {
+            $Shell.Process.Refresh()
+            $window = $Shell.Process.MainWindowHandle
+        }
         if ($window -eq [IntPtr]::Zero) { return }
         $rect = New-Object AgtermSnapshot+Rect
         [AgtermSnapshot]::GetWindowRect($window, [ref]$rect) | Out-Null
@@ -217,6 +221,7 @@ $shellCases = [ordered]@{
 
 . (Join-Path $PSScriptRoot "title-bar-cases.ps1")
 . (Join-Path $PSScriptRoot "palette-cases.ps1")
+. (Join-Path $PSScriptRoot "settings-cases.ps1")
 
 # seeds a case's state directory before its window starts; a keymap problem at launch would open a message box
 $shellPreparations = @{
