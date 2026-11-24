@@ -1034,10 +1034,10 @@ struct ControlDispatcherTests {
     @Test func settingsOpenParsesItsTabBeforeTheAction() async {
         let actions = MockControlActions()
         let dispatcher = ControlDispatcher(actions: actions)
-        #expect(await dispatcher.dispatch(ControlRequest(cmd: .settingsOpen, args: ControlArgs(name: "Notifications"))).ok)
-        #expect(await dispatcher.dispatch(ControlRequest(cmd: .settingsOpen)).ok)
+        #expect(await dispatcher.dispatch(ControlRequest(cmd: .settingsOpen, args: ControlArgs(name: "Notifications")))?.ok == true)
+        #expect(await dispatcher.dispatch(ControlRequest(cmd: .settingsOpen))?.ok == true)
         let refused = await dispatcher.dispatch(ControlRequest(cmd: .settingsOpen, args: ControlArgs(name: "keys")))
-        #expect(refused.error == "unknown settings tab: keys (general|appearance|notifications)")
+        #expect(refused?.error == "unknown settings tab: keys (general|appearance|notifications)")
         #expect(actions.calls == [.openSettings(.notifications), .openSettings(.general)])
     }
     #endif
