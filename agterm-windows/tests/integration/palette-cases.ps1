@@ -73,7 +73,7 @@ function Get-Rows($Palette) { if ($Palette.List) { @([AgtermInput]::Rows($Palett
 # Open-Palette presses the chord and waits for the panel; nothing comes back when the window is not in front.
 function Open-Palette([IntPtr]$Window, [bool]$Shift) {
     if (-not [AgtermInput]::Front($Window)) { return $null }
-    [AgtermInput]::Chord(0x50, $Shift)
+    [AgtermInput]::Chord([byte]0x50, $Shift)
     Wait-Until { Get-Palette $Window } 5
 }
 
@@ -114,9 +114,9 @@ $shellCases["palettes"] = {
     if (-not $palette) { return $failures + @("Ctrl+P did not open the palette again") }
     Send-Key $palette.Edit 0x28
     if (-not (Wait-Until { [AgtermInput]::Highlight($palette.List) -eq 1 } 2)) { $failures += "Down left the highlight on $([AgtermInput]::Highlight($palette.List))" }
-    [AgtermInput]::Chord(0x4A, $false)
+    [AgtermInput]::Chord([byte]0x4A, $false)
     if (-not (Wait-Until { [AgtermInput]::Highlight($palette.List) -eq 2 } 2)) { $failures += "Ctrl+J left the highlight on $([AgtermInput]::Highlight($palette.List))" }
-    [AgtermInput]::Chord(0x4B, $false)
+    [AgtermInput]::Chord([byte]0x4B, $false)
     if (-not (Wait-Until { [AgtermInput]::Highlight($palette.List) -eq 1 } 2)) { $failures += "Ctrl+K left the highlight on $([AgtermInput]::Highlight($palette.List))" }
     if ([AgtermWin32]::TextOf($palette.Edit) -ne "") { $failures += "Ctrl+J/K typed '$([AgtermWin32]::TextOf($palette.Edit))' into the field" }
     Send-Key $palette.Edit 0x0D

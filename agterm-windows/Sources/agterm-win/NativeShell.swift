@@ -1053,7 +1053,7 @@ final class NativeShell {
         pressed = nil
         ReleaseCapture()
         invalidateTitleBar()
-        if clientButton(lParam) == button { act(button) }
+        if clientButton(lParam) == button { PostMessageW(window, Self.titleActionMessage, WPARAM(button.rawValue), 0) }
     }
 
     /// frameDown takes a caption button's press so DefWindowProc does not run its own, which draws the classic buttons.
@@ -1068,11 +1068,17 @@ final class NativeShell {
         guard let button = pressed, button.isCaption else { return false }
         pressed = nil
         invalidateTitleBar()
-        if TitleBar.Button(hitCode: LRESULT(truncatingIfNeeded: wParam)) == button { act(button) }
+        if TitleBar.Button(hitCode: LRESULT(truncatingIfNeeded: wParam)) == button {
+            PostMessageW(window, Self.titleActionMessage, WPARAM(button.rawValue), 0)
+        }
         return true
     }
 
-    private func act(_ button: TitleBar.Button) {
+    /// titleActionMessage carries a released button's action out of the mouse message, as the Win-key hook posts its
+    /// command: a new session or a menu then runs with no button message or capture in flight.
+    fileprivate static let titleActionMessage = UINT(WM_APP + 23)
+
+    fileprivate func act(_ button: TitleBar.Button) {
         switch button {
         case .menu: windowMenu()
         case .minimize: ShowWindow(window, SW_MINIMIZE)
@@ -1093,6 +1099,20 @@ final class NativeShell {
     /// fromKeyboard is whether a WM_CONTEXTMENU came from the keyboard, whose point is (-1, -1).
     fileprivate static func fromKeyboard(_ lParam: LPARAM) -> Bool {
         Int16(truncatingIfNeeded: lParam) == -1 && Int16(truncatingIfNeeded: lParam >> 16) == -1
+    }
+
+    /// systemMenu shows the window menu at a WM_CONTEXTMENU's point: DefWindowProc finds no caption in a frame that has
+    /// none, so the drag area shows it itself, with what the window's state allows enabled.
+    fileprivate func systemMenu(_ lParam: LPARAM) {
+        guard let menu = GetSystemMenu(window, false) else { return }
+        let zoomed = IsZoomed(window)
+        for (item, enabled) in [(SC_RESTORE, zoomed), (SC_MOVE, !zoomed), (SC_SIZE, !zoomed), (SC_MINIMIZE, true), (SC_MAXIMIZE, !zoomed),
+                                (SC_CLOSE, true)] {
+            EnableMenuItem(menu, UINT(item), UINT(MF_BYCOMMAND) | UINT(enabled ? MF_ENABLED : MF_GRAYED))
+        }
+        let picked = nt_track_menu(UnsafeMutableRawPointer(menu), UnsafeMutableRawPointer(window), Int32(Int16(truncatingIfNeeded: lParam)),
+                                   Int32(Int16(truncatingIfNeeded: lParam >> 16)))
+        if picked != 0 { PostMessageW(window, UINT(WM_SYSCOMMAND), WPARAM(picked), 0) }
     }
 
     /// inCaption is whether a WM_CONTEXTMENU's screen point is on the title bar's drag area, which shows the window menu.
@@ -1225,6 +1245,9 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
         case UINT(WM_COMMAND):
             if wParam >> 16 & 0xFFFF == WPARAM(EN_CHANGE) { shell.findChanged() }
             return 0
+        case NativeShell.titleActionMessage:
+            if let button = TitleBar.Button(rawValue: Int(wParam)) { shell.act(button) }
+            return 0
         case UINT(NT_PALETTE_QUERY):
             shell.paletteQueryChanged()
             return 0
@@ -1243,7 +1266,8 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
         case UINT(WM_CTLCOLOREDIT):
             return shell.editColors(HDC(bitPattern: UInt(wParam)))
         case UINT(WM_CONTEXTMENU) where !NativeShell.fromKeyboard(lParam) && shell.inCaption(lParam):
-            return DefWindowProcW(window, message, wParam, lParam)
+            shell.systemMenu(lParam)
+            return 0
         case UINT(WM_CONTEXTMENU) where !NativeShell.fromKeyboard(lParam) && shell.onTitleButton(lParam):
             return 0
         case UINT(WM_CONTEXTMENU):

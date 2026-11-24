@@ -615,7 +615,11 @@ struct nt_terminal {
     }
 
     // the window's title is the shown terminal's; a hidden one keeps its title until it is shown
-    void showTitle() { SetWindowTextW(GetAncestor(window, GA_ROOT), title.empty() ? L"agterm" : terminated(title)); }
+    // only a command window's own title: inside the full window, its title bar names the selected session
+    void showTitle() {
+        if (GetAncestor(window, GA_ROOT) != window) return;
+        SetWindowTextW(window, title.empty() ? L"agterm" : terminated(title));
+    }
 };
 
 namespace {

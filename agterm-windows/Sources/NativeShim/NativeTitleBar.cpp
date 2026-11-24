@@ -118,10 +118,20 @@ extern "C" void nt_tooltip_set(void *tip, void *parent, uintptr_t id, int32_t le
     info.cbSize = TTTOOLINFOW_V2_SIZE;
     info.hwnd = static_cast<HWND>(parent);
     info.uId = id;
-    SendMessageW(static_cast<HWND>(tip), TTM_DELTOOLW, 0, reinterpret_cast<LPARAM>(&info));
-    if (!text || !*text) return;
+    bool known = SendMessageW(static_cast<HWND>(tip), TTM_GETTOOLINFOW, 0, reinterpret_cast<LPARAM>(&info)) != 0;
+    if (!text || !*text) {
+        if (known) SendMessageW(static_cast<HWND>(tip), TTM_DELTOOLW, 0, reinterpret_cast<LPARAM>(&info));
+        return;
+    }
+    // a known tool is moved and retitled in place: removing and adding it again re-hooks the parent, which this runs
+    // under while the parent is handling a relayed mouse message
     info.uFlags = TTF_SUBCLASS;
     info.rect = {left, top, right, bottom};
     info.lpszText = const_cast<wchar_t *>(reinterpret_cast<const wchar_t *>(text));
-    SendMessageW(static_cast<HWND>(tip), TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&info));
+    if (known) {
+        SendMessageW(static_cast<HWND>(tip), TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&info));
+        SendMessageW(static_cast<HWND>(tip), TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&info));
+    } else {
+        SendMessageW(static_cast<HWND>(tip), TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&info));
+    }
 }

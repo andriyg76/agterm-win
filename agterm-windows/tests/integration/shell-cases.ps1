@@ -232,6 +232,9 @@ function Invoke-ShellCase([string]$Name) {
     $started = Get-Date
     try {
         $failures = if ($shell.Ready) { @(& $shellCases[$Name] $shell) } else { @("the control socket did not answer within 30 s") }
+    } catch {
+        # a case's own script error fails that case, with where it stopped, and the run goes on
+        $failures = @("script error at $(Split-Path -Leaf $_.InvocationInfo.ScriptName):$($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)")
     } finally {
         Save-Snapshot $shell "final"
         Stop-Process -Id $watchdog.Id -Force -ErrorAction SilentlyContinue
