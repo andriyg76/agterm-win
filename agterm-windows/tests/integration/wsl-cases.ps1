@@ -107,3 +107,9 @@ $shellCases["wsl-first-start"] = {
     if ((Get-ServerLaunch $state $absent) -ne "manual") { $failures += "native.json keeps '$(Get-ServerLaunch $state $absent)'" }
     $failures
 }
+
+# Stage B: overlay on an agterm-server session (presentation + job helper). run.ps1 SKIPs until implemented.
+$shellCases["overlay-server-program"] = {
+    param($Shell)
+    @("overlay-server-program should be skipped by run.ps1 until stage B ships")
+}
