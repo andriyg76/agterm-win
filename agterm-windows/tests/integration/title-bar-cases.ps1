@@ -101,7 +101,7 @@ function Get-Bar([IntPtr]$Window, [double]$SidebarWidthPts = 220) {
     $menuLimit = $width - 3 * $caption - 5 * $action - [Math]::Floor($action / 4)
     $x = $menuStart; $menuEnd = $menuStart
     $menuSpans = [ordered]@{}
-    foreach ($pair in @(@("file", "File"), @("navigate", "Navigate"), @("help", "Help"))) {
+    foreach ($pair in @(@("file", "File"), @("view", "View"), @("navigate", "Navigate"), @("help", "Help"))) {
         $w = & $labelW $pair[1]
         if (($x + $w) -gt $menuLimit) { break }
         $menuSpans[$pair[0]] = @($x, ($x + $w)); $x += $w + $menuGap; $menuEnd = $x - $menuGap
