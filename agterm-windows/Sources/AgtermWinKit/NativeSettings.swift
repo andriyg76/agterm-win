@@ -47,6 +47,8 @@ public struct NativeSettings: Codable, Equatable, Sendable {
     public var defaultProfile: String?
     /// selectedLocal indexes `localSessions` when one was in view at quit; nil leaves the selection to the server's.
     public var selectedLocal: Int?
+    /// serverLaunch is the choice made for each WSL distribution's agterm-server, by distribution name.
+    public var serverLaunch: [String: ServerLaunch] = [:]
 
     public init() {}
 
@@ -79,5 +81,6 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         localSessions = try container.decodeIfPresent([LocalSession].self, forKey: .localSessions) ?? []
         selectedLocal = try container.decodeIfPresent(Int.self, forKey: .selectedLocal)
         defaultProfile = try container.decodeIfPresent(String.self, forKey: .defaultProfile)
+        serverLaunch = try container.decodeIfPresent([String: ServerLaunch].self, forKey: .serverLaunch) ?? [:]
     }
 }

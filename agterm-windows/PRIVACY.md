@@ -30,7 +30,7 @@ The files are under `%LOCALAPPDATA%\agterm-win`, or the folder `AGTERM_WIN_STATE
 
 | File | What it holds |
 |---|---|
-| `native.json` | Settings: theme, font and size, notification choices, window position and size, the default launch profile, and the local sessions open at quit. Each session keeps its name, the command line it started with and the folder it was last in, so it can start there again. |
+| `native.json` | Settings: theme, font and size, notification choices, window position and size, the default launch profile, whether each WSL distribution's agterm-server starts at launch, and the local sessions open at quit. Each session keeps its name, the command line it started with and the folder it was last in, so it can start there again. |
 | `config\keymap.conf` | Your key bindings, written only when you choose Edit Keymap. |
 | `windows\wsl-<distribution>.json` | How agterm-win last showed an agterm-server's sessions, so the sidebar fills at once on the next start. |
 | `agterm-win.log` | A diagnostic log: start and stop, sessions opened and closed, the commands that started them, the title and text of notifications posted to a session, errors. It does not record what you type or what programs print. |

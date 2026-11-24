@@ -3,7 +3,7 @@
 public enum NativeMenu {
     public enum Command: Int, CaseIterable, Sendable {
         case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, newServerSession, renameSession, restartSession, closeSession, nextSession, previousSession, find, quit,
-             editKeymap, reloadKeymap, settings, sessionPalette, commandPalette
+             editKeymap, reloadKeymap, settings, sessionPalette, commandPalette, startServer, serverAtLaunch
 
         public var title: String {
             switch self {
@@ -28,6 +28,8 @@ public enum NativeMenu {
             case .settings: "Settings…"
             case .sessionPalette: "Go to Session…"
             case .commandPalette: "Command Palette…"
+            case .startServer: "Start agterm-server"
+            case .serverAtLaunch: "Start agterm-server at Launch"
             }
         }
 
@@ -53,7 +55,7 @@ public enum NativeMenu {
             case .settings: "Ctrl+,"
             case .sessionPalette: "Ctrl+P"
             case .commandPalette: "Ctrl+Shift+P"
-            case .editKeymap, .reloadKeymap: ""
+            case .editKeymap, .reloadKeymap, .startServer, .serverAtLaunch: ""
             }
         }
     }
@@ -122,11 +124,26 @@ public enum NativeMenu {
         name.flatMap { name in profiles.firstIndex { $0.name.caseInsensitiveCompare(name) == .orderedSame } } ?? 0
     }
 
+    /// ServerState is what the menu shows of the agterm-server: whether it was started this launch, whether it is
+    /// connected, and whether it starts at launch.
+    public struct ServerState: Equatable, Sendable {
+        public var started: Bool
+        public var connected: Bool
+        public var atLaunch: Bool
+
+        public init(started: Bool = true, connected: Bool = false, atLaunch: Bool = false) {
+            self.started = started
+            self.connected = connected
+            self.atLaunch = atLaunch
+        }
+    }
+
     /// sessions is the sidebar's menu: New Session lists the profiles, the default one on New Session's shortcut, then
-    /// the agterm-server named `server`, enabled while it is connected; Default Profile picks that default.
-    public static func sessions(profiles: [LaunchProfile], defaultProfile: Int = 0, server: String? = nil, serverConnected: Bool = false,
-                                canCloseSession: Bool, sessionCount: Int, canRenameSession: Bool = false,
-                                canRestartSession: Bool = false, shortcuts: Shortcuts = [:]) -> [Entry] {
+    /// the agterm-server named `server`: starting it, enabled until it is started, and a session on it, enabled while
+    /// it is connected; Default Profile picks that default, and Start agterm-server at Launch is checked while it does.
+    public static func sessions(profiles: [LaunchProfile], defaultProfile: Int = 0, server: String? = nil,
+                                serverState: ServerState = .init(), canCloseSession: Bool, sessionCount: Int,
+                                canRenameSession: Bool = false, canRestartSession: Bool = false, shortcuts: Shortcuts = [:]) -> [Entry] {
         let newSessionShortcut = shortcuts[.newSession] ?? Command.newSession.shortcut
         var launches = profiles.enumerated().map { index, profile in
             Entry(title: profile.name, shortcut: index == defaultProfile ? newSessionShortcut : "", pick: .profile(index),
@@ -135,22 +152,29 @@ public enum NativeMenu {
         let defaults = profiles.enumerated().map { index, profile in
             Entry(title: profile.name, shortcut: "", pick: .defaultProfile(index), enabled: true, children: [], checked: index == defaultProfile)
         }
+        var serverEntries: [Entry] = []
         if let server {
-            launches += [.separator, Entry(title: "\(server) (agterm-server)", shortcut: shortcuts[.newServerSession] ?? Command.newServerSession.shortcut,
-                                           pick: .command(.newServerSession), enabled: serverConnected, children: [])]
+            launches += [.separator,
+                         Entry(title: "Start agterm-server in \(server)", shortcut: "", pick: .command(.startServer),
+                               enabled: !serverState.started, children: []),
+                         Entry(title: "\(server) (agterm-server)", shortcut: shortcuts[.newServerSession] ?? Command.newServerSession.shortcut,
+                               pick: .command(.newServerSession), enabled: serverState.connected, children: [])]
+            serverEntries = [Entry(title: Command.serverAtLaunch.title, shortcut: "", pick: .command(.serverAtLaunch), enabled: true,
+                                   children: [], checked: serverState.atLaunch)]
         }
         return [Entry(title: Command.newSession.title, shortcut: "", pick: nil, enabled: !launches.isEmpty, children: launches),
-                Entry(title: "Default Profile", shortcut: "", pick: nil, enabled: !defaults.isEmpty, children: defaults),
+                Entry(title: "Default Profile", shortcut: "", pick: nil, enabled: !defaults.isEmpty, children: defaults)]
+            + serverEntries + [
                 .command(.renameSession, enabled: canRenameSession, shortcuts), .command(.restartSession, enabled: canRestartSession),
                 .command(.closeSession, enabled: canCloseSession, shortcuts),
                 .command(.nextSession, enabled: sessionCount > 1, shortcuts), .command(.previousSession, enabled: sessionCount > 1, shortcuts)]
     }
 
     /// window is the ☰ menu: the sidebar's menu, Find, the terminal's menu, the keymap's commands, and Quit.
-    public static func window(profiles: [LaunchProfile], defaultProfile: Int = 0, server: String? = nil, serverConnected: Bool = false,
+    public static func window(profiles: [LaunchProfile], defaultProfile: Int = 0, server: String? = nil, serverState: ServerState = .init(),
                               canCloseSession: Bool, sessionCount: Int, canRenameSession: Bool = false,
                               canRestartSession: Bool = false, hasSelection: Bool, canPaste: Bool, shortcuts: Shortcuts = [:]) -> [Entry] {
-        sessions(profiles: profiles, defaultProfile: defaultProfile, server: server, serverConnected: serverConnected, canCloseSession: canCloseSession,
+        sessions(profiles: profiles, defaultProfile: defaultProfile, server: server, serverState: serverState, canCloseSession: canCloseSession,
                  sessionCount: sessionCount, canRenameSession: canRenameSession, canRestartSession: canRestartSession, shortcuts: shortcuts)
             + [.separator, .command(.sessionPalette, shortcuts), .command(.commandPalette, shortcuts), .command(.find, shortcuts)] + terminal(hasSelection: hasSelection, canPaste: canPaste, shortcuts: shortcuts)
             + [.separator, .command(.settings), .command(.editKeymap), .command(.reloadKeymap), .separator, .command(.quit)]

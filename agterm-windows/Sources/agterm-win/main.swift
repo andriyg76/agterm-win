@@ -10,6 +10,7 @@ import agtermCore
 //   agterm-win.exe --local [<name>]
 //   agterm-win.exe -- <command line>
 //
+// agterm-server in WSL starts only on `--wsl`, `--install-server`, the menu, or the choice to start it at launch.
 // `--native` is accepted as a compatibility no-op for commands written while the implementation was introduced.
 // AGTERM_WIN_STATE_DIR isolates a test or second instance; AGTERM_WIN_TEST_SCREEN makes a command window write its
 // terminal text there when the program exits, then close.
@@ -93,7 +94,8 @@ MainActor.assumeIsolated {
             .map { arguments[$0 + 1] }
         NativeShell.open(remote: RemoteWindow(host: WSLHost(distribution: distribution), stateDirectory: stateDirectory),
                          settings: stateDirectory.appendingPathComponent("native.json"), profiles: profiles,
-                         version: (try? serverRelease().version) ?? "dev", installServer: arguments.contains("--install-server"))
+                         version: (try? serverRelease().version) ?? "dev", serverRequested: flag != nil,
+                         installServer: arguments.contains("--install-server"))
     }
 }
 

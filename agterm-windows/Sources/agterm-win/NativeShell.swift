@@ -69,12 +69,18 @@ final class NativeShell {
     private var dpi: UInt32 = 96
     private var control: ControlSocket?
     private let version: String
+    /// serverStarted is set once the agterm-server is started this launch; until then nothing runs wsl.exe for it, and its
+    /// catalog from the last launch stays out of the sidebar, the palette and agtermctl.
+    private var serverStarted = false
+    private var askingServerLaunch = false
 
     /// open shows the window; `profiles` name launch profiles to start local sessions from once they are known.
-    static func open(remote: RemoteWindow, settings: URL, profiles: [String], version: String, installServer: Bool) {
+    /// `serverRequested` (`--wsl`) and `installServer` start the agterm-server as the menu does; otherwise it starts
+    /// only when the user chose that it starts at launch.
+    static func open(remote: RemoteWindow, settings: URL, profiles: [String], version: String, serverRequested: Bool, installServer: Bool) {
         nt_init_process()
         shell = NativeShell(remote: remote, settingsURL: settings, version: version)
-        shell.create(starting: profiles, installServer: installServer)
+        shell.create(starting: profiles, serverRequested: serverRequested, installServer: installServer)
     }
 
     private init(remote: RemoteWindow, settingsURL: URL, version: String) {
@@ -85,7 +91,7 @@ final class NativeShell {
         TerminalAppearance.use(settings.appearance)
     }
 
-    private func create(starting requested: [String], installServer: Bool) {
+    private func create(starting requested: [String], serverRequested: Bool, installServer: Bool) {
         let instance = GetModuleHandleW(nil)
         let className = Array("agterm-shell".utf16) + [0]
         className.withUnsafeBufferPointer { name in
@@ -138,13 +144,73 @@ final class NativeShell {
         remote.onNotification = { [weak self] id, notification in
             self?.deliver(id, title: notification.title, body: notification.body, source: notification.source == "control" ? .control : .terminal)
         }
-        if installServer {
+        catalogChanged()
+        if installServer || serverRequested || ServerLaunch.startsAtLaunch(serverChoice) {
+            // once the window is up, so the question a first start asks has it to sit on
+            DispatchQueue.main.async { [self] in startServer(installing: installServer) }
+        } else {
+            remoteTerminal.show(notice: ServerLaunch.notStartedNotice(server: serverLabel))
+            log("native shell: agterm-server in \(serverLabel) waits to be started")
+        }
+    }
+
+    // MARK: agterm-server
+
+    private var distribution: String { remote.host.distribution }
+
+    private var serverChoice: ServerLaunch? { settings.serverLaunch[distribution] }
+
+    private var serverState: NativeMenu.ServerState {
+        .init(started: serverStarted, connected: remote.connected, atLaunch: ServerLaunch.startsAtLaunch(serverChoice))
+    }
+
+    /// startServer connects to the agterm-server, installing it first when `installing`; while nothing is chosen for the
+    /// distribution, it first asks whether the server starts at launch.
+    private func startServer(installing: Bool = false) {
+        // the question's own message loop can deliver another Start from the keyboard hook or the palette
+        guard !serverStarted, !askingServerLaunch else { return }
+        if ServerLaunch.asks(serverChoice) {
+            askingServerLaunch = true
+            askServerLaunch()
+            askingServerLaunch = false
+        }
+        serverStarted = true
+        log("native shell: starting agterm-server in \(serverLabel)")
+        remoteTerminal.show(notice: "")
+        if installing {
             installRemoteServer()
         } else {
             catalogChanged()
             remote.start()
         }
     }
+
+    private func askServerLaunch() {
+        let question = ServerLaunch.question(server: serverLabel)
+        let answers = ServerLaunch.Answer.allCases
+        let titles = answers.map { Array($0.title.utf16) + [0] }
+        let picked = Int(withWideStrings(titles) {
+            nt_ask_choice(UnsafeMutableRawPointer(window), Array("agterm".utf16) + [0], Array(question.title.utf16) + [0],
+                          Array(question.text.utf16) + [0], $0, Int32(titles.count))
+        })
+        let answer = answers.indices.contains(picked) ? answers[picked] : .notNow
+        settings.serverLaunch[distribution] = ServerLaunch.choice(after: answer)
+        saveSettings()
+        log("native shell: agterm-server in \(serverLabel) at launch: \(answer)")
+    }
+
+    private func toggleServerAtLaunch() {
+        settings.serverLaunch[distribution] = ServerLaunch.toggled(serverChoice)
+        saveSettings()
+    }
+
+    /// serverSession is the server's session `id`, nil until the server is started.
+    private func serverSession(_ id: Foundation.UUID) -> Session? {
+        serverStarted ? remote.session(id) : nil
+    }
+
+    /// shownWorkspaces is the server's catalog as the window shows it: nothing until the server is started.
+    private var shownWorkspaces: [Workspace] { serverStarted ? remote.store.workspaces : [] }
 
     /// Installs or upgrades the WSL server off the UI thread, then connects whether installation succeeded or not.
     private func installRemoteServer() {
@@ -524,7 +590,7 @@ final class NativeShell {
     }
 
     private func closeServerSession(_ id: Foundation.UUID) {
-        guard let session = remote.session(id) else { return }
+        guard let session = serverSession(id) else { return }
         let question = NativeMenu.closeQuestion(session: session.displayName, server: serverLabel)
         guard session.ended || MessageBoxW(window, Array(question.utf16) + [0], Array("agterm".utf16) + [0],
                                            UINT(MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)) == IDOK else { return }
@@ -537,11 +603,11 @@ final class NativeShell {
     /// canRename is whether `id` takes a new name: a local session, or a server session while the server is connected.
     private func canRename(_ id: Foundation.UUID?) -> Bool {
         guard let id else { return false }
-        return locals.contains { $0.id == id } || (remote.connected && remote.session(id) != nil)
+        return locals.contains { $0.id == id } || (remote.connected && serverSession(id) != nil)
     }
 
     private func name(of id: Foundation.UUID) -> String? {
-        locals.first { $0.id == id }?.name ?? remote.session(id)?.displayName
+        locals.first { $0.id == id }?.name ?? serverSession(id)?.displayName
     }
 
     private func startRename() {
@@ -589,7 +655,7 @@ final class NativeShell {
     private func canRestart(_ id: Foundation.UUID?) -> Bool {
         guard let id else { return false }
         if let local = locals.first(where: { $0.id == id }) { return local.exited }
-        return remote.connected && remote.session(id)?.ended == true
+        return remote.connected && serverSession(id)?.ended == true
     }
 
     private func restartSelected() {
@@ -608,11 +674,11 @@ final class NativeShell {
     }
 
     private var canCloseSelected: Bool {
-        locals.contains { $0.id == selected } || (remote.connected && selected.flatMap(remote.session) != nil)
+        locals.contains { $0.id == selected } || (remote.connected && selected.flatMap(serverSession) != nil)
     }
 
     private func closeSelected() {
-        if let selected, remote.session(selected) != nil {
+        if let selected, serverSession(selected) != nil {
             closeServerSession(selected)
             return
         }
@@ -641,6 +707,8 @@ final class NativeShell {
         switch command {
         case .newSession: if profiles.indices.contains(defaultProfile) { newSession(profiles[defaultProfile]) }
         case .newServerSession: newServerSession()
+        case .startServer: startServer()
+        case .serverAtLaunch: toggleServerAtLaunch()
         case .renameSession: startRename()
         case .restartSession: restartSelected()
         case .closeSession: closeSelected()
@@ -674,7 +742,7 @@ final class NativeShell {
         var client = RECT()
         GetClientRect(window, &client)
         let width = sidebarWidth, height = client.bottom
-        let noticeText = remote.mirror.state.windowNotice(host: "WSL \(remote.host.distribution)")
+        let noticeText = serverStarted ? remote.mirror.state.windowNotice(host: serverLabel) : nil
         let top = titleBar.height
         let noticeHeight = noticeText == nil ? 0 : scaled(56)
         ShowWindow(notice, noticeText == nil ? SW_HIDE : SW_SHOW)
@@ -695,7 +763,7 @@ final class NativeShell {
     private func catalogChanged() {
         rebuild()
         layout()
-        let workspaces = remote.store.workspaces
+        let workspaces = shownWorkspaces
         if let before = sessionsBeforeCreate, let created = workspaces.flatMap(\.sessions).first(where: { !before.contains($0.id) }) {
             sessionsBeforeCreate = nil
             select(created.id)
@@ -709,7 +777,7 @@ final class NativeShell {
 
     private func rebuild() {
         guard let tree else { return }
-        var sidebar = SessionSidebar.items(remote.store.workspaces, unseen: settings.notifications.unseenCount ? serverUnseen : [:])
+        var sidebar = SessionSidebar.items(shownWorkspaces, unseen: settings.notifications.unseenCount ? serverUnseen : [:])
         if !locals.isEmpty {
             let children = locals.map {
                 SessionSidebar.Item(id: $0.id, title: SessionSidebar.localTitle($0.name, exited: $0.exited, attention: $0.attention || $0.unseen > 0,
@@ -764,7 +832,7 @@ final class NativeShell {
         titleChanged()
         let shown = visibleTerminal
         for terminal in terminalsShown { terminal.setVisible(terminal === shown) }
-        guard !locals.contains(where: { $0.id == id }), let session = remote.session(id) else {
+        guard !locals.contains(where: { $0.id == id }), let session = serverSession(id) else {
             remote.store.selectedSessionID = nil
             return
         }
@@ -814,7 +882,7 @@ final class NativeShell {
 
     /// windowEntries is the ☰ menu as it stands now, which the command palette lists too.
     private var windowEntries: [NativeMenu.Entry] {
-        NativeMenu.window(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
+        NativeMenu.window(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverState: serverState,
                           canCloseSession: canCloseSelected, sessionCount: tagged.count, canRenameSession: canRename(selected),
                           canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
                           canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), shortcuts: Keys.keymap.shortcuts)
@@ -827,7 +895,7 @@ final class NativeShell {
         let tag = nt_tree_item_at(tree, &point.x, &point.y)
         if tag > 0, Int(tag) <= tagged.count { select(tagged[Int(tag) - 1]) }
         if x != -1 || y != -1 { point = POINT(x: x, y: y) }
-        run(showMenu(NativeMenu.sessions(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverConnected: remote.connected,
+        run(showMenu(NativeMenu.sessions(profiles: profiles, defaultProfile: defaultProfile, server: serverLabel, serverState: serverState,
                                          canCloseSession: canCloseSelected, sessionCount: tagged.count,
                                          canRenameSession: canRename(selected), canRestartSession: canRestart(selected),
                                          shortcuts: Keys.keymap.shortcuts),
@@ -870,7 +938,7 @@ final class NativeShell {
                 Palette.Local(id: $0.id, name: $0.name, exited: $0.exited, attention: $0.attention || $0.unseen > 0,
                               unseen: counting ? $0.unseen : 0)
             }
-            return Palette.sessionRows(locals: localRows, server: remote.store.workspaces, serverLabel: serverLabel,
+            return Palette.sessionRows(locals: localRows, server: shownWorkspaces, serverLabel: serverLabel,
                                        unseen: counting ? serverUnseen : [:])
         case .commands:
             return Palette.commandRows(windowEntries)
@@ -1326,7 +1394,7 @@ extension NativeShell: NativeControlHost {
         remote.connected ? remote.store.controlTree(paneForeground: { _ in nil }).workspaces : []
     }
 
-    func isServerSession(_ id: Foundation.UUID) -> Bool { remote.session(id) != nil }
+    func isServerSession(_ id: Foundation.UUID) -> Bool { serverSession(id) != nil }
 
     func newLocalSession(name: String?, command: String?, select: Bool) -> Foundation.UUID? {
         let customName = name.flatMap(SessionNaming.customName)
@@ -1339,6 +1407,7 @@ extension NativeShell: NativeControlHost {
     }
 
     func newServerSession() async -> ControlResponse {
+        guard serverStarted else { return ControlResponse(ok: false, error: "agterm-server in \(serverLabel) is not started") }
         guard remote.connected, let workspace = remote.store.currentWorkspaceID else {
             return ControlResponse(ok: false, error: "no connection to \(serverLabel)")
         }
@@ -1410,4 +1479,17 @@ extension NativeShell: NativeControlHost {
     func reloadKeymap() -> Int { Keys.reload(owner: window, quiet: true) }
 
     func setFontPoints(_ points: Float) { setFontSize(points) }
+}
+
+/// withWideStrings lends `strings`, each NUL-terminated, to `body` as one array of pointers, valid for the call only.
+private func withWideStrings<Result>(_ strings: [[UInt16]], _ body: (UnsafePointer<UnsafePointer<UInt16>?>) -> Result) -> Result {
+    var pointers: [UnsafePointer<UInt16>?] = []
+    func lend(_ index: Int) -> Result {
+        guard index < strings.count else { return pointers.withUnsafeBufferPointer { body($0.baseAddress!) } }
+        return strings[index].withUnsafeBufferPointer { buffer in
+            pointers.append(buffer.baseAddress)
+            return lend(index + 1)
+        }
+    }
+    return lend(0)
 }
