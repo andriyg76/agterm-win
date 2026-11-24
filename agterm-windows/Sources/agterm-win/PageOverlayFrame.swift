@@ -4,6 +4,10 @@ import NativeShim
 import WinSDK
 import agtermCore
 
+private let pageOverlayFrameProcedure: WNDPROC = { window, message, wParam, lParam in
+    DefWindowProcW(window, message, wParam, lParam)
+}
+
 /// PageOverlayFrame hosts a WebView2 page over a session, in the same overlay rectangle as a program overlay.
 @MainActor
 final class PageOverlayFrame {
@@ -18,10 +22,11 @@ final class PageOverlayFrame {
 
     init(parent: HWND?) {
         let instance = GetModuleHandleW(nil)
-        let className = Self.nullTerminatedUTF16("agterm-overlay")
+        let className = Self.nullTerminatedUTF16("agterm-page-overlay")
         className.withUnsafeBufferPointer { name in
             var windowClass = WNDCLASSEXW()
             windowClass.cbSize = UINT(MemoryLayout<WNDCLASSEXW>.size)
+            windowClass.lpfnWndProc = pageOverlayFrameProcedure
             windowClass.hInstance = instance
             windowClass.hCursor = LoadCursorW(nil, UnsafePointer<WCHAR>(bitPattern: 32512))
             windowClass.lpszClassName = name.baseAddress
