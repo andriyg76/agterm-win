@@ -10,6 +10,12 @@ final class PageOverlayFrame {
     private(set) var window: HWND?
     private var page: UnsafeMutableRawPointer?
 
+    private static func nullTerminatedUTF16(_ text: String) -> [UInt16] {
+        var wide = Array(text.utf16)
+        wide.append(0)
+        return wide
+    }
+
     init(parent: HWND?) {
         let instance = GetModuleHandleW(nil)
         let className = Array("agterm-overlay".utf16) + [0]
@@ -40,21 +46,21 @@ final class PageOverlayFrame {
     func load(file path: String) {
         guard let page else { return }
         let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
-        Array(normalized.utf16) + [0].withUnsafeBufferPointer {
+        Self.nullTerminatedUTF16(normalized).withUnsafeBufferPointer {
             nt_page_navigate_file(page, $0.baseAddress)
         }
     }
 
     func load(url: URL) {
         guard let page else { return }
-        Array(url.absoluteString.utf16) + [0].withUnsafeBufferPointer {
+        Self.nullTerminatedUTF16(url.absoluteString).withUnsafeBufferPointer {
             nt_page_navigate_url(page, $0.baseAddress)
         }
     }
 
     func load(html: String) {
         guard let page else { return }
-        Array(html.utf16) + [0].withUnsafeBufferPointer { nt_page_navigate_html(page, $0.baseAddress) }
+        Self.nullTerminatedUTF16(html).withUnsafeBufferPointer { nt_page_navigate_html(page, $0.baseAddress) }
     }
 
     func loadState() -> HtmlLoadState {
