@@ -1682,7 +1682,7 @@ final class NativeShell {
     fileprivate func paletteRun(_ index: Int) {
         guard paletteShown.indices.contains(index) else { return }
         let row = paletteShown[index]
-        if let pick = pickPalette {
+        if pickPalette != nil {
             guard case .pickChoice(let id) = row.target else { return }
             resolvePickChoice(id)
             return
