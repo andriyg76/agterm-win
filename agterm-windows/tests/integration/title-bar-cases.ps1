@@ -88,26 +88,38 @@ function Get-ShellWindow($Shell) {
 }
 
 # Get-Bar is TitleBar's layout at the window's size and dpi: each part's horizontal centre, in client pixels.
-function Get-Bar([IntPtr]$Window) {
+function Get-Bar([IntPtr]$Window, [double]$SidebarWidthPts = 220) {
     $dpi = [AgtermWin32]::GetDpiForWindow($Window)
     $scaled = { param($v) [int][Math]::Floor(($v * $dpi + 48) / 96) }
     $client = New-Object AgtermWin32+Rect
     [AgtermWin32]::GetClientRect($Window, [ref]$client) | Out-Null
-    $width = $client.Right; $action = & $scaled 40; $caption = & $scaled 46; $sidebar = [int][Math]::Round(240 * $dpi / 96)
-    [pscustomobject]@{
-        Height = & $scaled 36; Width = $width; Action = $action; Caption = $caption; Middle = [int]((& $scaled 36) / 2)
-        Spans = [ordered]@{
-            menu = @(0, $action); "new session" = @($action, (2 * $action))
-            quick = @(($width - 3 * $caption - 5 * $action), ($width - 3 * $caption - 4 * $action))
-            split = @(($width - 3 * $caption - 4 * $action), ($width - 3 * $caption - 3 * $action))
-            dashboard = @(($width - 3 * $caption - 3 * $action), ($width - 3 * $caption - 2 * $action))
-            find = @(($width - 3 * $caption - 2 * $action), ($width - 3 * $caption - $action))
-            settings = @(($width - 3 * $caption - $action), ($width - 3 * $caption))
-            minimize = @(($width - 3 * $caption), ($width - 2 * $caption)); maximize = @(($width - 2 * $caption), ($width - $caption))
-            close = @(($width - $caption), $width)
-        }
-        Title = @(([Math]::Max(2 * $action, $sidebar) + [Math]::Floor($action / 4)), ($width - 3 * $caption - 5 * $action - [Math]::Floor($action / 4)))
+    $width = $client.Right; $action = & $scaled 40; $caption = & $scaled 46; $height = & $scaled 40
+    $sidebar = [int][Math]::Round($SidebarWidthPts * $dpi / 96)
+    $menuStart = $sidebar + $action + [Math]::Floor($action / 4)
+    $labelW = { param($t) & $scaled ($t.Length * 7 + 20) }
+    $menuGap = [Math]::Max(1, [Math]::Floor((& $scaled 7) / 5))
+    $menuLimit = $width - 3 * $caption - 5 * $action - [Math]::Floor($action / 4)
+    $x = $menuStart; $menuEnd = $menuStart
+    $menuSpans = [ordered]@{}
+    foreach ($pair in @(@("file", "File"), @("navigate", "Navigate"), @("help", "Help"))) {
+        $w = & $labelW $pair[1]
+        if (($x + $w) -gt $menuLimit) { break }
+        $menuSpans[$pair[0]] = @($x, ($x + $w)); $x += $w + $menuGap; $menuEnd = $x - $menuGap
     }
+    $titleLeft = [Math]::Max(($sidebar + $action), $menuEnd) + [Math]::Floor($action / 4)
+    $titleRight = $width - 3 * $caption - 5 * $action - [Math]::Floor($action / 4)
+    $spans = [ordered]@{ "new session" = @($sidebar, ($sidebar + $action)) }
+    foreach ($key in $menuSpans.Keys) { $spans[$key] = $menuSpans[$key] }
+    $spans.quick = @(($width - 3 * $caption - 5 * $action), ($width - 3 * $caption - 4 * $action))
+    $spans.split = @(($width - 3 * $caption - 4 * $action), ($width - 3 * $caption - 3 * $action))
+    $spans.dashboard = @(($width - 3 * $caption - 3 * $action), ($width - 3 * $caption - 2 * $action))
+    $spans.find = @(($width - 3 * $caption - 2 * $action), ($width - 3 * $caption - $action))
+    $spans.settings = @(($width - 3 * $caption - $action), ($width - 3 * $caption))
+    $spans.minimize = @(($width - 3 * $caption), ($width - 2 * $caption))
+    $spans.maximize = @(($width - 2 * $caption), ($width - $caption))
+    $spans.close = @(($width - $caption), $width)
+    [pscustomobject]@{ Height = $height; Width = $width; Action = $action; Caption = $caption; Middle = [int]($height / 2)
+                       Spans = $spans; Title = @($titleLeft, $titleRight) }
 }
 
 function Get-Centre($Bar, [string]$Part) { [int](($Bar.Spans[$Part][0] + $Bar.Spans[$Part][1]) / 2) }
@@ -199,7 +211,9 @@ $shellCases["title-bar"] = {
     if (-not $window) { return @("no visible agterm-shell window") }
     if ([AgtermWin32]::IsZoomed($window)) { [AgtermWin32]::ShowWindow($window, 9) | Out-Null }
     $failures = @()
-    $bar = Get-Bar $window
+    $sidebarPts = (Invoke-Ctl $state @("tree")).result.tree.sidebarWidth
+    if (-not $sidebarPts) { $sidebarPts = 220 }
+    $bar = Get-Bar $window $sidebarPts
 
     Note "hit tests"
     $rect = New-Object AgtermWin32+Rect
@@ -207,9 +221,15 @@ $shellCases["title-bar"] = {
     $origin = Get-ScreenPoint $window 0 0
     if ($origin.Y -ne $rect.Top) { $failures += "the client starts $($origin.Y - $rect.Top) px below the window's top: Windows' caption is still there" }
 
-    $expected = [ordered]@{ menu = $hitClient; "new session" = $hitClient; quick = $hitClient; split = $hitClient; dashboard = $hitClient
+    $expected = [ordered]@{ "new session" = $hitClient; quick = $hitClient; split = $hitClient; dashboard = $hitClient
                             find = $hitClient; settings = $hitClient
                             minimize = $hitMinimize; maximize = $hitMaximize; close = $hitClose }
+    if ($bar.Spans.file) {
+        $expected.file = $hitClient
+        if ((Get-Hit $window (Get-Centre $bar "file") $bar.Middle) -ne $hitClient) {
+            $failures += "the hit test on the File tab is not client"
+        }
+    }
     foreach ($part in $expected.Keys) {
         $hit = Get-Hit $window (Get-Centre $bar $part) $bar.Middle
         if ($hit -ne $expected[$part]) { $failures += "the hit test on $part is $hit, not $($expected[$part])" }
@@ -237,11 +257,15 @@ $shellCases["title-bar"] = {
             $failures += "the bar's background is #{0:X2}{1:X2}{2:X2}, not #252526" -f $c.R, $c.G, $c.B
         }
         foreach ($part in $bar.Spans.Keys) {
+            if ($part -match '^(file|navigate|help)$') { continue }
             $span = $bar.Spans[$part]
             if ((Get-InkCount $shot $span[0] $span[1] 0 $bar.Height) -lt 4) {
                 $failures += "the $part button drew no glyph"
                 Show-Pixels $shot $part $span[0] $span[1] 0 $bar.Height
             }
+        }
+        if ($bar.Spans.file -and (Get-InkCount $shot $bar.Spans.file[0] $bar.Spans.file[1] 0 $bar.Height) -lt 8) {
+            $failures += "the File tab drew no label"
         }
         if ((Get-InkCount $shot $bar.Title[0] ([Math]::Min($bar.Title[1], $bar.Title[0] + 200)) 0 $bar.Height) -lt 20) {
             $failures += "the bar drew no title"
@@ -308,7 +332,7 @@ $shellCases["title-bar-close"] = {
     if (-not $Shell.Process.WaitForExit(10000)) { @("close did not quit within 10 s") }
 }
 
-# ☰ opens the window menu under itself; a right click on the drag area opens the system menu; on a button, nothing
+# Title-bar menu tabs open under the label; a right click on the drag area opens the system menu; on a button, nothing
 $shellCases["title-bar-menus"] = {
     param($Shell)
     [AgtermWin32]::SetThreadDpiAwarenessContext([IntPtr](-4)) | Out-Null
@@ -316,25 +340,39 @@ $shellCases["title-bar-menus"] = {
     $window = Get-ShellWindow $Shell
     if (-not $window) { return @("no visible agterm-shell window") }
     $failures = @()
-    $bar = Get-Bar $window
+    $sidebarPts = (Invoke-Ctl $Shell.State @("tree")).result.tree.sidebarWidth
+    if (-not $sidebarPts) { $sidebarPts = 220 }
+    $bar = Get-Bar $window $sidebarPts
 
-    Note "☰ menu"
-    Send-Click $window (Get-Centre $bar "menu") $bar.Middle
-    $menu = Wait-Until { [AgtermWin32]::Visible($processId, "#32768") | Select-Object -First 1 } 5
-    if (-not $menu) { $failures += "☰ opened no menu" }
-    else {
+    function Test-MenuTab([string]$Label) {
+        if (-not $bar.Spans[$Label]) { return @("no $Label tab in the layout") }
+        Send-Click $window (Get-Centre $bar $Label) $bar.Middle
+        $menu = Wait-Until { [AgtermWin32]::Visible($processId, "#32768") | Select-Object -First 1 } 5
+        if (-not $menu) { return @("$Label opened no menu") }
         $ids = [AgtermWin32]::MenuIds($menu)
-        if (-not ($ids -contains 15 -and $ids -contains 16)) { $failures += "☰'s menu lacks Find and Quit: ids $($ids -join ',')" }
+        $span = $bar.Spans[$Label]
+        $under = Get-ScreenPoint $window $span[0] $bar.Height
         $menuRect = New-Object AgtermWin32+Rect
         [AgtermWin32]::GetWindowRect($menu, [ref]$menuRect) | Out-Null
-        $under = Get-ScreenPoint $window 0 $bar.Height
+        $out = @()
         if ([Math]::Abs($menuRect.Top - $under.Y) -gt 4 -or [Math]::Abs($menuRect.Left - $under.X) -gt 4) {
-            $failures += "☰'s menu opened at ($($menuRect.Left), $($menuRect.Top)), not under the button at ($($under.X), $($under.Y))"
+            $out += "$Label opened at ($($menuRect.Left), $($menuRect.Top)), not under $($under.X), $($under.Y)"
         }
-        Save-ScreenSnapshot $Shell "window-menu"
+        Save-ScreenSnapshot $Shell "$Label-menu"
         Send-Escape $menu
-        if (-not (Wait-Until { [AgtermWin32]::Visible($processId, "#32768").Count -eq 0 } 5)) { return $failures + @("Escape did not close ☰'s menu") }
+        if (-not (Wait-Until { [AgtermWin32]::Visible($processId, "#32768").Count -eq 0 } 5)) { return $out + @("Escape did not close $Label's menu") }
+        return ,@($out, $ids)
     }
+
+    Note "Navigate menu"
+    $nav = Test-MenuTab "navigate"
+    if ($nav[0].Count -gt 0) { $failures += $nav[0] }
+    elseif ($nav[1] -notcontains 15) { $failures += "Navigate lacks Find: ids $($nav[1] -join ',')" }
+
+    Note "Help menu"
+    $help = Test-MenuTab "help"
+    if ($help[0].Count -gt 0) { $failures += $help[0] }
+    elseif ($help[1] -notcontains 16) { $failures += "Help lacks Quit: ids $($help[1] -join ',')" }
 
     Note "system menu"
     $drag = Get-ScreenPoint $window ([int](($bar.Title[0] + $bar.Title[1]) / 2)) $bar.Middle

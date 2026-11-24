@@ -74,6 +74,9 @@ public protocol NativeControlHost: AnyObject {
     var dashboard: NativeControl.Dashboard? { get }
     /// recentSessions are the window's sessions, most recently selected first.
     var recentSessions: [UUID] { get }
+    /// sidebarWidthPoints is the stored divider position echoed by `sidebar.width`.
+    var sidebarWidthPoints: Double { get }
+    func setSidebarWidth(points: Double)
     func openDashboard(_ members: [DashboardMember], fontMode: DashboardFontMode)
     func closeDashboard()
 }
@@ -222,6 +225,12 @@ public enum NativeControl {
             return quick(request, host: host)
         case .dashboard:
             return dashboard(request, host: host)
+        case .sidebarWidth:
+            guard let points = request.args?.sidebarWidth, points.isFinite else {
+                return failure("sidebar.width requires a width in points")
+            }
+            host.setSidebarWidth(points: points)
+            return ControlResponse(ok: true, result: ControlResult(sidebarWidth: host.sidebarWidthPoints))
         default:
             return failure("\(request.cmd.rawValue) is not supported on Windows")
         }
@@ -358,6 +367,7 @@ public enum NativeControl {
                                dashboardMembers: dashboard?.members.map(\.controlRef), dashboardHighlighted: dashboard?.highlighted?.controlRef,
                                dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
         tree.wslServers = host.wslServers
+        tree.sidebarWidth = host.sidebarWidthPoints
         return tree
     }
 

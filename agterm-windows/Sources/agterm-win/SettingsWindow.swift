@@ -31,6 +31,11 @@ final class SettingsWindow {
     private var pages: [[HWND?]] = [[], [], []]
     private var font: HFONT?
     private var loading = true
+    private var dialogBrush: HBRUSH?
+    private var chromeText = COLORREF(bitPattern: 0xCCCCCC)
+    private var chromeBg = COLORREF(bitPattern: 0x252526)
+    private var chromeDim = COLORREF(bitPattern: 0x808080)
+    private var chromeDark = true
 
     // UDM_SETBUDDY, UDM_SETRANGE32, UDM_SETPOS32, UDM_GETPOS32; TCM_INSERTITEMW, TCM_GETCURSEL; TCN_SELCHANGE
     private static let setBuddy = UINT(WM_USER + 105), setRange = UINT(WM_USER + 111), setPosition = UINT(WM_USER + 113),
@@ -56,7 +61,7 @@ final class SettingsWindow {
     /// show opens Settings over `owner`, or brings an open one to the front. `finish` gets the kept values, nil for a
     /// cancel.
     static func show(owner: HWND?, tab: SettingsTab = .general, values: Values, themes: [String], fonts: [String], distributions: [String],
-                     preview: @escaping (Values) -> Void, finish: @escaping (Values?) -> Void) {
+                     chrome: ChromePalette, preview: @escaping (Values) -> Void, finish: @escaping (Values?) -> Void) {
         if let open = current, let window = open.window {
             open.select(tab)
             SetForegroundWindow(window)
@@ -65,6 +70,7 @@ final class SettingsWindow {
         let settings = SettingsWindow(values: values, themes: themes, fonts: fonts, distributions: distributions, preview: preview,
                                       finish: finish)
         current = settings
+        settings.applyChrome(chrome)
         settings.create(owner: owner)
         settings.select(tab)
     }
@@ -87,6 +93,35 @@ final class SettingsWindow {
     }
 
     var handle: HWND? { window }
+
+    private func applyChrome(_ palette: ChromePalette) {
+        if let dialogBrush { DeleteObject(dialogBrush) }
+        chromeDark = palette.isDark
+        chromeBg = COLORREF(bitPattern: UInt(palette.clientBg & 0xFFFFFF))
+        chromeText = COLORREF(bitPattern: UInt(palette.chromeText & 0xFFFFFF))
+        chromeDim = COLORREF(bitPattern: UInt(palette.chromeDim & 0xFFFFFF))
+        dialogBrush = CreateSolidBrush(COLORREF(bitPattern: UInt(palette.palBg & 0xFFFFFF)))
+    }
+
+    private func tintCommCtrls(_ window: HWND?) {
+        guard let window else { return }
+        let theme = Array((chromeDark ? "DarkMode_Explorer" : "Explorer").utf16) + [0]
+        theme.withUnsafeBufferPointer { name in
+            SetWindowTheme(window, name.baseAddress, nil)
+            var child = GetWindow(window, GW_CHILD)
+            while let current = child {
+                SetWindowTheme(current, name.baseAddress, nil)
+                child = GetWindow(current, GW_HWNDNEXT)
+            }
+        }
+    }
+
+    fileprivate func controlColors(_ context: HDC?) -> LRESULT {
+        guard let context, let dialogBrush else { return 0 }
+        SetTextColor(context, chromeText)
+        SetBkColor(context, chromeBg)
+        return LRESULT(Int(bitPattern: dialogBrush))
+    }
 
     private func create(owner: HWND?) {
         let instance = GetModuleHandleW(nil)
@@ -218,6 +253,8 @@ final class SettingsWindow {
         EnableWindow(sound, notifications.banners ? true : false)
         TaskbarFlash.allCases.forEach { addString($0.title, to: flash, message: CB_ADDSTRING) }
         SendMessageW(flash, UINT(CB_SETCURSEL), WPARAM(TaskbarFlash.allCases.firstIndex(of: notifications.flash) ?? 0), 0)
+        if let dialogBrush { SetClassLongPtr(window, GCLP_HBRBACKGROUND, dialogBrush) }
+        tintCommCtrls(window)
         loading = false
         ShowWindow(window, SW_SHOW)
         SetFocus(tabs)
@@ -337,6 +374,7 @@ final class SettingsWindow {
         self.window = nil
         DestroyWindow(window)
         if let font { DeleteObject(font) }
+        if let dialogBrush { DeleteObject(dialogBrush) }
         Self.current = nil
     }
 }
@@ -355,6 +393,9 @@ private let settingsWindowProcedure: WNDPROC = { window, message, wParam, lParam
         case UINT(WM_CLOSE):
             SettingsWindow.current?.close(keeping: nil)
             return 0
+        case UINT(WM_CTLCOLORSTATIC), UINT(WM_CTLCOLOREDIT), UINT(WM_CTLCOLORLISTBOX), UINT(WM_CTLCOLORBTN):
+            if let colors = SettingsWindow.current?.controlColors(HDC(bitPattern: UInt(wParam))), colors != 0 { return colors }
+            return DefWindowProcW(window, message, wParam, lParam)
         default:
             return DefWindowProcW(window, message, wParam, lParam)
         }

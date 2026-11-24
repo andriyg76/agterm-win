@@ -223,6 +223,11 @@ extension NativeShell {
     func bodyMouseDown(_ lParam: LPARAM, double: Bool) -> Bool {
         let (x, y) = point(lParam)
         guard y >= titleBar.height else { return false }
+        if onSidebarDivider(x) {
+            sidebarDragging = true
+            SetCapture(window)
+            return true
+        }
         if let dashboard {
             let cells = NativeDashboard.cells(in: sessionArea, count: dashboard.members.count, gap: scaled(6), caption: scaled(22))
             if let index = NativeDashboard.cell(at: x, y, in: cells) { jump(to: dashboard.members[index]) }
@@ -241,6 +246,10 @@ extension NativeShell {
     }
 
     func dragDivider(_ lParam: LPARAM) -> Bool {
+        if sidebarDragging {
+            sidebarResizeDrag(point(lParam).x)
+            return true
+        }
         guard let dragging, let index = locals.firstIndex(where: { $0.id == dragging.id }), let axis = locals[index].split?.axis else { return false }
         let (x, y) = point(lParam)
         locals[index].split?.ratio = PaneLayout.ratio(at: x, y, area: dragging.area, axis: axis, divider: dividerThickness)
@@ -249,6 +258,11 @@ extension NativeShell {
     }
 
     func endDividerDrag() -> Bool {
+        if sidebarDragging {
+            sidebarDragging = false
+            ReleaseCapture()
+            return true
+        }
         guard dragging != nil else { return false }
         dragging = nil
         ReleaseCapture()
@@ -260,6 +274,10 @@ extension NativeShell {
         var cursor = POINT()
         GetCursorPos(&cursor)
         ScreenToClient(window, &cursor)
+        if sidebarDragging || (cursor.y >= titleBar.height && onSidebarDivider(cursor.x)) {
+            SetCursor(LoadCursorW(nil, UnsafePointer<WCHAR>(bitPattern: 32644))) // IDC_SIZEWE
+            return true
+        }
         let axis: SplitAxis
         if let dragging, let split = local(dragging.id)?.split {
             axis = split.axis

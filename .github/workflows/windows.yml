@@ -2,10 +2,10 @@ name: windows
 
 on:
   push:
-    branches: [windows-port]
-    paths: ["agterm-windows/**", "agtermCore/**", ".github/workflows/windows.yml"]
+    branches: [windows-port, feature/agwinterm-chrome]
   pull_request:
-    branches: [windows-port]
+    branches: [windows-port, feature/agwinterm-chrome]
+    paths: ["agterm-windows/**", "agtermCore/**", ".github/workflows/windows.yml"]
   workflow_dispatch:
 
 concurrency:
