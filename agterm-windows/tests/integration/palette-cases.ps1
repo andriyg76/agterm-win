@@ -26,11 +26,17 @@ public static class AgtermInput {
         keybd_event(0x11, 0, 2, UIntPtr.Zero);
     }
 
-    // Front brings a window forward; an Alt tap first lets a background process do it.
-    public static bool Front(IntPtr window) {
+    // Front brings a window forward: an Alt tap lets a background process ask, and where Windows still refuses, a
+    // click at (x, y), the window's drag area, activates it as a user would.
+    public static bool Front(IntPtr window, int x, int y) {
+        if (GetForegroundWindow() == window) return true;
         keybd_event(0x12, 0, 0, UIntPtr.Zero);
         keybd_event(0x12, 0, 2, UIntPtr.Zero);
         SetForegroundWindow(window);
+        for (int i = 0; i < 20 && GetForegroundWindow() != window; i++) {
+            if (i == 2) Click(x, y);
+            System.Threading.Thread.Sleep(100);
+        }
         return GetForegroundWindow() == window;
     }
 
@@ -70,9 +76,16 @@ function Get-Palette([IntPtr]$Window) {
 
 function Get-Rows($Palette) { if ($Palette.List) { @([AgtermInput]::Rows($Palette.List)) } else { @() } }
 
+# Bring-Front brings the window forward, clicking the middle of its drag area if Windows refuses the request.
+function Bring-Front([IntPtr]$Window) {
+    $bar = Get-Bar $Window
+    $drag = Get-ScreenPoint $Window ([int](($bar.Title[0] + $bar.Title[1]) / 2)) $bar.Middle
+    [AgtermInput]::Front($Window, $drag.X, $drag.Y)
+}
+
 # Open-Palette presses the chord and waits for the panel; nothing comes back when the window is not in front.
 function Open-Palette([IntPtr]$Window, [bool]$Shift) {
-    if (-not [AgtermInput]::Front($Window)) { return $null }
+    if (-not (Bring-Front $Window)) { return $null }
     [AgtermInput]::Chord([byte]0x50, $Shift)
     Wait-Until { Get-Palette $Window } 5
 }
@@ -94,7 +107,7 @@ $shellCases["palettes"] = {
         $reply = Invoke-Ctl $state @("session", "new", "--name", $name, "--command", "cmd.exe /d /k")
         if (-not $reply.ok) { return @("session new $name failed: $($reply | ConvertTo-Json -Compress)") }
     }
-    if (-not [AgtermInput]::Front($window)) { return @("the window could not be brought to the front, so no key reaches it") }
+    if (-not (Bring-Front $window)) { return @("the window could not be brought to the front, even by a click, so no key reaches it") }
 
     Note "Ctrl+P"
     $palette = Open-Palette $window $false
