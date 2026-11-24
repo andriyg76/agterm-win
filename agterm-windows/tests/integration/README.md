@@ -36,6 +36,9 @@ minimize, maximize and close), then reads the outcome back and checks the pixels
 Every user-visible feature lands with a case here that drives the real window the way a user or Windows does,
 and reads the outcome back; a unit test of its logic alone does not cover it.
 
+Overlay and presentation stages **A → B → E → D**, each with its own CI gate, are defined in
+`docs/plans/20261123-windows-naming-keys-notifications-settings.md` (section **Presentation and overlays**).
+
 ## Architecture skips
 
 `run.ps1` may skip a shell case on a host whose native `PROCESSOR_ARCHITECTURE` makes it unreliable. Skips count as
