@@ -132,3 +132,15 @@ $env:AGTERM_WIN_GATE_WSL = 'Ubuntu'   # or another listed distribution with agte
 | connected | `wsl list` reports `connected` for that distribution |
 | presenter | the new server session's `presenters.presenter == true` |
 | program overlay | `session.overlay.open` / `text` / `close`; `tree.overlay` toggles; the session row stays |
+
+# WSL presentation UI gate (agterm-win, stage E)
+
+Stages **E1–E3** (replica ask, pick, HUD) have no CI automation yet. With `AGTERM_WIN_GATE_WSL` set and a connected
+catalog, run a server session script that posts an ask, a `pick.open` bound to that session, or a `hud` while agterm-win
+is the presenter (`tree` → `presenters.presenter == true` for that row).
+
+| surface | manual check |
+|---|---|
+| ask | Task Dialog answers; `askPending` clears from `tree`; origin receives the choice |
+| pick | Command palette lists items; choice reaches the server (`pick.result`) |
+| HUD | passive panel over the remote terminal; `tree` shows overlay/HUD state; dismiss does not end the session row |

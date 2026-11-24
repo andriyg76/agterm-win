@@ -1205,7 +1205,8 @@ final class NativeShell {
     // MARK: replica HUDs (catalog sessions)
 
     private func showReplicaHud(on server: Server, sessionID: Foundation.UUID, hud: PresentationHud?) {
-        guard let session = server.remote.session(sessionID), hud?.pane == nil || hud == nil else { return }
+        guard let session = server.remote.session(sessionID) else { return }
+        if let hud, hud.pane != nil { return }
         guard let hud else {
             clearServerHud(sessionID)
             return
