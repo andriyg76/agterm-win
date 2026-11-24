@@ -19,7 +19,7 @@ struct TitleBarTests {
 
     @Test func titleStartsAtTheTerminalAndStopsBeforeTheTrailingButtons() {
         #expect(bar.title == .init(left: 535, right: 952))
-        #expect(TitleBar(width: 1300, sidebarWidth: 0, dpi: 96).title.left == 535)
+        #expect(TitleBar(width: 1300, sidebarWidth: 0, dpi: 96).title.left == 295)
         #expect(TitleBar(width: 200, sidebarWidth: 240, dpi: 96).title.isEmpty)
     }
 
