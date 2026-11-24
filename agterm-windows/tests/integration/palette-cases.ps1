@@ -40,6 +40,11 @@ public static class AgtermInput {
         return GetForegroundWindow() == window;
     }
 
+    public static void Press(byte key) {
+        keybd_event(key, 0, 0, UIntPtr.Zero);
+        keybd_event(key, 0, 2, UIntPtr.Zero);
+    }
+
     public static void Click(int x, int y) {
         SetCursorPos(x, y);
         mouse_event(0x02, 0, 0, 0, UIntPtr.Zero);
@@ -76,11 +81,21 @@ function Get-Palette([IntPtr]$Window) {
 
 function Get-Rows($Palette) { if ($Palette.List) { @([AgtermInput]::Rows($Palette.List)) } else { @() } }
 
-# Bring-Front brings the window forward, clicking the middle of its drag area if Windows refuses the request.
+# Bring-Front brings the window forward, clicking the middle of its drag area if Windows refuses the request. A
+# Windows flyout in front (the arm64 runner's "Microsoft account" prompt) takes every click, so it is dismissed with
+# Esc first; another program's window is left alone.
 function Bring-Front([IntPtr]$Window) {
     $bar = Get-Bar $Window
     $drag = Get-ScreenPoint $Window ([int](($bar.Title[0] + $bar.Title[1]) / 2)) $bar.Middle
-    [AgtermInput]::Front($Window, $drag.X, $drag.Y)
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        if ([AgtermInput]::Front($Window, $drag.X, $drag.Y)) { return $true }
+        $front = [AgtermInput]::GetForegroundWindow()
+        if ([AgtermWin32]::ClassOf($front) -ne "Windows.UI.Core.CoreWindow") { return $false }
+        Note "dismissing the Windows flyout '$([AgtermWin32]::TextOf($front))' in front"
+        [AgtermInput]::Press([byte]0x1B)
+        Start-Sleep -Milliseconds 800
+    }
+    $false
 }
 
 # Open-Palette presses the chord and waits for the panel; nothing comes back when the window is not in front.
