@@ -351,7 +351,7 @@ final class NativeTerminal {
             let next = NativeMenu.points(after: command, from: points)
             if let onFontSize { onFontSize(next) } else { setFontSize(next) }
         case .newSession, .newServerSession, .renameSession, .restartSession, .closeSession, .nextSession, .previousSession, .find, .quit,
-             .editKeymap, .reloadKeymap, .settings:
+             .editKeymap, .reloadKeymap, .settings, .sessionPalette, .commandPalette:
             if let onWindowCommand { onWindowCommand(command) } else if command == .quit { DestroyWindow(window) }
         }
     }

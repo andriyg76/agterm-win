@@ -10,6 +10,7 @@ public struct WindowsKeymap: Sendable {
         (.newSession, .newSession), (.newServerSession, .newRemoteSession), (.renameSession, .renameSession),
         (.closeSession, .closeSession), (.nextSession, .nextSession), (.previousSession, .previousSession),
         (.find, .toggleSearch), (.fontBigger, .increaseFontSize), (.fontSmaller, .decreaseFontSize), (.fontReset, .resetFontSize),
+        (.sessionPalette, .sessionPalette), (.commandPalette, .commandPalette),
     ]
 
     /// reserved are the fixed chords of commands with no built-in action; a binding on one never fires.

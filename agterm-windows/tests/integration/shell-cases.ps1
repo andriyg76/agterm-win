@@ -204,6 +204,9 @@ $shellCases = [ordered]@{
     }
 }
 
+. (Join-Path $PSScriptRoot "title-bar-cases.ps1")
+. (Join-Path $PSScriptRoot "palette-cases.ps1")
+
 # seeds a case's state directory before its window starts; a keymap problem at launch would open a message box
 $shellPreparations = @{
     "notify-banners-off" = { param($state) Set-Content (Join-Path $state "native.json") '{"notifications": {"banners": false}}' }
@@ -214,13 +217,34 @@ $shellPreparations = @{
     }
 }
 
+# Note marks a step in the log, so a case that stops shows where.
+function Note([string]$Text) { Write-Host ("  {0:HH:mm:ss} {1}" -f (Get-Date), $Text) }
+
+# A window that stops answering blocks SendMessage, PrintWindow and agtermctl for good, so a watchdog process stops
+# it after $ShellCaseSeconds: every blocked call then returns and the case fails instead of hanging the run.
+$ShellCaseSeconds = 180
+
 function Invoke-ShellCase([string]$Name) {
     $shell = Start-Shell $Name $shellPreparations[$Name]
+    Note "$Name started"
+    $watchdog = Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -PassThru -ArgumentList @("-NoProfile", "-Command",
+        "Start-Sleep -Seconds $ShellCaseSeconds; Stop-Process -Id $($shell.Process.Id) -Force -ErrorAction SilentlyContinue")
+    $started = Get-Date
     try {
         $failures = if ($shell.Ready) { @(& $shellCases[$Name] $shell) } else { @("the control socket did not answer within 30 s") }
+    } catch {
+        # a case's own script error fails that case, with where it stopped, and the run goes on
+        $failures = @("script error at $(Split-Path -Leaf $_.InvocationInfo.ScriptName):$($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)")
     } finally {
         Save-Snapshot $shell "final"
+        Stop-Process -Id $watchdog.Id -Force -ErrorAction SilentlyContinue
         Stop-Shell $shell
+    }
+    if (((Get-Date) - $started).TotalSeconds -ge $ShellCaseSeconds) { $failures += "the case did not finish within $ShellCaseSeconds s; the window was stopped" }
+    if (@($failures | ? { $_ }).Count -gt 0) {
+        # the app's own account of the case, since CI's uploaded results are not always at hand
+        $logFile = Join-Path $shell.State "agterm-win.log"
+        if (Test-Path $logFile) { Get-Content $logFile -Tail 25 | % { Write-Host "    log: $_" } }
     }
     $crash = Join-Path $shell.State "crash.log"
     if (Test-Path $crash) { $failures += "crash: " + (Get-Content $crash -Raw).Trim() }

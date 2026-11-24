@@ -1,0 +1,57 @@
+import AgtermWinKit
+import Testing
+
+struct TitleBarTests {
+    private let bar = TitleBar(width: 1300, sidebarWidth: 240, dpi: 96)
+
+    @Test func buttonsSitAtTheEdgesInOrder() {
+        #expect(bar.height == 36)
+        #expect(bar.span(of: .menu) == .init(left: 0, right: 40))
+        #expect(bar.span(of: .newSession) == .init(left: 40, right: 80))
+        #expect(bar.span(of: .close) == .init(left: 1254, right: 1300))
+        #expect(bar.span(of: .maximize) == .init(left: 1208, right: 1254))
+        #expect(bar.span(of: .minimize) == .init(left: 1162, right: 1208))
+        #expect(bar.span(of: .find) == .init(left: 1122, right: 1162))
+    }
+
+    @Test func titleStartsAtTheTerminalAndStopsBeforeFind() {
+        #expect(bar.title == .init(left: 250, right: 1112))
+        #expect(TitleBar(width: 1300, sidebarWidth: 0, dpi: 96).title.left == 90)
+        #expect(TitleBar(width: 200, sidebarWidth: 240, dpi: 96).title.isEmpty)
+    }
+
+    @Test func spansScaleWithTheMonitor() {
+        let scaled = TitleBar(width: 2600, sidebarWidth: 480, dpi: 192)
+        #expect(scaled.height == 72)
+        #expect(scaled.span(of: .close) == .init(left: 2508, right: 2600))
+        #expect(scaled.span(of: .newSession) == .init(left: 80, right: 160))
+    }
+
+    @Test func hitTellsButtonsCaptionAndTheTopEdgeApart() {
+        #expect(bar.hit(x: 10, y: 20, topBorder: 6) == .button(.menu))
+        #expect(bar.hit(x: 60, y: 20, topBorder: 6) == .button(.newSession))
+        #expect(bar.hit(x: 600, y: 20, topBorder: 6) == .caption)
+        #expect(bar.hit(x: 1130, y: 20, topBorder: 6) == .button(.find))
+        #expect(bar.hit(x: 1170, y: 20, topBorder: 6) == .button(.minimize))
+        #expect(bar.hit(x: 1220, y: 20, topBorder: 6) == .button(.maximize))
+        #expect(bar.hit(x: 1299, y: 20, topBorder: 6) == .button(.close))
+        #expect(bar.hit(x: 1299, y: 2, topBorder: 6) == .top)
+        #expect(bar.hit(x: 1299, y: 2, topBorder: 0) == .button(.close))
+        #expect(bar.hit(x: 600, y: 36, topBorder: 6) == .outside)
+    }
+
+    @Test func captionButtonsWinWhenTheWindowIsNarrow() {
+        let narrow = TitleBar(width: 150, sidebarWidth: 240, dpi: 96)
+        #expect(narrow.hit(x: 20, y: 20, topBorder: 0) == .button(.minimize))
+        #expect(narrow.hit(x: 149, y: 20, topBorder: 0) == .button(.close))
+    }
+
+    @Test func tipsNameTheCommandAndTheKeymapsChord() {
+        #expect(TitleBar.Button.menu.tip() == "Menu")
+        #expect(TitleBar.Button.newSession.tip() == "New Session (Ctrl+Shift+T)")
+        #expect(TitleBar.Button.find.tip([.find: "Ctrl+F"]) == "Find… (Ctrl+F)")
+        #expect(TitleBar.Button.find.tip([.find: ""]) == "Find…")
+        #expect(TitleBar.Button.close.tip() == nil)
+        #expect(TitleBar.Button.allCases.filter(\.isCaption) == [.minimize, .maximize, .close])
+    }
+}
