@@ -12,6 +12,10 @@ public static class AgtermInput {
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr pid);
+    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint attach, uint to, bool on);
+    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr window);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr wParam, string text);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr wParam, StringBuilder text);
     [DllImport("user32.dll")] static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
@@ -35,9 +39,20 @@ public static class AgtermInput {
         SetForegroundWindow(window);
         for (int i = 0; i < 20 && GetForegroundWindow() != window; i++) {
             if (i == 2) Click(x, y);
+            if (i == 5) Take(window);
             System.Threading.Thread.Sleep(100);
         }
         return GetForegroundWindow() == window;
+    }
+
+    // Take borrows the foreground window's input queue for the request, which Windows then grants: keystrokes
+    // reach the window in front even while a flyout still covers it.
+    static void Take(IntPtr window) {
+        uint mine = GetCurrentThreadId(), theirs = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
+        bool attached = theirs != 0 && theirs != mine && AttachThreadInput(mine, theirs, true);
+        BringWindowToTop(window);
+        SetForegroundWindow(window);
+        if (attached) AttachThreadInput(mine, theirs, false);
     }
 
     public static void Press(byte key) {
@@ -81,21 +96,12 @@ function Get-Palette([IntPtr]$Window) {
 
 function Get-Rows($Palette) { if ($Palette.List) { @([AgtermInput]::Rows($Palette.List)) } else { @() } }
 
-# Bring-Front brings the window forward, clicking the middle of its drag area if Windows refuses the request. A
-# Windows flyout in front (the arm64 runner's "Microsoft account" prompt) takes every click, so it is dismissed with
-# Esc first; another program's window is left alone.
+# Bring-Front brings the window forward: asked, then by a click on the middle of its drag area, then by borrowing the
+# foreground's input queue, which a Windows flyout in front (the arm64 runner's "Microsoft account" prompt) needs.
 function Bring-Front([IntPtr]$Window) {
     $bar = Get-Bar $Window
     $drag = Get-ScreenPoint $Window ([int](($bar.Title[0] + $bar.Title[1]) / 2)) $bar.Middle
-    for ($attempt = 0; $attempt -lt 3; $attempt++) {
-        if ([AgtermInput]::Front($Window, $drag.X, $drag.Y)) { return $true }
-        $front = [AgtermInput]::GetForegroundWindow()
-        if ([AgtermWin32]::ClassOf($front) -ne "Windows.UI.Core.CoreWindow") { return $false }
-        Note "dismissing the Windows flyout '$([AgtermWin32]::TextOf($front))' in front"
-        [AgtermInput]::Press([byte]0x1B)
-        Start-Sleep -Milliseconds 800
-    }
-    $false
+    [AgtermInput]::Front($Window, $drag.X, $drag.Y)
 }
 
 # Open-Palette presses the chord and waits for the panel; nothing comes back when the window is not in front.
