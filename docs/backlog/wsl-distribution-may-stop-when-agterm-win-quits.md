@@ -6,7 +6,9 @@ added: 2026-11-24
 # a WSL distribution may stop, with its agterm-server, once agterm-win quits
 
 agterm-win reaches a distribution's agterm-server only through `wsl.exe` pipes: the catalog stream, the presentation
-streams and the shown pane's `zmx attach`. Sessions live in the distribution's own zmx daemons, as on a Linux host.
+streams and the shown pane's `zmx attach`. Sessions live in the distribution's own zmx daemons, as on a Linux host. The server process itself needs no
+keeping: each daemon runs in a systemd scope of its own (`ServerPlacement`), and a restarted server adopts the
+survivors (`AgtermServer.adopt`). What a session cannot survive is the distribution stopping, daemons included.
 Unverified: WSL2 may stop a distribution once no `wsl.exe` client is left and its idle timeout passes, systemd and
 lingering or not. Then quitting agterm-win ends the server and every session in it, which a Linux host never does.
 
