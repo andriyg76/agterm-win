@@ -50,6 +50,8 @@ paths:
   an event carrying `agent_id` adds `--if-idle` to `active`, and a Stop whose `background_tasks` lists a
   running subagent, workflow or shell posts `active --blink` in place of `completed`, dropping the caller's flags
   so `--auto-reset` cannot idle the row. Anything else, an unreadable payload included, posts argv.
+  `AGTERM_CLAUDE_IGNORE_SHELLS=1` (exactly `1`) in Claude's environment drops shells from that running set; it is a
+  hook-local knob because the hook decides before the status reaches the app, and agterm-server has no settings to read.
 - Codex maps SessionStart idle; prompt/pre/post tool active; Stop ending `?` blocked, otherwise completed.
   Those first four report nothing for a null `transcript_path`: Codex's ephemeral memory consolidation
   thread fires them but never a user Stop, so they would leave the pane active.
@@ -182,7 +184,7 @@ renumbering. Do not reintroduce a count anywhere.
   `.expand`, `.tint`
 - `session.new`, `.duplicate`, `.remote.new`, `.companion.new`, `.companion.page`, `.companion.duplicate`, `.companion.convert`, `.companion.move`, `.companion.promote`, `.companion.page.attach`, `.page`, `.collapse`, `.expand`, `.close`, `.terminate`, `.select`, `.rename`, `.reveal`, `.move`, `.type`, `.split`,
   `.split.close`, `.swap`, `.lead`,
-  `.scratch`, `.focus`, `.resize`, `.go`, `.copy`, `.paste`, `.selectall`, `.text`, `.search`, `.status`,
+  `.scratch`, `.focus`, `.resize`, `.go`, `.copy`, `.paste`, `.paste.text`, `.selectall`, `.text`, `.search`, `.status`,
   `.flag`, `.tint`, `.info`, `.seen`, `.restore`, `.restart`, `.background`, `.overlay.open`, `.overlay.close`, `.overlay.resize`,
   `.overlay.reload`, `.overlay.navigate`,
   `.overlay.result`, `.overlay.submit`, `.overlay.copy`, `.overlay.text`, `.overlay.job.run`, `.overlay.page.serve`, `.overlay.hide`,
@@ -349,9 +351,7 @@ Windows reply.
   the free can land on that address and take the old child's exit, which closed the pane (measured: the
   event carried the old shell's run time). The same call spawns a pane the deck does not lay out, since
   libghostty creates a surface for a view outside any window. The reply waits up to 10 s for a new
-  leader pid read per daemon from the kernel (`ZmxDaemonForeground.leaderPID` on the Mac, `ProcDaemon` by argv and
-  `ZMX_DIR` on agterm-server, where a socket's peer pid names the process that called `listen`), never `zmx list`,
-  which waits on every daemon (#1055). Past that it answers unverified, and a follow keeps the pane's restart hold and
+  leader pid read per daemon from the kernel (the leader-scan bullet below, #1055). Past that it answers unverified, and a follow keeps the pane's restart hold and
   publishes the respawn once the shell shows up, within 60 s of the launch. Holds are counted, one per restart, so a
   refused retry releases only its own. A later restart's confirmed kill, the pane closing, a parent respawn
   (`primaryRespawns`) or, on the server, a recorded exit ends the follow without publishing; a confirmed pane is
@@ -360,7 +360,7 @@ Windows reply.
   hold. agterm-server announces the respawn as soon as the new daemon is attachable, before `exec`, since a viewer's
   attach is what releases it; the Mac publishes after confirmation. A confirmed reply carries `result.restart` (`paneID`, `oldPid`, `newPid`); they are shell pids, the program
   reads back as `foreground`. With no `command` the host replays the pane's foreground program: the
-  argv `tree` reports, read through `ForegroundProcess.observed` from a fresh leader listing, filtered by
+  argv `tree` reports, read through `ForegroundProcess.observed` from a fresh leader scan, filtered by
   host-free `RestartReplay.resolve` and launched through `attachCommand(replaying:)`. It starts in that
   process's own working directory, never `session.cwd`: the shell-reported cwd can be stale before the
   first prompt. A process that IS the daemon leader and a shell is refused, to prevent replaying the
@@ -382,7 +382,15 @@ Windows reply.
   also lands during app termination and before panes mount. A stale-socket or failed kill sends nothing.
   This is what a closed terminal does: `nohup`, `disown`ed and other background jobs are never signalled,
   and a foreground program that ignores hangups survives a close. Do not widen it to the shell's process
-  tree. `ProcessSweeper` is nil by default because a test's fake listing names real pids.
+  tree. `ProcessSweeper` is nil by default because a test's fake leaders name real pids.
+- Runtime leader reads never run `zmx list`, which probes daemons one at a time, so a few stalled ones time out
+  every pane's answer. The tree, companion duplicate, restart's old and new shell, and the foreground job of a pane
+  or session kill read `ZmxClient.sessionLeaderPIDs` on the Mac (each daemon socket's peer pid,
+  `ZmxDaemonForeground.leaders`) and `ServerPanes.daemonShells` on agterm-server (one `/proc` pass,
+  `ProcDaemon.leaders`, since a Linux socket's peer pid names the process that called `listen`), where `zmx.kill`'s
+  leader comes from it too. `zmx.list`, `zmx.tree`, prune, the reset and launch reap, the Mac's `zmx.kill` inventory
+  and the server's observer keep the listing, since they need client counts, unclaimed daemons and unreadable rows;
+  the reap, reset and server prune also hang up the foreground jobs of the leader pids that listing read.
 - `session.scratch` is a third login shell with on/off/toggle; in Live sessions mode it is the daemon
   `Session.ScratchDaemon` names, saved and restored hidden, claimed, reaped and reset like a pane's, and
   ended by its shell's exit or `--command`; a requested-Live fallback keeps it for the next Live launch. It spawns lazily, survives
@@ -505,7 +513,7 @@ Windows reply.
   sessions): that Mac shows the page's asks in its own window.
 - `session.companion.duplicate` is its own wire command for the same older-app reason.
   `ControlServer.duplicateCompanion` plans every pane through `ForegroundProcess.replayObservation` and host-free
-  `DuplicateReplay` from one fresh leader listing before creating anything; `AppStore.duplicateAsCompanion` then
+  `DuplicateReplay` from one fresh leader scan before creating anything; `AppStore.duplicateAsCompanion` then
   stores each program as `initialCommand`/`splitInitialCommand`, so it runs as a `--command` pane does, ungated by
   restore mode. It stores them only after the copy and its split exist, rewriting the source's session id, pane ids
   and their zmx daemon names to the copy's: an argv carrying its own pane identity, as a codex started with
@@ -625,6 +633,15 @@ Windows reply.
   `session.copy` read-back having no pane either. Omitted, and for select-all always, the pane is
   `Session.addressableSurface = surface ?? splitSurface`, never focus-aware `activeSurface`, so select-all
   and copy share one pane. Read paste through text and select-all through copy.
+- `session.paste.text` (CLI `session paste --stdin`) is its own wire command, never a `text` field on
+  `session.paste`: an older app already decodes `args.text` and would ignore it, pasting the clipboard instead.
+  It goes through `bindingSurface` plus `--pane-id` (`Session.paneAddress`), then `insertPasted`, which is
+  `ghostty_surface_text`: bracketed when the program set mode 2004, no paste-protection prompt, and selected control
+  bytes, including ESC, BS, DEL, Ctrl-C, Ctrl-Z, Ctrl-U and Ctrl-W, replaced with spaces by libghostty's paste encoder, so
+  the text cannot close the bracket; other C0 bytes and tab pass through, and LF becomes CR without mode 2004.
+  `insertPasted` returns nothing, so the arm checks `isRealized` after the expedite. Not in `waitsOnNetwork`:
+  it copies nothing. agterm-server refuses it (`ServerCommandPolicy`) by approved exception: only the daemon's
+  terminal knows mode 2004, so parity needs a zmx patch. Read back through `session.text --pane-id`.
 - Keep standard SwiftUI Edit routing. `GhosttySurfaceView` implements Copy/Paste/Select All and validation;
   focused text fields retain their behavior, terminal Cut stays absent. Do not replace the combined
   pasteboard command group. Remove the separate Undo/Redo group because Command-Z belongs to Reopen Closed
@@ -1543,7 +1560,11 @@ Windows reply.
   fall back on, and `result.id` is the resolved `surface:<session>:<position>`. `ControlActions` keeps
   the two-argument requirement and defaults the overload to refuse a token by name.
 - Each tree surface node carries `paneID`, the live surface's token, omitted for a slot whose surface
-  carries none (an overlay, or a pane whose surface is not created yet).
+  carries none (an overlay, or a pane whose surface is not created yet). A Live split hidden since a relaunch reports
+  its identity while its daemon runs (the mail predicate): `msg` and `zmx.kill.pane` take it, and
+  `Session.paneRole(forToken:)` resolves a surfaceless slot by its identity, so a command needing a surface
+  refuses it rather than answering `unknown pane id`. `paneToken(for:)` keeps the daemon gate, the server's
+  mail predicate. A token that matched a primary with no surface never falls back to the split.
 - `session.status --pane-id` (#199) falls back to the role for an absent or unknown token and adds no
   read-back field: it reports only the resolved `statusPane`.
 - Auto-reset clears both session entered and session left. Status renders on selected sessions too.
@@ -1604,8 +1625,14 @@ Windows reply.
   shapes the reply; `ControlActions` only resolves an address to a live pane, lists the `--all` panes and
   reports a queued message. A host without the bus answers `MessagePaneError.unsupported`, which refuses the
   whole command; only `.unresolved` becomes a per-recipient `unknown pane` rejection.
-- A live pane is a realized surface with a parseable token, the one definition recipients, identities and
-  `--all` share; a split hidden since launch has none. `ControlServer+Messages` resolves the session across
+- A live pane is a realized surface with a parseable token, or, in a Live launch, a locally owned pane with no
+  realized surface whose daemon the kernel finds (`AppStore.daemonProbe`): the one definition recipients, identities,
+  `--all` and the tree's daemon-based `paneID` fallback share; a realized surface's token and `scratchPaneID` stay
+  identity metadata, published whatever a probe answers. Such a pane's leader pid is recorded and checked on every mail access, a
+  realized surface included, since its attach can still replace the daemon: an unknown probe refuses and drops
+  nothing, an absent one (no socket at the pane's name) and a different pid drop the earlier mail first. A primary exit
+  promotes a surfaceless split unless its probe is absent. The queued event routes by the recipient's canonical
+  session and never re-probes. `ControlServer+Messages` resolves the session across
   every open store with `window: nil`, never the frontmost default, then asks `AppStore.messagePane`.
 - An identity is `SESSION:PANE-ID` only and must be a live pane of that session, on send, read and ack alike.
   There is no fallback to a role or the active pane, and a stale or incomplete identity never becomes an
@@ -2213,7 +2240,8 @@ Windows reply.
   origin had reported a role or the attach it replaced dropped before its first report, and
   `remotePaneResumed`. Re-running the attach in the shell was rejected: it
   would claim the lead on every retry and skip that cleanup. A key on a waiting pane retries now; Command
-  chords pass. `RemoteLinkObserver` calls `ControlServer.retryRemoteLinksNow` on the display wake
+  chords pass. A click on the reconnecting panel, or on a lead cover still up over a waiting pane, retries too
+  (`PaneLead.coverClicked`, `noticeClicked`) and never claims; a dashboard cell's panel takes no clicks. `RemoteLinkObserver` calls `ControlServer.retryRemoteLinksNow` on the display wake
   `SystemWakeObserver` bridges, which a dark wake or a headless Mac never posts, and on every
   `NWPathMonitor` path change that leaves the path usable, a hand-off that stayed usable included;
   the first path report is the state at start. That makes
@@ -2654,9 +2682,10 @@ Windows reply.
   before and is never covered. A role change emits `tree.changed`.
 - A pane that does not lead is covered (`PaneLeadCover`), by every host of its terminal: the deck, where
   it sits BELOW the pane's own pane overlay and hides while one is up, terminal zoom, and the dashboard.
+  A dashboard cell's cover takes no click and offers no takeover, since the cell owns its clicks and keys.
   The daemon ignores a session switch while its leader is managed: the client's nonce, its generation and
   what it reads and types through the daemon are all bound to that one session. Taking the lead is always a FRESH attach into a
-  new surface, by the first key on the cover, by `session.lead`, or by itself when the role turns
+  new surface, by the first key or a click on the cover, by `session.lead`, or by itself when the role turns
   `unowned`. The automatic one omits the claim, so it leads only if the daemon is still unowned when it
   arrives and cannot take a lead someone claimed meanwhile.
   A reconnect after a dropped link, an attached row's origin scratch included, also sets `ZMX_MANAGED_RECLAIM` to
@@ -2725,9 +2754,9 @@ Windows reply.
   bracketed paste.
 - A covered pane ATTACHED from another Mac refuses all three with `pane is in use on the Mac it runs
   on; take the lead to drive it from here`: its daemon is an ssh away and these reads are synchronous.
-- `session.lead [--pane]` is the control twin of the cover's key. A pane that already leads answers ok;
+- `session.lead [--pane]` is the control twin of the cover's key and click. A pane that already leads answers ok;
   one still attaching without the claim (a reconnect, the unowned retry) answers ok and takes the lead on
-  its first report, as a key on its cover does; one with no reported role answers `pane has no lead to take`; a scratch outside Live
+  its first report, as a key or click on its cover does; one with no reported role answers `pane has no lead to take`; a scratch outside Live
   sessions is refused.
   Read back `lead`.
   It has no menu item or chord: the cover is its GUI surface.

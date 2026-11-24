@@ -49,7 +49,7 @@ the control channel is available:
 - `AGTERM_PANE` / `AGTERM_PANE_ID`: the surface's spawn role (`left`|`right`|`scratch`) and stable
   per-surface token. The role is not rewritten after promotion or swap; the token resolves the LIVE slot.
   Prefer `--pane-id "$AGTERM_PANE_ID"` where supported: `session status`, `session restore`,
-  `session text`, `session type`, `session restart`, `surface cursor` and `session hud`. `tree --json` lists each surface's
+  `session text`, `session type`, `session paste --stdin`, `session restart`, `surface cursor` and `session hud`. `tree --json` lists each surface's
   token as `surfaces[].paneID`. The agent-status hook forwards both values for compatibility.
 - `TERM_PROGRAM=agterm` / `TERM_PROGRAM_VERSION` (agterm's version): the terminal identity, replacing
   the `ghostty` pair embedded libghostty would set. A tool that decides a capability from a list of
@@ -447,7 +447,8 @@ omitted when expanded).
 - `session paste` — paste the system clipboard into the session (the socket analogue of ⌘V; read it back with
   `session text`). `--pane left|right|scratch` picks the pane, with the usual role and position aliases;
   omitted is the main pane. Copied files paste as paths and an image-only clipboard as a saved PNG's path; in a
-  remote pane they are copied to that host first ([details](reference.md#session)).
+  remote pane they are copied to that host first ([details](reference.md#session)). `--stdin` pastes text from
+  stdin instead, leaving the clipboard alone, and with it `--pane-id "$AGTERM_PANE_ID"` targets a pane by its token.
 - `session select-all` — select the session's entire terminal buffer (the socket analogue of ⌘A; read the
   selection back with `session copy`).
 - `session text [--all] [--lines N] [--pane left|right|scratch] [--pane-id TOKEN]`: print the session buffer
@@ -463,7 +464,7 @@ omitted when expanded).
   transposes a shown split of the other orientation. Hide keeps it alive; `close` destroys the pane and
   whatever runs in it.
 - `session lead [--pane left|right|scratch]`: for a session shared with another Mac, take the lead of a pane here
-  (what a key press on its "in use" cover does). `tree`'s `surfaces[].lead` reads `leader`/`follower`/
+  (what a key press or click on its "in use" cover does). `tree`'s `surfaces[].lead` reads `leader`/`follower`/
   `unowned`. On the Mac the session runs on, a covered pane still takes `session type`/`text`.
 - `session restart --pane-id ID [--command LINE]`: end one pane's shell and its foreground program, and start a
   new login shell there running LINE. Same pane, same stable id, blank screen, nothing typed. Without
