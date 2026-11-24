@@ -74,7 +74,7 @@ public struct NativeSettings: Codable, Equatable, Sendable {
     /// serverLaunch is the choice made for each WSL distribution's agterm-server, by distribution name.
     public var serverLaunch: [String: ServerLaunch] = [:]
     /// sidebarWidthPoints is the stored divider position, the read side of `sidebar.width`.
-    public var sidebarWidthPoints: Double = AppStore.sidebarWidthDefault
+    public var sidebarWidthPoints: Double = SidebarWidthLimits.defaultPoints
     public var sidebarTint: Int = 0
 
     public init() {}
@@ -88,7 +88,7 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         if let frame = settings.frame, frame.right <= frame.left || frame.bottom <= frame.top { settings.frame = nil }
         settings.localSessions.removeAll { $0.commandLine.isEmpty }
         if let index = settings.selectedLocal, !settings.localSessions.indices.contains(index) { settings.selectedLocal = nil }
-        settings.sidebarWidthPoints = AppStore.clampSidebarWidth(settings.sidebarWidthPoints)
+        settings.sidebarWidthPoints = SidebarWidthLimits.clamp(settings.sidebarWidthPoints)
         return settings
     }
 
@@ -111,9 +111,9 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         selectedLocal = try container.decodeIfPresent(Int.self, forKey: .selectedLocal)
         defaultProfile = try container.decodeIfPresent(String.self, forKey: .defaultProfile)
         serverLaunch = try container.decodeIfPresent([String: ServerLaunch].self, forKey: .serverLaunch) ?? [:]
-        sidebarWidthPoints = try container.decodeIfPresent(Double.self, forKey: .sidebarWidthPoints) ?? AppStore.sidebarWidthDefault
+        sidebarWidthPoints = try container.decodeIfPresent(Double.self, forKey: .sidebarWidthPoints) ?? SidebarWidthLimits.defaultPoints
         sidebarTint = try container.decodeIfPresent(Int.self, forKey: .sidebarTint) ?? 0
-        sidebarWidthPoints = AppStore.clampSidebarWidth(sidebarWidthPoints)
+        sidebarWidthPoints = SidebarWidthLimits.clamp(sidebarWidthPoints)
     }
 
     public func encode(to encoder: Encoder) throws {
