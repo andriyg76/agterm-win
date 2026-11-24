@@ -273,6 +273,35 @@ $shellCases = [ordered]@{
         $failures
     }
 
+    # local --html opens a WebView2 page in the overlay slot (stage D0).
+    "overlay-html" = {
+        param($Shell)
+        $state = $Shell.State
+        $fixtures = Join-Path $PSScriptRoot "fixtures"
+        $page = Join-Path $fixtures "overlay-page.html"
+        if (-not (Test-Path $page)) { return @("missing fixture $page") }
+        $id = New-PowerShellSession $state
+        if (-not $id -or -not (Wait-Prompt $state $id)) { return @("the session never reached its prompt") }
+        $failures = @()
+        $open = Invoke-Ctl $state @("session", "overlay", "open", "--html", $page, "--target", $id)
+        if (-not $open.ok) { return @("overlay open replied $($open | ConvertTo-Json -Compress)") }
+        $node = Wait-Until {
+            $n = Get-Node $state $id
+            if ($n.htmlOverlays -and $n.htmlOverlays[0].state -eq "loaded") { $n }
+        } 45
+        if (-not $node) {
+            $snap = Get-Node $state $id
+            return $failures + @("html overlay never reached loaded: $($snap.htmlOverlays | ConvertTo-Json -Compress)")
+        }
+        if ($node.htmlOverlays[0].file -ne $page) { $failures += "tree file is '$($node.htmlOverlays[0].file)'" }
+        Save-Snapshot $Shell "overlay-html"
+        $noRead = Invoke-Ctl $state @("session", "overlay", "text", "--target", $id)
+        if ($noRead.error -ne "no overlay to read: the slot holds an html page") { $failures += "overlay text replied $($noRead | ConvertTo-Json -Compress)" }
+        Invoke-Ctl $state @("session", "overlay", "close", "--target", $id) | Out-Null
+        if (-not (Wait-Until { -not (Get-Node $state $id).overlay } 10)) { $failures += "overlay stayed on tree after close" }
+        $failures
+    }
+
     # keymap.conf rebinds a built-in; a reload reports a line agterm-win cannot run
     "keymap" = {
         param($Shell)

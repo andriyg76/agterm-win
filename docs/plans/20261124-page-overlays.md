@@ -6,15 +6,17 @@ overlay slot; replica pages follow the same `pageRequest` path as program overla
 
 **Order:** **D0** `--url` in a floating panel, then markdown/text/image and presentation replica pages.
 
-## Not started
+## In progress (branch `feature/page-overlays`)
 
 | Milestone | Work | Gate |
 |-----------|------|------|
-| D0 | WebView2 host in `OverlayFrame` or sibling HWND; `session.overlay.open --url` on **local** sessions | integration `overlay-html` (minimal file on disk) |
+| D0 | WebView2 host (`PageOverlayFrame` + `NativeWebView.cpp`); local `--html` / `--url` | integration `overlay-html` |
 | D1 | Remote `pageRequest` / `pageClose` on WSL presenter | `remote-linux-gate` row + smoke when disconnected |
 | D2 | markdown/text/image sources | extend `overlay-html` |
 
 ## Progress
 
-- [ ] D0 scaffold (dependency + empty host)
-- [ ] Remove `NativeOverlay.pageRefusal` for supported sources incrementally
+- [x] D0 scaffold (WebView2 SDK fetch, host HWND, local file + https URL)
+- [x] `--html` / `--url` on local sessions (`ControlOverlayOpen` + `NativeControl+Overlay`)
+- [ ] D1 replica pages on catalog sessions
+- [ ] D2 markdown/text/image

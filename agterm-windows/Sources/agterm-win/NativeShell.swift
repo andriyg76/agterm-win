@@ -32,6 +32,7 @@ final class NativeShell {
         var unseen = 0
         var overlay: Overlay?
         var overlayExitCode: Int?
+        var pageOverlay: (page: HtmlOverlay, sizePercent: Int?, hidden: Bool, frame: PageOverlayFrame)?
         /// split and its terminal are the second pane, both nil without one; a hidden split keeps its shell.
         var split: NativeSplit?
         var splitTerminal: NativeTerminal?
@@ -951,6 +952,7 @@ final class NativeShell {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         let closing = locals.remove(at: index)
         closing.overlay?.frame.destroy()
+        closing.pageOverlay?.frame.destroy()
         closing.terminals.forEach { DestroyWindow($0.window) }
         recentSessions.removeAll { $0 == id }
         if dashboard?.members.contains(where: { $0.session == id }) == true { dashboardSessionsChanged() }
@@ -1019,6 +1021,14 @@ final class NativeShell {
         let top = titleBar.height
         let area = NativeOverlay.Rect(x: sidebarWidth, y: top, width: max(client.right - sidebarWidth, 1), height: max(client.bottom - top, 1))
         for session in locals {
+            refreshPageOverlayState(session)
+            if let page = session.pageOverlay {
+                let shown = session.id == selected && !page.hidden && dashboard == nil
+                let floating = (page.sizePercent ?? 100) < 100
+                page.frame.place(NativeOverlay.panel(in: area, sizePercent: page.sizePercent), border: floating ? scaled(1) : 0, shown: shown)
+                session.terminals.forEach { EnableWindow($0.window, !shown && dashboard == nil) }
+                continue
+            }
             guard let overlay = session.overlay else {
                 session.terminals.forEach { EnableWindow($0.window, dashboard == nil) }
                 continue
@@ -2113,7 +2123,9 @@ extension NativeShell: NativeControlHost {
         locals.map {
             var local = NativeControl.Local(id: $0.id, name: $0.name, commandLine: $0.commandLine, exited: $0.exited, attention: $0.attention,
                                             unseen: $0.unseen, cwd: $0.directory ?? "", title: $0.programTitle, overlay: $0.overlay?.state,
-                                            overlayExitCode: $0.overlayExitCode)
+                                            overlayExitCode: $0.overlayExitCode, htmlOverlay: $0.pageOverlay?.page)
+            local.pageOverlayHidden = $0.pageOverlay?.hidden ?? false
+            local.pageOverlaySizePercent = $0.pageOverlay?.sizePercent
             local.split = $0.splitTerminal == nil ? nil : $0.split
             local.splitCwd = $0.splitDirectory
             local.scratch = $0.scratchShown && $0.scratch != nil
@@ -2267,6 +2279,7 @@ extension NativeShell: NativeControlHost {
             return
         }
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
+        guard locals[index].pageOverlay == nil else { return }
         if selected != id { select(id) }
         let focused = hasFocus(id)
         let frame = OverlayFrame(parent: window, points: settings.fontPoints, dpi: dpi)
@@ -2295,6 +2308,51 @@ extension NativeShell: NativeControlHost {
         if focused { focus() }
     }
 
+    private func refreshPageOverlayState(at index: Int) {
+        guard var slot = locals[index].pageOverlay else { return }
+        var page = slot.page
+        let state = slot.frame.loadState()
+        page.loadState = state
+        if state == .loaded, let title = slot.frame.documentTitle() {
+            page.current = HtmlPageInfo(page: title, title: title, canGoBack: false, canGoForward: false)
+        }
+        slot.page = page
+        locals[index].pageOverlay = slot
+    }
+
+    private func refreshPageOverlayState(_ session: LocalSession) {
+        guard let index = locals.firstIndex(where: { $0.id == session.id }) else { return }
+        refreshPageOverlayState(at: index)
+    }
+
+    func openPageOverlay(_ id: Foundation.UUID, _ overlay: HtmlOverlay, sizePercent: Int?) {
+        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
+        guard locals[index].overlay == nil else { return }
+        if selected != id { select(id) }
+        let frame = PageOverlayFrame(parent: window)
+        var page = overlay
+        page.loadState = .loading
+        switch page.source {
+        case .file(let path, _): frame.load(file: path)
+        case .url(let address): frame.load(url: address)
+        default: break
+        }
+        locals[index].pageOverlay = (page: page, sizePercent: sizePercent, hidden: false, frame: frame)
+        placeOverlays()
+        rebuild()
+        log("native shell: page overlay over \(locals[index].name) [\(id)]")
+    }
+
+    private func removePageOverlay(_ id: Foundation.UUID, frame: PageOverlayFrame) {
+        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay?.frame === frame else { return }
+        let focused = hasFocus(id)
+        locals[index].pageOverlay = nil
+        frame.destroy()
+        placeOverlays()
+        rebuild()
+        if focused { focus() }
+    }
+
     private func openServerCtlOverlay(_ id: Foundation.UUID, _ open: NativeOverlay.Open) {
         guard serverConnected(id), serverOverlays[id] == nil, let server = server(of: id), let session = server.remote.session(id) else { return }
         let launch = SessionSidebar.launch(for: session, hostLabel: server.label)
@@ -2311,6 +2369,10 @@ extension NativeShell: NativeControlHost {
             removeServerOverlay(id, frame: slot.frame, notifyOrigin: serverOverlayOriginNotify(id))
             return
         }
+        if let page = locals.first(where: { $0.id == id })?.pageOverlay {
+            removePageOverlay(id, frame: page.frame)
+            return
+        }
         guard let frame = locals.first(where: { $0.id == id })?.overlay?.frame else { return }
         removeOverlay(id, frame: frame)
     }
@@ -2320,6 +2382,12 @@ extension NativeShell: NativeControlHost {
             slot.state.sizePercent = sizePercent
             serverOverlays[id] = slot
             server(of: id)?.remote.session(id)?.overlaySizePercent = sizePercent
+            placeOverlays()
+            rebuild()
+            return
+        }
+        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay != nil {
+            locals[index].pageOverlay?.sizePercent = sizePercent
             placeOverlays()
             rebuild()
             return
@@ -2338,6 +2406,14 @@ extension NativeShell: NativeControlHost {
             placeOverlays()
             if focused { focus() }
             rebuild()
+            return
+        }
+        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay != nil {
+            let focused = hasFocus(id)
+            locals[index].pageOverlay?.hidden = hidden
+            placeOverlays()
+            rebuild()
+            if focused { focus() }
             return
         }
         guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay != nil else { return }
