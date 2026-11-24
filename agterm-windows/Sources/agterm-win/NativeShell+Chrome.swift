@@ -1,6 +1,7 @@
 import AgtermWinKit
 import NativeShim
 import WinSDK
+import agtermCore
 
 extension NativeShell {
     private static let dividerSlop: Int32 = 4
@@ -10,11 +11,11 @@ extension NativeShell {
     }
 
     func applyChrome() {
-        let palette = chromePalette
-        palette.applyToShim()
+        let colors = chromePalette
+        colors.applyToShim()
         if let tree { nt_tree_apply_colors(tree) }
         if let palette { nt_palette_apply_chrome(palette) }
-        refreshClientBrushes(palette)
+        refreshClientBrushes(colors)
         invalidateTitleBar()
         if let window { InvalidateRect(window, nil, false) }
     }

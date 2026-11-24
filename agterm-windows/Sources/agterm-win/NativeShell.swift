@@ -110,12 +110,12 @@ final class NativeShell {
     private let settingsURL: URL
     var settings: NativeSettings
     var window: HWND?
-    private var tree: UnsafeMutableRawPointer?
+    fileprivate var tree: UnsafeMutableRawPointer?
     private var notice: HWND?
     private var findBar: HWND?
     private var findFailed = false
     private var tooltip: UnsafeMutableRawPointer?
-    private var palette: UnsafeMutableRawPointer?
+    fileprivate var palette: UnsafeMutableRawPointer?
     // the open palette, what it lists, and the rows its query leaves, which Enter's index refers to
     private var paletteMode: Palette.Mode?
     private var paletteRows: [Palette.Row] = []

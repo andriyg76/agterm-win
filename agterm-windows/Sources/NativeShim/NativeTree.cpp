@@ -1,4 +1,5 @@
 #include "NativeShim.h"
+#include "NativeChrome.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -42,6 +43,14 @@ extern "C" void nt_tree_set_dpi(void *tree, uint32_t dpi) {
     auto window = static_cast<HWND>(tree);
     setFont(window, dpi);
     TreeView_SetItemHeight(window, MulDiv(24, static_cast<int>(dpi), 96));
+}
+
+extern "C" void nt_tree_apply_colors(void *tree) {
+    auto window = static_cast<HWND>(tree);
+    if (!window) return;
+    TreeView_SetBkColor(window, nt_chrome_sb_bg());
+    TreeView_SetTextColor(window, nt_chrome_sb_text());
+    InvalidateRect(window, nullptr, TRUE);
 }
 
 extern "C" void nt_find_bar_set_dpi(void *bar, uint32_t dpi) { setFont(static_cast<HWND>(bar), dpi); }
