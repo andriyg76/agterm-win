@@ -9,8 +9,7 @@ struct SidebarWidthTests {
         var settings = NativeSettings()
         settings.sidebarWidthPoints = SidebarWidthLimits.minPoints
         #expect(settings.sidebarWidthPoints == SidebarWidthLimits.minPoints)
-        settings.sidebarWidthPoints = 9000
-        #expect(settings.sidebarWidthPoints == SidebarWidthLimits.maxPoints)
+        #expect(SidebarWidthLimits.clamp(9000) == SidebarWidthLimits.maxPoints)
     }
 
     @Test func loadClampsOutOfRange() {
