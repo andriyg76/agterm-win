@@ -97,10 +97,10 @@ final class SettingsWindow {
     private func applyChrome(_ palette: ChromePalette) {
         if let dialogBrush { DeleteObject(dialogBrush) }
         chromeDark = palette.isDark
-        chromeBg = COLORREF(bitPattern: UInt(palette.clientBg & 0xFFFFFF))
-        chromeText = COLORREF(bitPattern: UInt(palette.chromeText & 0xFFFFFF))
-        chromeDim = COLORREF(bitPattern: UInt(palette.chromeDim & 0xFFFFFF))
-        dialogBrush = CreateSolidBrush(COLORREF(bitPattern: UInt(palette.palBg & 0xFFFFFF)))
+        chromeBg = COLORREF(bitPattern: Int32(palette.clientBg & 0xFFFFFF))
+        chromeText = COLORREF(bitPattern: Int32(palette.chromeText & 0xFFFFFF))
+        chromeDim = COLORREF(bitPattern: Int32(palette.chromeDim & 0xFFFFFF))
+        dialogBrush = CreateSolidBrush(COLORREF(bitPattern: Int32(palette.palBg & 0xFFFFFF)))
     }
 
     private func tintCommCtrls(_ window: HWND?) {

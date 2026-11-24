@@ -110,12 +110,12 @@ final class NativeShell {
     private let settingsURL: URL
     var settings: NativeSettings
     var window: HWND?
-    fileprivate var tree: UnsafeMutableRawPointer?
+    var tree: UnsafeMutableRawPointer?
     private var notice: HWND?
     private var findBar: HWND?
     private var findFailed = false
     private var tooltip: UnsafeMutableRawPointer?
-    fileprivate var palette: UnsafeMutableRawPointer?
+    var palette: UnsafeMutableRawPointer?
     // the open palette, what it lists, and the rows its query leaves, which Enter's index refers to
     private var paletteMode: Palette.Mode?
     private var paletteRows: [Palette.Row] = []
@@ -150,7 +150,7 @@ final class NativeShell {
     private var tagged: [Foundation.UUID] = []
     private var dimmed: [UInt8] = []
     private var items: [Foundation.UUID: UnsafeMutableRawPointer] = [:]
-    fileprivate var darkBrush = CreateSolidBrush(0x262525)
+    var darkBrush = CreateSolidBrush(0x262525)
     var dpi: UInt32 = 96
     private var control: ControlSocket?
     private let version: String
@@ -166,7 +166,7 @@ final class NativeShell {
     /// sidebarDragging moves the sidebar divider in client pixels.
     var sidebarDragging = false
     var menuBarHighlight: Int?
-    fileprivate var highlightBrush = CreateSolidBrush(0x784F26)
+    var highlightBrush = CreateSolidBrush(0x784F26)
     /// closeSessionCoalesced swallows a second Close Session chord right after one dismissed an overlay; arm64 can deliver two.
     private var closeSessionCoalesced: Date?
 
@@ -1426,7 +1426,7 @@ final class NativeShell {
         return overlay.terminal
     }
 
-    private func layout() {
+    func layout() {
         guard let window else { return }
         var client = RECT()
         GetClientRect(window, &client)

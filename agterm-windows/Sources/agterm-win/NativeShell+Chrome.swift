@@ -21,10 +21,10 @@ extension NativeShell {
     }
 
     private func refreshClientBrushes(_ palette: ChromePalette) {
-        let color = COLORREF(bitPattern: UInt(palette.clientBg & 0xFFFFFF))
+        let color = COLORREF(bitPattern: Int32(palette.clientBg & 0xFFFFFF))
         DeleteObject(darkBrush)
         darkBrush = CreateSolidBrush(color)
-        let accent = COLORREF(bitPattern: UInt(palette.chromeAccent & 0xFFFFFF))
+        let accent = COLORREF(bitPattern: Int32(palette.chromeAccent & 0xFFFFFF))
         DeleteObject(highlightBrush)
         highlightBrush = CreateSolidBrush(accent)
     }
