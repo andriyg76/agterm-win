@@ -121,16 +121,6 @@ final class RemoteWindow: RemoteCatalogEffects {
             hud: { [weak self] hud in self?.onReplicaHud?(id, hud) },
             notify: { [weak self] in self?.onNotification(id, $0) },
             connection: { log("presentation for \(id): \($0)") },
-            overlayRequest: { [weak self] overlay in
-                guard let self else { return false }
-                return self.onReplicaOverlay?(id, overlay) ?? false
-            },
-            overlayClose: { [weak self] change in
-                self?.onReplicaOverlayClose?(id, change)
-            },
-            overlayResize: { [weak self] change in
-                self?.onReplicaOverlayResize?(id, change)
-            },
             askRequest: { [weak self] ask in
                 guard let self else { return false }
                 return self.onReplicaAsk?(id, ask) ?? false
@@ -144,6 +134,16 @@ final class RemoteWindow: RemoteCatalogEffects {
             },
             pickDismiss: { [weak self] ref in
                 self?.onReplicaPickDismiss?(id, ref)
+            },
+            overlayRequest: { [weak self] overlay in
+                guard let self else { return false }
+                return self.onReplicaOverlay?(id, overlay) ?? false
+            },
+            overlayClose: { [weak self] change in
+                self?.onReplicaOverlayClose?(id, change)
+            },
+            overlayResize: { [weak self] change in
+                self?.onReplicaOverlayResize?(id, change)
             },
             warn: { log("presentation for \(id): \($0)") })
         let client = RemotePresentationClient(argv: argv, presentationVersion: binding.presentationVersion, transport: transport,
