@@ -249,10 +249,10 @@ It accepts light/dark, sets `NSApp.appearance`, posts `.agtermSystemAppearanceCh
 side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provide no CLI or skill entry.
 
 `settings.open` (`agtermctl settings open [general|appearance|notifications]`) is agterm-win's, absent from the list
-above: it shows Settings on a tab, switching an open one, and answers the tab. `SettingsTab` owns the names and the
-dispatcher's refusal; macOS answers `ControlActionsUnsupported` through the `ControlActions` default. It is window
-chrome with no tree read-back, and there is still no command that reads or writes a setting; integration tests set
-Settings' controls through Win32.
+above and compiled only under `#if os(Windows)` (the case, its `ControlActions` requirement, the dispatch arm and the
+CLI's `hostSubcommands` entry), so no other build's switch over every command owes it a case. It shows Settings on a
+tab, switching an open one, and answers the tab; `SettingsTab` owns the names and the refusal. It is window chrome
+with no tree read-back, and there is still no command that reads or writes a setting.
 
 ## Organization commands
 

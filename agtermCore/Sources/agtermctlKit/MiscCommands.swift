@@ -280,6 +280,7 @@ struct Theme: ParsableCommand {
 
 // MARK: - settings
 
+#if os(Windows)
 struct Settings: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Settings window commands (agterm-win).", subcommands: [Open.self])
 
@@ -296,6 +297,7 @@ struct Settings: ParsableCommand {
         func makeRequest() throws -> ControlRequest { ControlRequest(cmd: .settingsOpen, args: ControlArgs(name: tab)) }
     }
 }
+#endif
 
 // MARK: - quick
 

@@ -139,6 +139,7 @@ struct NativeControlTests {
         #expect(!host.appearance.followsSystem && host.appearance.activeTheme(dark: true) == "Nord")
     }
 
+    #if os(Windows)
     @Test func settingsOpenShowsTheNamedTab() async {
         let host = FakeHost()
         #expect(await handle(ControlRequest(cmd: .settingsOpen, args: ControlArgs(name: "appearance")), host).result?.text == "appearance")
@@ -147,6 +148,7 @@ struct NativeControlTests {
             == "unknown settings tab: keys (general|appearance|notifications)")
         #expect(host.settingsTabs == [.appearance, .general])
     }
+    #endif
 
     @Test func keymapListAndReloadReachTheHost() async {
         let host = FakeHost()

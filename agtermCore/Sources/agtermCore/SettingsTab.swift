@@ -1,5 +1,4 @@
-/// SettingsTab names the Settings tab `settings.open` shows, agterm-win's command; an app without it answers
-/// `ControlActionsUnsupported`.
+/// SettingsTab names the Settings tab `settings.open` shows, a Windows-only command.
 public enum SettingsTab: String, CaseIterable, Sendable {
     case general
     case appearance

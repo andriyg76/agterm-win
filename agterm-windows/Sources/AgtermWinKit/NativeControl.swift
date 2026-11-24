@@ -129,12 +129,14 @@ public enum NativeControl {
                 host.setAppearance(next)
                 return ControlResponse(ok: true, result: themeResult(host, themes: nil))
             }
+        #if os(Windows)
         case .settingsOpen:
             guard let tab = SettingsTab.parse(request.args?.name) else {
                 return failure("unknown settings tab: \(request.args?.name ?? "") (\(SettingsTab.acceptedNames))")
             }
             host.openSettings(tab: tab)
             return ControlResponse(ok: true, result: ControlResult(text: tab.rawValue))
+        #endif
         case .keymapList:
             return ControlResponse(ok: true, result: ControlResult(keymap: host.keymap))
         case .keymapReload:

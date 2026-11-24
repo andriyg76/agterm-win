@@ -91,11 +91,13 @@ public struct ControlDispatcher {
             return await dispatchWindowCommand(request)
         case .dashboard:
             return dispatchDashboard(request)
+        #if os(Windows)
         case .settingsOpen:
             guard let tab = SettingsTab.parse(request.args?.name) else {
                 return ControlResponse(ok: false, error: "unknown settings tab: \(request.args?.name ?? "") (\(SettingsTab.acceptedNames))")
             }
             return actions.openSettings(tab: tab)
+        #endif
         case .debugAppearance:
             // UI-test-only seam handled app-side in `ControlServer` (needs AppKit + `ContentView.isUITestLaunch`).
             return nil

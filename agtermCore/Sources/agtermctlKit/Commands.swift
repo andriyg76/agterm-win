@@ -89,12 +89,14 @@ public struct Agtermctl: ParsableCommand {
         commandName: "agtermctl",
         abstract: "Drive agterm over its control socket, and install its terminfo entry on other hosts.",
         subcommands: [Tree.self, Events.self, Workspace.self, Session.self, Surface.self, Dashboard.self, Window.self, Quick.self,
-                      Sidebar.self, Notify.self, Msg.self, Font.self, Keymap.self, Hooks.self, Browser.self, Config.self, Theme.self, Settings.self, Pick.self, Ask.self, Restore.self,
+                      Sidebar.self, Notify.self, Msg.self, Font.self, Keymap.self, Hooks.self, Browser.self, Config.self, Theme.self, Pick.self, Ask.self, Restore.self,
                       Recent.self, Zmx.self, Catalog.self, Terminfo.self, Paste.self] + hostSubcommands + [Clipboard.self, Update.self, Version.self]
     )
 
     #if os(macOS)
     private static let hostSubcommands: [ParsableCommand.Type] = [Server.self]
+    #elseif os(Windows)
+    private static let hostSubcommands: [ParsableCommand.Type] = [Settings.self]
     #else
     private static let hostSubcommands: [ParsableCommand.Type] = []
     #endif

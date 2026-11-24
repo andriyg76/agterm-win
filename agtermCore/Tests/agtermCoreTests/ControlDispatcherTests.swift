@@ -1030,6 +1030,7 @@ struct ControlDispatcherTests {
         #expect(actions.calls == [.themeSet("NotARealTheme")])
     }
 
+    #if os(Windows)
     @Test func settingsOpenParsesItsTabBeforeTheAction() async {
         let actions = MockControlActions()
         let dispatcher = ControlDispatcher(actions: actions)
@@ -1039,6 +1040,7 @@ struct ControlDispatcherTests {
         #expect(refused.error == "unknown settings tab: keys (general|appearance|notifications)")
         #expect(actions.calls == [.openSettings(.notifications), .openSettings(.general)])
     }
+    #endif
 
     @Test func themeListReturnsCurrentThemeAndAvailableThemes() async {
         let actions = MockControlActions()

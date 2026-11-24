@@ -79,7 +79,7 @@ public enum HeadlessCommandPolicy {
         .sidebar, .sidebarMode, .sidebarFlaggedLayout, .sidebarDensity, .sidebarExpand, .sidebarCollapse,
         .sidebarWidth, .fontInc, .fontDec, .fontReset, .quick, .quickType, .quickText, .dashboard,
         .surfaceZoom, .themeSet, .themeList, .keymapReload, .keymapList, .keymapRun,
-        .configReload, .browserClear, .browserLinks, .settingsOpen,
+        .configReload, .browserClear, .browserLinks,
     ]
 
     /// physicalWindowRefusal is the error for a command that only a Mac window can carry out, nil for any other.
