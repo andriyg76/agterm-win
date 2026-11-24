@@ -295,6 +295,15 @@ final class NativeShell {
         }
         started.remote.onPresentationStopped = { [weak self] id in
             self?.clearServerReplicaOverlay(id, notifyOrigin: false)
+            self?.dismissReplicaAsk(ifShownFor: id)
+        }
+        started.remote.onReplicaAsk = { [weak self, weak started] id, ask in
+            guard let self, let started else { return false }
+            return self.showReplicaAsk(on: started, sessionID: id, ask: ask)
+        }
+        started.remote.onReplicaAskDismiss = { [weak self, weak started] id, ref in
+            guard let self, let started else { return }
+            self.dismissReplicaAsk(on: started, sessionID: id, ref: ref)
         }
         servers.append(started)
         log("native shell: starting agterm-server in \(started.label)")
@@ -1051,6 +1060,48 @@ final class NativeShell {
         locals[index].overlayExitCode = code
         log("native shell: overlay of [\(id)] exited \(code)")
         if !overlay.state.wait { removeOverlay(id, frame: frame) }
+    }
+
+    // MARK: replica asks (catalog sessions)
+
+    private func showReplicaAsk(on server: Server, sessionID: Foundation.UUID, ask: PresentationAsk) -> Bool {
+        guard ask.pane == nil, ask.style == .terminal, !ask.needsFormSupport else { return false }
+        guard ask.buttons.count >= 1, ask.buttons.count <= 8 else { return false }
+        let answer: @MainActor (PresentationFrame.Body) -> Void = { [weak server] body in
+            server?.remote.answerPresentation(sessionID, body)
+        }
+        guard server.remote.store.presentReplicaAsk(ask, forSession: sessionID, answer: answer) else { return false }
+        if running != sessionID { select(sessionID) }
+        presentReplicaAskDialog(on: server, sessionID: sessionID)
+        rebuild()
+        log("native shell: replica ask on server session [\(sessionID)]: \(ask.id)")
+        return true
+    }
+
+    private func presentReplicaAskDialog(on server: Server, sessionID: Foundation.UUID) {
+        guard let session = server.remote.session(sessionID), let ask = session.askPending else { return }
+        let titles = ask.buttons.map { Array($0.label.utf16) + [0] }
+        let picked = Int(withWideStrings(titles) {
+            nt_ask_choice(UnsafeMutableRawPointer(window), Array("agterm".utf16) + [0], Array(ask.title.utf16) + [0],
+                          Array((ask.message ?? "").utf16) + [0], $0, Int32(titles.count))
+        })
+        if picked >= 0 {
+            _ = session.answerAsk(id: ask.id, buttonAt: picked)
+        } else {
+            _ = session.cancelAsk(id: ask.id)
+        }
+        rebuild()
+    }
+
+    private func dismissReplicaAsk(on server: Server, sessionID: Foundation.UUID, ref: PresentationAskRef) {
+        server.remote.store.dismissReplicaAsk(ref, forSession: sessionID)
+        rebuild()
+    }
+
+    private func dismissReplicaAsk(ifShownFor sessionID: Foundation.UUID) {
+        guard let server = server(of: sessionID), let session = server.remote.session(sessionID), session.askReplica else { return }
+        session.releaseAsk()
+        rebuild()
     }
 
     // MARK: replica overlays (catalog sessions)

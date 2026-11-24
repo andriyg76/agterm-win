@@ -19,6 +19,10 @@ final class RemoteWindow: RemoteCatalogEffects {
     var onReplicaOverlay: (@MainActor (UUID, PresentationOverlay) -> Bool)?
     var onReplicaOverlayClose: (@MainActor (UUID, PresentationOverlayChange) -> Void)?
     var onReplicaOverlayResize: (@MainActor (UUID, PresentationOverlayChange) -> Void)?
+    /// onReplicaAsk shows a button-only ask the origin handed over on a catalog session row.
+    var onReplicaAsk: (@MainActor (UUID, PresentationAsk) -> Bool)?
+    /// onReplicaAskDismiss takes down an ask the origin ended without an answer.
+    var onReplicaAskDismiss: (@MainActor (UUID, PresentationAskRef) -> Void)?
     /// onPresentationStopped runs when a session's `zmx present` stream is torn down.
     var onPresentationStopped: (UUID) -> Void = { _ in }
     // a presentation stream per server session, as a Mac's remote window keeps them
@@ -119,6 +123,13 @@ final class RemoteWindow: RemoteCatalogEffects {
             },
             overlayResize: { [weak self] change in
                 self?.onReplicaOverlayResize?(id, change)
+            },
+            askRequest: { [weak self] ask in
+                guard let self else { return false }
+                return self.onReplicaAsk?(id, ask) ?? false
+            },
+            askDismiss: { [weak self] ref in
+                self?.onReplicaAskDismiss?(id, ref)
             },
             warn: { log("presentation for \(id): \($0)") })
         let client = RemotePresentationClient(argv: argv, presentationVersion: binding.presentationVersion, transport: transport,
