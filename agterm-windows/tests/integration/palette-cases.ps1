@@ -16,6 +16,48 @@ public static class AgtermInput {
     [DllImport("user32.dll")] static extern bool AttachThreadInput(uint attach, uint to, bool on);
     [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr window);
     [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [StructLayout(LayoutKind.Sequential)] struct GuiThreadInfo {
+        public int Size, Flags;
+        public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
+        public int Left, Top, Right, Bottom;
+    }
+    [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
+    [DllImport("user32.dll")] static extern bool GetKeyboardState(byte[] state);
+    [DllImport("user32.dll")] static extern bool SetKeyboardState(byte[] state);
+    [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr window);
+
+    // SendChord is Chord for a window Windows will not put in front: attached to its thread, the case holds Ctrl (and
+    // Shift) in their shared key state and sends the key to the window with focus, whose own GetKeyState then reads
+    // the chord, so the keymap is what turns it into a command.
+    public static void SendChord(IntPtr window, byte key, bool shift) {
+        uint mine = GetCurrentThreadId(), theirs = GetWindowThreadProcessId(window, IntPtr.Zero);
+        bool attached = AttachThreadInput(mine, theirs, true);
+        try {
+            var state = new byte[256];
+            GetKeyboardState(state);
+            state[0x11] = state[0xA2] = 0x80;
+            if (shift) state[0x10] = state[0xA0] = 0x80;
+            SetKeyboardState(state);
+            var info = new GuiThreadInfo();
+            info.Size = Marshal.SizeOf(info);
+            GetGUIThreadInfo(theirs, ref info);
+            IntPtr target = info.Focus != IntPtr.Zero ? info.Focus : window;
+            SendMessageW(target, 0x0100, (IntPtr)key, (IntPtr)1);
+            SendMessageW(target, 0x0101, (IntPtr)key, (IntPtr)unchecked((int)0xC0000001));
+            state[0x11] = state[0xA2] = state[0x10] = state[0xA0] = 0;
+            SetKeyboardState(state);
+        } finally {
+            if (attached) AttachThreadInput(mine, theirs, false);
+        }
+    }
+
+    // FocusOn moves the keyboard focus to `window` through its thread, as a click on it would.
+    public static void FocusOn(IntPtr window) {
+        uint mine = GetCurrentThreadId(), theirs = GetWindowThreadProcessId(window, IntPtr.Zero);
+        bool attached = AttachThreadInput(mine, theirs, true);
+        SetFocus(window);
+        if (attached) AttachThreadInput(mine, theirs, false);
+    }
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr wParam, string text);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr wParam, StringBuilder text);
     [DllImport("user32.dll")] static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
@@ -104,10 +146,18 @@ function Bring-Front([IntPtr]$Window) {
     [AgtermInput]::Front($Window, $drag.X, $drag.Y)
 }
 
-# Open-Palette presses the chord and waits for the panel; nothing comes back when the window is not in front.
+# $InFront says whether the window could be brought forward, so keys and clicks go in as real input, or only through
+# its thread (SendChord, FocusOn) while a Windows flyout keeps the foreground.
+$script:InFront = $true
+
+function Send-Chord([IntPtr]$Window, [byte]$Key, [bool]$Shift) {
+    if ($script:InFront) { [AgtermInput]::Chord($Key, $Shift) } else { [AgtermInput]::SendChord($Window, $Key, $Shift) }
+}
+
+# Open-Palette presses the chord and waits for the panel.
 function Open-Palette([IntPtr]$Window, [bool]$Shift) {
-    if (-not (Bring-Front $Window)) { return $null }
-    [AgtermInput]::Chord([byte]0x50, $Shift)
+    if ($script:InFront -and -not (Bring-Front $Window)) { return $null }
+    Send-Chord $Window ([byte]0x50) $Shift
     Wait-Until { Get-Palette $Window } 5
 }
 
@@ -128,9 +178,12 @@ $shellCases["palettes"] = {
         $reply = Invoke-Ctl $state @("session", "new", "--name", $name, "--command", "cmd.exe /d /k")
         if (-not $reply.ok) { return @("session new $name failed: $($reply | ConvertTo-Json -Compress)") }
     }
-    if (-not (Bring-Front $window)) {
+    $script:InFront = Bring-Front $window
+    if (-not $script:InFront) {
         $front = [AgtermInput]::GetForegroundWindow()
-        return @("the window could not be brought to the front, even by a click, so no key reaches it; in front: '$([AgtermWin32]::ClassOf($front))' '$([AgtermWin32]::TextOf($front))'")
+        Note "Windows keeps '$([AgtermWin32]::ClassOf($front))' '$([AgtermWin32]::TextOf($front))' in front: keys go in through the window's thread"
+        # a window out of the foreground may have no focused child, and the main window reads no keys itself
+        [AgtermInput]::FocusOn(([AgtermWin32]::VisibleChildren($window, "agterm-native") | Select-Object -First 1))
     }
 
     Note "Ctrl+P"
@@ -151,9 +204,9 @@ $shellCases["palettes"] = {
     if (-not $palette) { return $failures + @("Ctrl+P did not open the palette again") }
     Send-Key $palette.Edit 0x28
     if (-not (Wait-Until { [AgtermInput]::Highlight($palette.List) -eq 1 } 2)) { $failures += "Down left the highlight on $([AgtermInput]::Highlight($palette.List))" }
-    [AgtermInput]::Chord([byte]0x4A, $false)
+    Send-Chord $window ([byte]0x4A) $false
     if (-not (Wait-Until { [AgtermInput]::Highlight($palette.List) -eq 2 } 2)) { $failures += "Ctrl+J left the highlight on $([AgtermInput]::Highlight($palette.List))" }
-    [AgtermInput]::Chord([byte]0x4B, $false)
+    Send-Chord $window ([byte]0x4B) $false
     if (-not (Wait-Until { [AgtermInput]::Highlight($palette.List) -eq 1 } 2)) { $failures += "Ctrl+K left the highlight on $([AgtermInput]::Highlight($palette.List))" }
     if ([AgtermWin32]::TextOf($palette.Edit) -ne "") { $failures += "Ctrl+J/K typed '$([AgtermWin32]::TextOf($palette.Edit))' into the field" }
     Send-Key $palette.Edit 0x0D
@@ -170,7 +223,8 @@ $shellCases["palettes"] = {
     if ($palette) {
         $bar = Get-Bar $window
         $terminal = Get-ScreenPoint $window ([int]($bar.Width - 60)) ([int]($bar.Height + 200))
-        [AgtermInput]::Click($terminal.X, $terminal.Y)
+        if ($script:InFront) { [AgtermInput]::Click($terminal.X, $terminal.Y) }
+        else { [AgtermInput]::FocusOn(([AgtermWin32]::VisibleChildren($window, "agterm-native") | Select-Object -First 1)) }
         if (-not (Wait-Until { -not (Get-Palette $window) } 5)) { $failures += "a click on the terminal left the palette open" }
     } else { $failures += "Ctrl+P did not open the palette for the click away" }
 
