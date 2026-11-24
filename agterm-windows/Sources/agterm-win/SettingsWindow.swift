@@ -108,10 +108,10 @@ final class SettingsWindow {
         let theme = Array((chromeDark ? "DarkMode_Explorer" : "Explorer").utf16) + [0]
         theme.withUnsafeBufferPointer { name in
             SetWindowTheme(window, name.baseAddress, nil)
-            var child = GetWindow(window, GW_CHILD)
+            var child = GetWindow(window, UINT(GW_CHILD))
             while let current = child {
                 SetWindowTheme(current, name.baseAddress, nil)
-                child = GetWindow(current, GW_HWNDNEXT)
+                child = GetWindow(current, UINT(GW_HWNDNEXT))
             }
         }
     }
@@ -253,7 +253,6 @@ final class SettingsWindow {
         EnableWindow(sound, notifications.banners ? true : false)
         TaskbarFlash.allCases.forEach { addString($0.title, to: flash, message: CB_ADDSTRING) }
         SendMessageW(flash, UINT(CB_SETCURSEL), WPARAM(TaskbarFlash.allCases.firstIndex(of: notifications.flash) ?? 0), 0)
-        if let dialogBrush { SetClassLongPtr(window, GCLP_HBRBACKGROUND, dialogBrush) }
         tintCommCtrls(window)
         loading = false
         ShowWindow(window, SW_SHOW)

@@ -223,7 +223,7 @@ extension NativeShell {
     func bodyMouseDown(_ lParam: LPARAM, double: Bool) -> Bool {
         let (x, y) = point(lParam)
         guard y >= titleBar.height else { return false }
-        if onSidebarDivider(x) {
+        if onSidebarDivider(x: x) {
             sidebarDragging = true
             SetCapture(window)
             return true
@@ -247,7 +247,7 @@ extension NativeShell {
 
     func dragDivider(_ lParam: LPARAM) -> Bool {
         if sidebarDragging {
-            sidebarResizeDrag(point(lParam).x)
+            sidebarResizeDrag(x: point(lParam).x)
             return true
         }
         guard let dragging, let index = locals.firstIndex(where: { $0.id == dragging.id }), let axis = locals[index].split?.axis else { return false }
@@ -274,7 +274,7 @@ extension NativeShell {
         var cursor = POINT()
         GetCursorPos(&cursor)
         ScreenToClient(window, &cursor)
-        if sidebarDragging || (cursor.y >= titleBar.height && onSidebarDivider(cursor.x)) {
+        if sidebarDragging || (cursor.y >= titleBar.height && onSidebarDivider(x: cursor.x)) {
             SetCursor(LoadCursorW(nil, UnsafePointer<WCHAR>(bitPattern: 32644))) // IDC_SIZEWE
             return true
         }
