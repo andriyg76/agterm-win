@@ -8,6 +8,7 @@ public struct OverlayOpenFailure: Error, Sendable {
 /// ControlOverlayOpen parses `session.overlay.open` into a program or a page source, using the same rules as the Mac
 /// dispatcher.
 public enum ControlOverlayOpen {
+  @MainActor
   public static func parse(command: String, args: ControlArgs?) -> Result<HtmlSource?, OverlayOpenFailure> {
     switch ControlDispatcher.overlayContent(command: command, args: args) {
     case .rejected(let response):
