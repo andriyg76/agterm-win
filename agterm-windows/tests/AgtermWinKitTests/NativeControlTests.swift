@@ -416,7 +416,7 @@ struct NativeControlTests {
         #expect(html.ok)
         #expect(host.openedPages.count == 1)
         #expect(await overlay(.sessionOverlayOpen, host, target: a.uuidString, ControlArgs(html: "C:\\page2.html")).error == "overlay already open")
-        #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(image: "C:\\x.png")).error == NativeOverlay.pageRefusal)
+        #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(markdownFile: "C:\\x.md")).error == NativeOverlay.pageRefusal)
         #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "x", pane: "right")).error == NativeOverlay.paneRefusal)
         #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "x", sizePercent: 50, width: 400)).error == NativeOverlay.pointsRefusal)
         #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "x", sizePercent: 0)).error
