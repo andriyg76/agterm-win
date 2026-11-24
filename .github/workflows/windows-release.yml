@@ -164,6 +164,11 @@ jobs:
           }
           choco pack "$out/agterm-win.nuspec" --out "agterm-windows/build/package-managers/$env:VERSION"
           if ($LASTEXITCODE) { throw 'choco pack failed' }
+          choco push "agterm-windows/build/package-managers/$env:VERSION/agterm-win.$env:VERSION.nupkg" `
+            --source https://push.chocolatey.org/ --api-key $env:CHOCOLATEY_API_KEY
+          if ($LASTEXITCODE) { throw 'Chocolatey Community Repository upload failed' }
+        env:
+          CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
       - uses: actions/upload-artifact@v7
         with:
           name: chocolatey-package
@@ -204,3 +209,18 @@ jobs:
           $notes = "agterm-win $env:VERSION, locked to agterm ${agterm}: Windows 10 1809 or later, x64 or arm64, installs per user without admin."
           $notes += if ($signed) { "`n`nFree code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)." } else { "`n`nUnsigned: SmartScreen warns on first run." }
           gh release create "v$env:VERSION" --target $env:GITHUB_SHA @assets --title "agterm-win $env:VERSION" --notes $notes
+      - name: Submit WinGet update
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:WINGET_CREATE_GITHUB_TOKEN) { throw 'Set the WINGET_CREATE_GITHUB_TOKEN repository secret before releasing.' }
+          $wingetCreate = Join-Path $env:RUNNER_TEMP 'wingetcreate.exe'
+          Invoke-WebRequest 'https://aka.ms/wingetcreate/latest' -OutFile $wingetCreate
+          & $wingetCreate update andriyg76.agterm-win `
+            --version $env:VERSION `
+            --urls "https://github.com/${{ github.repository }}/releases/download/v$env:VERSION/agterm-win-$env:VERSION-x64-setup.exe,https://github.com/${{ github.repository }}/releases/download/v$env:VERSION/agterm-win-$env:VERSION-arm64-setup.exe" `
+            --submit --no-open
+          if ($LASTEXITCODE) { throw 'WinGet manifest submission failed' }
