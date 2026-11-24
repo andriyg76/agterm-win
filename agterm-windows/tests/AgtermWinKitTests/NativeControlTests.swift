@@ -92,6 +92,37 @@ private final class FakeHost: NativeControlHost {
     }
     var settingsTabs: [SettingsTab] = []
     func openSettings(tab: SettingsTab) { settingsTabs.append(tab) }
+
+    var opened: [NativeOverlay.Open] = []
+    var overlayScreens: [UUID: (lines: [String], rows: Int)] = [:]
+    var overlaySelections: [UUID: String] = [:]
+
+    private func editLocal(_ id: UUID, _ edit: (inout NativeControl.Local) -> Void) {
+        guard let index = localSessions.firstIndex(where: { $0.id == id }) else { return }
+        edit(&localSessions[index])
+    }
+
+    func openOverlay(_ id: UUID, _ open: NativeOverlay.Open) {
+        opened.append(open)
+        editLocal(id) {
+            $0.overlay = NativeOverlay(sizePercent: open.sizePercent, wait: open.wait)
+            $0.overlayExitCode = nil
+        }
+    }
+
+    func closeOverlay(_ id: UUID) { editLocal(id) { $0.overlay = nil } }
+    func resizeOverlay(_ id: UUID, sizePercent: Int?) { editLocal(id) { $0.overlay?.sizePercent = sizePercent } }
+    func setOverlayHidden(_ id: UUID, _ hidden: Bool) { editLocal(id) { $0.overlay?.hidden = hidden } }
+    func overlayScreen(of id: UUID) -> (lines: [String], rows: Int)? { overlayScreens[id] }
+    func overlaySelection(of id: UUID) -> String? { overlaySelections[id] }
+
+    /// exitOverlay is the overlay's program ending without `--wait`, which closes it.
+    func exitOverlay(_ id: UUID, code: Int) {
+        editLocal(id) {
+            $0.overlay = nil
+            $0.overlayExitCode = code
+        }
+    }
 }
 
 @MainActor
@@ -270,5 +301,142 @@ struct NativeControlTests {
         let host = FakeHost()
         #expect(await handle(ControlRequest(cmd: .version), host).result?.app?.version == "1.2.3")
         #expect(await handle(ControlRequest(cmd: .sessionSplit), host).error == "session.split is not supported on Windows")
+    }
+
+    private func overlay(_ cmd: agtermCore.Command, _ host: FakeHost, target: String? = nil, _ args: ControlArgs? = nil) async -> ControlResponse {
+        await handle(ControlRequest(cmd: cmd, target: target, args: args), host)
+    }
+
+    @Test func anOverlayOpensOverTheSessionAndReadsBackInTheTree() async {
+        let host = FakeHost()
+        let a = host.add("a")
+        host.selectedSession = host.add("b")
+        let open = await overlay(.sessionOverlayOpen, host, target: a.uuidString,
+                                 ControlArgs(cwd: "C:\\src", command: "git log", wait: true, sizePercent: 60, color: "#102030"))
+        #expect(open.ok && open.result?.id == a.uuidString)
+        #expect(host.opened == [NativeOverlay.Open(command: "git log", cwd: "C:\\src", wait: true, sizePercent: 60, background: 0x102030)])
+        #expect(host.selectedSession != a)
+        let node = await handle(ControlRequest(cmd: .tree), host).result?.tree?.workspaces[0].sessions[0]
+        #expect(node?.overlay == true && node?.overlaySizePercent == 60 && node?.hiddenOverlays == nil)
+        #expect(await overlay(.sessionOverlayOpen, host, target: a.uuidString, ControlArgs(command: "dir")).error == "overlay already open")
+    }
+
+    @Test func followSelectsTheSessionAnOverlayOpensOver() async {
+        let host = FakeHost()
+        let a = host.add("a")
+        host.selectedSession = host.add("b")
+        _ = await overlay(.sessionOverlayOpen, host, target: a.uuidString, ControlArgs(command: "top", follow: true))
+        #expect(host.selectedSession == a)
+    }
+
+    @Test func openRefusesWhatWindowsCannotShowBeforeTouchingASession() async {
+        let host = FakeHost()
+        host.selectedSession = host.add("a")
+        #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "")).error == "session.overlay.open requires a command")
+        #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(html: "C:\\page.html")).error == NativeOverlay.pageRefusal)
+        #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "x", pane: "right")).error == NativeOverlay.paneRefusal)
+        #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "x", sizePercent: 50, width: 400)).error == NativeOverlay.pointsRefusal)
+        #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "x", sizePercent: 0)).error
+            == "session.overlay.open: --size-percent must be 1...100")
+        #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "x", color: "red")).error == "invalid color: red (#rrggbb)")
+        #expect(host.opened.isEmpty)
+    }
+
+    @Test func aServerSessionsOverlayIsRefused() async {
+        let host = FakeHost()
+        let server = ControlSessionNode(id: UUID().uuidString, name: "zsh", cwd: "~", active: false, split: false, backedByZmx: true)
+        host.serverWorkspaces = [ControlWorkspaceNode(id: UUID().uuidString, name: "dev", active: false, sessions: [server])]
+        #expect(await overlay(.sessionOverlayOpen, host, target: server.id, ControlArgs(command: "top")).error == NativeOverlay.serverRefusal)
+    }
+
+    @Test func resultIsRunningWhileOpenThenTheExitCode() async {
+        let host = FakeHost()
+        let a = host.add("a")
+        host.selectedSession = a
+        #expect(await overlay(.sessionOverlayResult, host).error == OverlayResultError.noResult)
+        _ = await overlay(.sessionOverlayOpen, host, ControlArgs(command: "exit 3"))
+        #expect(await overlay(.sessionOverlayResult, host).error == OverlayResultError.stillRunning)
+        host.exitOverlay(a, code: 3)
+        let result = await overlay(.sessionOverlayResult, host)
+        #expect(result.ok && result.result?.exitCode == 3)
+        _ = await overlay(.sessionOverlayOpen, host, ControlArgs(command: "exit 0"))
+        _ = await overlay(.sessionOverlayClose, host)
+        #expect(await overlay(.sessionOverlayResult, host).error == OverlayResultError.noResult)
+    }
+
+    @Test func closeResizeAndReadsNeedAnOpenOverlay() async {
+        let host = FakeHost()
+        let a = host.add("a")
+        host.selectedSession = a
+        for cmd: agtermCore.Command in [.sessionOverlayClose, .sessionOverlayText, .sessionOverlayCopy, .sessionOverlayHide] {
+            #expect(await overlay(cmd, host).error == "no overlay")
+        }
+        #expect(await overlay(.sessionOverlayResize, host, ControlArgs(full: true)).error == "no overlay")
+        _ = await overlay(.sessionOverlayOpen, host, ControlArgs(command: "less x", sizePercent: 50))
+        #expect(await overlay(.sessionOverlayResize, host, ControlArgs(full: true)).ok)
+        #expect(host.localSessions[0].overlay?.sizePercent == nil)
+        #expect(await overlay(.sessionOverlayResize, host, ControlArgs(sizePercent: 70, full: true)).error
+            == "session.overlay.resize: --full is mutually exclusive with --size-percent")
+        #expect(await overlay(.sessionOverlayText, host).error == "overlay not realized")
+        host.overlayScreens[a] = (["one", "two  ", ""], 2)
+        #expect(await overlay(.sessionOverlayText, host).result?.text == "two")
+        #expect(await overlay(.sessionOverlayText, host, ControlArgs(all: true)).result?.text == "one\ntwo")
+        #expect(await overlay(.sessionOverlayCopy, host).error == "no selection")
+        host.overlaySelections[a] = "picked"
+        #expect(await overlay(.sessionOverlayCopy, host).result?.text == "picked")
+        #expect(await overlay(.sessionOverlayClose, host).ok && host.localSessions[0].overlay == nil)
+    }
+
+    @Test func hideShowAndToggleReportTheStateTheyLeft() async {
+        let host = FakeHost()
+        host.selectedSession = host.add("a")
+        _ = await overlay(.sessionOverlayOpen, host, ControlArgs(command: "top"))
+        #expect(await overlay(.sessionOverlayToggle, host).result?.text == "hidden")
+        #expect(await handle(ControlRequest(cmd: .tree), host).result?.tree?.workspaces[0].sessions[0].hiddenOverlays == ["session"])
+        #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "dir")).error == OverlayVisibilityError.hidden)
+        #expect(await overlay(.sessionOverlayToggle, host).result?.text == "shown")
+        #expect(await overlay(.sessionOverlayHide, host).result?.text == "hidden")
+        #expect(await overlay(.sessionOverlayShow, host).result?.text == "shown")
+    }
+
+    @Test func resizeTextAndResultRefuseBadArgumentsBeforeTheSession() async {
+        let host = FakeHost()
+        host.selectedSession = host.add("a")
+        _ = await overlay(.sessionOverlayOpen, host, ControlArgs(command: "top"))
+        #expect(await overlay(.sessionOverlayResize, host).error == "session.overlay.resize requires --size-percent, --width/--height or --full")
+        #expect(await overlay(.sessionOverlayResize, host, ControlArgs(sizePercent: 101)).error
+            == "session.overlay.resize: --size-percent must be 1...100")
+        #expect(await overlay(.sessionOverlayResize, host, ControlArgs(sizePercent: 50, pane: "left")).error == PaneOverlayError.resizeUnsupported)
+        #expect(await overlay(.sessionOverlayText, host, ControlArgs(all: true, lines: 3)).error == "--all and --lines are exclusive")
+        #expect(await overlay(.sessionOverlayText, host, ControlArgs(lines: 0)).error == "--lines must be positive")
+        #expect(await overlay(.sessionOverlayResult, host, ControlArgs(page: UUID().uuidString)).error == OverlayHtmlError.unknownPage)
+        #expect(await overlay(.sessionOverlayClose, host, ControlArgs(pane: "right")).error == NativeOverlay.paneRefusal)
+        #expect(await overlay(.sessionOverlayResize, host, ControlArgs(sizePercent: 40)).ok && host.localSessions[0].overlay?.sizePercent == 40)
+    }
+
+    @Test func everyOverlayCommandRefusesAServerSession() async {
+        let host = FakeHost()
+        let server = ControlSessionNode(id: UUID().uuidString, name: "zsh", cwd: "~", active: false, split: false, backedByZmx: true)
+        host.serverWorkspaces = [ControlWorkspaceNode(id: UUID().uuidString, name: "dev", active: false, sessions: [server])]
+        for cmd: agtermCore.Command in [.sessionOverlayClose, .sessionOverlayResult, .sessionOverlayText, .sessionOverlayToggle] {
+            #expect(await overlay(cmd, host, target: server.id).error == NativeOverlay.serverRefusal)
+        }
+    }
+
+    @Test func anUnknownTargetIsRefusedAsForEveryCommand() async {
+        let host = FakeHost()
+        _ = host.add("a")
+        #expect(await overlay(.sessionOverlayOpen, host, target: "ffffffff", ControlArgs(command: "top")).error == "no such session: ffffffff")
+        #expect(host.opened.isEmpty)
+    }
+
+    @Test func closingTheSessionsOverlayKeepsTheSession() async {
+        let host = FakeHost()
+        let a = host.add("a")
+        host.selectedSession = a
+        _ = await overlay(.sessionOverlayOpen, host, ControlArgs(command: "top"))
+        _ = await overlay(.sessionOverlayClose, host)
+        #expect(host.closed.isEmpty && host.localSessions.map(\.id) == [a])
+        #expect(await handle(ControlRequest(cmd: .tree), host).result?.tree?.workspaces[0].sessions[0].overlay == false)
     }
 }

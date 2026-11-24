@@ -73,7 +73,29 @@ The native Windows server port waits until the client reaches parity with the WS
   pastes (off: Windows keeps its menu, Shift+right-click opens it when on), lines a wheel notch scrolls, and the WSL
   distribution agterm-server runs in (next start; `--wsl` wins). `session new --cwd` now starts there.
 - Not on General yet: restore mode (agterm-win restores fresh shells in their last folder; live would need a local
-  zmx per session, re-run a foreground-command reader) and opening links in an overlay (no overlays yet).
+  zmx per session, re-run a foreground-command reader) and opening links in an overlay (no page overlays yet).
+
+## 5. Program overlays — local sessions done; integration `overlay` verified on CI
+
+- `session.overlay.open|close|resize|result|text|copy|hide|show|toggle` on a local session, in the Mac's wording and
+  read-back (`overlay`, `overlaySizePercent`, `hiddenOverlays`); `NativeControl+Overlay.swift` owns the rules.
+- The program runs in its own ConPTY terminal (`OverlayFrame`) over the session: full, or a floating panel at
+  `--size-percent` with a 1 px border. The session's program keeps running; `session.text`/`type` still reach it.
+- A Windows session runs the command under `cmd.exe /d /s /c`, a WSL one under `wsl.exe -d D --cd DIR --exec sh -c`, in
+  `--cwd` or the session's last folder, with the session's environment, so agtermctl inside reaches this window.
+- The exit code comes from the process, not the Mac's `sh` wrapper. Without `--wait` the overlay closes on exit; with it
+  the last screen stays and a key closes it. A close before the program ends leaves no result.
+- A shown overlay owns the keyboard: Close Session's shortcut closes it first, the find bar searches it, and the session's
+  terminal under a floating panel is disabled, so a click beside the panel reaches nothing.
+- Refused by name: pages (`--html`, `--url`, `--image`, `--markdown`, `--text`), `--pane` (no split panes),
+  `--width/--height`, and every overlay on an agterm-server session.
+- Not yet: the full overlay is opaque, where the Mac's is translucent.
+- Next, agreed 2026-11-24: overlays on agterm-server sessions. agterm-win then presents (`presents: true`): it takes the
+  server's overlayRequest, runs the program through `session.overlay.job.run` in an overlay terminal, answers
+  resize/close/closed, and refuses asks, picks, HUD and pages until it shows them, so the server keeps them for a Mac.
+- Check on Windows: a floating panel over a full-screen TUI (vim, htop in WSL), `--wait` closing on a key, Ctrl+Shift+W
+  closing the overlay then (on a second chord) the session, DPI change with an overlay open. CI runs `overlay` and
+  `overlay-keys` integration cases on x64 and arm64.
 
 ## Later: font ligatures
 

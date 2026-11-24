@@ -206,6 +206,73 @@ $shellCases = [ordered]@{
         $failures
     }
 
+    # a program overlay floats over the session, reads back, hides, and reports its program's exit code once closed
+    "overlay" = {
+        param($Shell)
+        $state = $Shell.State
+        $id = New-PowerShellSession $state
+        if (-not $id -or -not (Wait-Prompt $state $id)) { return @("the session never reached its prompt") }
+        $failures = @()
+        $open = Invoke-Ctl $state @("session", "overlay", "open", "echo overlay-text& exit /b 4", "--wait", "--size-percent", "60", "--target", $id)
+        if (-not $open.ok) { return @("overlay open replied $($open | ConvertTo-Json -Compress)") }
+        $node = Get-Node $state $id
+        if (-not $node.overlay -or $node.overlaySizePercent -ne 60) { $failures += "tree reads overlay '$($node.overlay)' at '$($node.overlaySizePercent)'" }
+        if (-not (Wait-Until { (Invoke-Ctl $state @("session", "overlay", "text", "--target", $id)).result.text -match "overlay-text" })) {
+            $failures += "overlay text is '$((Invoke-Ctl $state @("session", "overlay", "text", "--target", $id)).result.text)'"
+        }
+        if ((Invoke-Ctl $state @("session", "text", "--target", $id)).result.text -match "overlay-text") { $failures += "session text read the overlay" }
+        $running = Invoke-Ctl $state @("session", "overlay", "result", "--target", $id)
+        if ($running.error -ne "overlay still running") { $failures += "a --wait overlay's result replied $($running | ConvertTo-Json -Compress)" }
+        Save-Snapshot $Shell "floating"
+        Invoke-Ctl $state @("session", "overlay", "hide", "--target", $id) | Out-Null
+        if (@((Get-Node $state $id).hiddenOverlays) -notcontains "session") { $failures += "hide left hiddenOverlays '$((Get-Node $state $id).hiddenOverlays)'" }
+        Save-Snapshot $Shell "hidden"
+        $again = Invoke-Ctl $state @("session", "overlay", "open", "dir", "--target", $id)
+        if ($again.error -ne "overlay hidden") { $failures += "opening over a hidden overlay replied $($again | ConvertTo-Json -Compress)" }
+        Invoke-Ctl $state @("session", "overlay", "show", "--target", $id) | Out-Null
+        Invoke-Ctl $state @("session", "overlay", "close", "--target", $id) | Out-Null
+        $closed = Invoke-Ctl $state @("session", "overlay", "result", "--target", $id)
+        if ($closed.result.exitCode -ne 4) { $failures += "result after close replied $($closed | ConvertTo-Json -Compress)" }
+        Invoke-Ctl $state @("session", "overlay", "open", "exit /b 7", "--target", $id) | Out-Null
+        if (-not (Wait-Until { -not (Get-Node $state $id).overlay })) { $failures += "an overlay without --wait stayed after its program exited" }
+        $exited = Invoke-Ctl $state @("session", "overlay", "result", "--target", $id)
+        if ($exited.result.exitCode -ne 7) { $failures += "result after exit replied $($exited | ConvertTo-Json -Compress)" }
+        $failures
+    }
+
+    # an overlay takes the keyboard: Close Session's chord closes it and leaves the session; an exited --wait one closes on a key
+    "overlay-keys" = {
+        param($Shell)
+        $state = $Shell.State
+        $id = New-PowerShellSession $state
+        if (-not $id -or -not (Wait-Prompt $state $id)) { return @("the session never reached its prompt") }
+        $Shell.Process.Refresh()
+        $window = $Shell.Process.MainWindowHandle
+        $failures = @()
+        Invoke-Ctl $state @("session", "overlay", "open", "ping -n 60 127.0.0.1", "--size-percent", "50", "--target", $id) | Out-Null
+        $frame = Wait-Until { [AgtermWin32]::VisibleChildren($window, "agterm-overlay") | Select-Object -First 1 } 5
+        if (-not $frame) { return @("no overlay frame came up") }
+        $terminal = [AgtermWin32]::VisibleChildren($frame, "agterm-native") | Select-Object -First 1
+        Save-Snapshot $Shell "overlay-open"
+        [AgtermInput]::FocusOn($terminal)
+        [AgtermInput]::SendChord($terminal, 0x57, $true)
+        if (-not (Wait-Until { -not (Get-Node $state $id).overlay } 5)) { $failures += "Ctrl+Shift+W left the overlay open" }
+        if (-not (Get-Node $state $id)) { $failures += "Ctrl+Shift+W closed the session under the overlay" }
+        if ([AgtermWin32]::VisibleChildren($window, "agterm-overlay").Count) { $failures += "the overlay's frame outlived it" }
+        Invoke-Ctl $state @("session", "overlay", "open", "echo done", "--wait", "--target", $id) | Out-Null
+        if (-not (Wait-Until { (Invoke-Ctl $state @("session", "overlay", "text", "--target", $id)).result.text -match "Press any key" })) {
+            return $failures + "an exited --wait overlay does not offer to close: '$((Invoke-Ctl $state @("session", "overlay", "text", "--target", $id)).result.text)'"
+        }
+        $frame = [AgtermWin32]::VisibleChildren($window, "agterm-overlay") | Select-Object -First 1
+        $terminal = [AgtermWin32]::VisibleChildren($frame, "agterm-native") | Select-Object -First 1
+        [AgtermInput]::FocusOn($terminal)
+        [AgtermInput]::SendChord($terminal, 0x41, $false)
+        if (-not (Wait-Until { -not (Get-Node $state $id).overlay } 5)) { $failures += "a key left the exited --wait overlay open" }
+        $result = Invoke-Ctl $state @("session", "overlay", "result", "--target", $id)
+        if ($result.result.exitCode -ne 0) { $failures += "result after the key replied $($result | ConvertTo-Json -Compress)" }
+        $failures
+    }
+
     # keymap.conf rebinds a built-in; a reload reports a line agterm-win cannot run
     "keymap" = {
         param($Shell)

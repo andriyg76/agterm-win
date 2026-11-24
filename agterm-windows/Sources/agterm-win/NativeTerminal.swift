@@ -34,8 +34,14 @@ final class NativeTerminal {
     /// rightClickPastes and scrollLines are Settings ▸ General's, for every terminal.
     static var rightClickPastes = false
     static var scrollLines = GeneralSettings.defaultScrollLines
-    /// onExit runs when the started program exits.
-    var onExit: (() -> Void)?
+    /// onExit runs with the exit code when the started program exits.
+    var onExit: ((Int) -> Void)?
+    /// onCloseKey, once the program has exited, takes the next key instead of dropping it: `overlay open --wait`.
+    var onCloseKey: (() -> Void)?
+    /// background is this terminal's own background as 0xRRGGBB over the theme's: an overlay's `--color`.
+    var background: UInt32? {
+        didSet { applyTheme() }
+    }
     /// onAttention runs when the program rings the bell.
     var onAttention: (() -> Void)?
     /// onNotification runs with the title and body of an OSC 9 or 777 notification.
@@ -103,7 +109,7 @@ final class NativeTerminal {
         var palette = [UInt32](repeating: unset, count: 256)
         for (index, color) in theme?.palette ?? [:] { palette[index] = color }
         palette.withUnsafeBufferPointer { entries in
-            nt_set_theme(terminal, theme?.foreground ?? unset, theme?.background ?? unset, theme?.cursor ?? unset,
+            nt_set_theme(terminal, theme?.foreground ?? unset, background ?? theme?.background ?? unset, theme?.cursor ?? unset,
                          theme?.cursorText ?? unset, theme?.selectionBackground ?? unset, theme == nil ? nil : entries.baseAddress)
         }
     }
@@ -188,9 +194,10 @@ final class NativeTerminal {
         flush()
         log("native: program exited \(code)")
         feed(Data("\r\n\u{1b}[2m[process exited with code \(code)]\u{1b}[0m\r\n".utf8))
+        if onCloseKey != nil { feed(Data("\u{1b}[2mPress any key to close.\u{1b}[0m\r\n".utf8)) }
         console?.close()
         console = nil
-        onExit?()
+        onExit?(Int(Int32(bitPattern: code)))
         if let testScreen, let terminal {
             let length = nt_screen_text(terminal, nil, 0)
             var text = [UInt16](repeating: 0, count: Int(length))
@@ -420,6 +427,15 @@ final class NativeTerminal {
                                                 motion: motion, modifiers: modifiers, sgr: mouseModes & 8 != 0)))
     }
 
+    /// selection is the selected text, nil without a selection.
+    var selection: String? {
+        guard let terminal, hasSelection else { return nil }
+        let length = nt_selection_text(terminal, nil, 0)
+        var text = [UInt16](repeating: 0, count: Int(length))
+        nt_selection_text(terminal, &text, length)
+        return String(decoding: text, as: UTF16.self)
+    }
+
     private func copySelection() {
         guard let terminal else { return }
         let length = nt_selection_text(terminal, nil, 0)
@@ -466,6 +482,10 @@ final class NativeTerminal {
 
     /// key sends what a non-character key types; false leaves the key to Windows (Alt+F4, Alt+Space).
     fileprivate func key(_ key: Int32) -> Bool {
+        if console == nil, let onCloseKey, ![VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN].contains(key) {
+            onCloseKey()
+            return true
+        }
         let modifiers = modifiers
         if let shortcut = shortcut(key, modifiers) {
             // TranslateMessage already queued the chord's WM_CHAR (^C, ^V, ^_), which must not type
@@ -513,6 +533,8 @@ final class NativeTerminal {
     }
 
     fileprivate func character(_ unit: UInt16, alt: Bool) {
+        // the key that closed an exited `--wait` terminal already ran onCloseKey
+        if console == nil, onCloseKey != nil { return }
         if (0xD800..<0xDC00).contains(unit) {
             highSurrogate = unit
             return

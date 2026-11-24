@@ -84,7 +84,7 @@ final class RemoteWindow: RemoteCatalogEffects {
     // MARK: presentation
 
     /// startPresentation opens `session`'s `zmx present` stream, which the server sends its notifications to. It stays a
-    /// mirror: agterm-win shows no asks, picks, overlays or pages yet, and the server keeps them for a viewer that does,
+    /// mirror: agterm-win shows no asks, picks, HUD, pages or server-session overlays yet, and the server keeps them for a viewer that does,
     /// as it does while no Mac shows the session. Once agterm-win shows them it presents, as a Mac does.
     private func startPresentation(_ session: Session) {
         let id = session.id
