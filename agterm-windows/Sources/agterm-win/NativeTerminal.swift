@@ -130,7 +130,8 @@ final class NativeTerminal {
         let generation = generation, window = window
         do {
             console = try PseudoConsole(commandLine: commandLine, directory: directory, environment: environment, columns: Int16(clamping: grid.columns), rows: Int16(clamping: grid.rows),
-                                        onOutput: { [unowned self] in enqueue($0, generation: generation, window: window) },
+                                        // weak: the reader thread can deliver ConPTY's last output after a closed pane's terminal is gone
+                                        onOutput: { [weak self] in self?.enqueue($0, generation: generation, window: window) },
                                         onExit: { PostMessageW(window, nativeExitMessage, WPARAM($0), LPARAM(generation)) })
             log("native: started \(commandLine) at \(grid.columns)x\(grid.rows)")
         } catch {

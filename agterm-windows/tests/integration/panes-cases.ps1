@@ -199,6 +199,9 @@ $shellCases["dashboard"] = {
     if (-not $reply.ok -or "$($reply.result.text)" -notmatch "unresolved: $($b):right") { $failures += "dashboard replied $($reply | ConvertTo-Json -Compress)" }
     $tree = (Invoke-Ctl $state @("tree")).result.tree
     if ((@($tree.dashboardMembers) -join ",") -ne "$($a):left,$($a):right") { $failures += "dashboardMembers are '$($tree.dashboardMembers -join ',')'" }
+    # a session is recent once selected, as on a Mac; the dashboard opened above left the selection alone
+    Invoke-Ctl $state @("session", "select", "--target", $b) | Out-Null
+    Invoke-Ctl $state @("session", "select", "--target", $a) | Out-Null
     $mru = Invoke-Ctl $state @("dashboard", "--mru", "--font-size", "9")
     if (-not $mru.ok) { $failures += "dashboard --mru replied $($mru | ConvertTo-Json -Compress)" }
     $tree = (Invoke-Ctl $state @("tree")).result.tree
@@ -206,6 +209,7 @@ $shellCases["dashboard"] = {
     if ($tree.dashboardFontSize -ne 9 -or $tree.dashboardFontMode -ne "fixed") { $failures += "font reads '$($tree.dashboardFontSize)' '$($tree.dashboardFontMode)'" }
     if (-not $tree.dashboardHighlighted) { $failures += "no cell is highlighted" }
     Save-Snapshot $Shell "dashboard-mru"
+    if ((@($tree.dashboardMembers) | Select-Object -First 1) -ne "$($a):left") { $failures += "the most recent session is not first: '$($tree.dashboardMembers -join ',')'" }
     Invoke-Ctl $state @("session", "select", "--target", $b) | Out-Null
     if ((Invoke-Ctl $state @("tree")).result.tree.dashboardMembers) { $failures += "selecting a session left the dashboard open" }
     $none = Invoke-Ctl $state @("dashboard", "--close")
