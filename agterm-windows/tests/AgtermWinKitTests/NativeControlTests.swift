@@ -24,7 +24,9 @@ private final class FakeHost: NativeControlHost {
 
     func isServerSession(_ id: UUID) -> Bool { serverWorkspaces.flatMap(\.sessions).contains { $0.id == id.uuidString } }
 
-    func newLocalSession(name: String?, command: String?, select: Bool) -> UUID? {
+    var cwds: [String?] = []
+    func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> UUID? {
+        cwds.append(cwd)
         let id = add(name ?? "Windows PowerShell", command: command ?? "powershell.exe")
         if select { selectedSession = id }
         return id
@@ -88,6 +90,8 @@ private final class FakeHost: NativeControlHost {
                                                                launch: atLaunch ? "atLaunch" : "manual") : $0
         }
     }
+    var settingsTabs: [SettingsTab] = []
+    func openSettings(tab: SettingsTab) { settingsTabs.append(tab) }
 }
 
 @MainActor
@@ -96,6 +100,7 @@ struct NativeControlTests {
         await NativeControl.handle(request, host: host, version: "1.2.3")
     }
 
+    #if os(Windows)
     @Test func wslStartAndLaunchAnswerWithEveryServer() async {
         let host = FakeHost()
         #expect(await handle(ControlRequest(cmd: .wslList), host).result?.wsl == host.wslServers)
@@ -113,6 +118,7 @@ struct NativeControlTests {
         host.startRefusal = "asking"
         #expect(await handle(ControlRequest(cmd: .wslStart, args: ControlArgs(name: "Ubuntu")), host).error == "asking")
     }
+    #endif
 
     @Test func treeListsLocalSessionsAheadOfTheServersWorkspaces() async {
         let host = FakeHost()
@@ -169,6 +175,17 @@ struct NativeControlTests {
         #expect(!host.appearance.followsSystem && host.appearance.activeTheme(dark: true) == "Nord")
     }
 
+    #if os(Windows)
+    @Test func settingsOpenShowsTheNamedTab() async {
+        let host = FakeHost()
+        #expect(await handle(ControlRequest(cmd: .settingsOpen, args: ControlArgs(name: "appearance")), host).result?.text == "appearance")
+        #expect(await handle(ControlRequest(cmd: .settingsOpen), host).result?.text == "general")
+        #expect(await handle(ControlRequest(cmd: .settingsOpen, args: ControlArgs(name: "keys")), host).error
+            == "unknown settings tab: keys (general|appearance|notifications)")
+        #expect(host.settingsTabs == [.appearance, .general])
+    }
+    #endif
+
     @Test func keymapListAndReloadReachTheHost() async {
         let host = FakeHost()
         let list = await handle(ControlRequest(cmd: .keymapList), host)
@@ -197,7 +214,8 @@ struct NativeControlTests {
         let host = FakeHost()
         let workspace = UUID()
         host.serverWorkspaces = [ControlWorkspaceNode(id: workspace.uuidString, name: "dev", active: false, sessions: [])]
-        let local = await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(name: "logs", command: "cmd.exe /k")), host)
+        let local = await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(name: "logs", cwd: #"C:\dev"#, command: "cmd.exe /k")), host)
+        #expect(host.cwds == [#"C:\dev"#])
         #expect(local.ok && host.localSessions.map(\.name) == ["logs"] && host.selectedSession?.uuidString == local.result?.id)
         #expect(await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(workspace: "dev-no")), host).error == "no such workspace: dev-no")
         #expect(await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(workspace: workspace.uuidString)), host).ok)

@@ -4,6 +4,7 @@ import Testing
 
 @MainActor
 struct ControlWSLTests {
+    #if os(Windows)
     @Test func parseNamesTheDistributionAndTheLaunchState() throws {
         #expect(try ControlWSL.parse(ControlRequest(cmd: .wslList)).get() == .list)
         #expect(try ControlWSL.parse(ControlRequest(cmd: .wslStart, args: ControlArgs(name: " Ubuntu "))).get() == .start("Ubuntu"))
@@ -23,15 +24,7 @@ struct ControlWSLTests {
         #expect(message(ControlRequest(cmd: .wslLaunch, args: ControlArgs(name: "Ubuntu", mode: "toggle"))) == "wsl.launch requires on or off")
     }
 
-    @Test func aMacRefusesEveryWSLCommand() async {
-        let actions = MockControlActions()
-        let dispatcher = ControlDispatcher(actions: actions)
-        for command in [Command.wslList, .wslStart, .wslLaunch] {
-            let response = await dispatcher.dispatch(ControlRequest(cmd: command, args: ControlArgs(name: "Ubuntu", mode: "on")))
-            #expect(response == ControlResponse(ok: false, error: "\(command.rawValue) is only available in agterm for Windows"))
-        }
-        #expect(actions.calls.isEmpty)
-    }
+    #endif
 
     @Test func wslFieldsRoundTripAndAreOmittedWhenAbsent() throws {
         let server = ControlWSLServer(distribution: "Ubuntu", started: true, connected: false, launch: nil)

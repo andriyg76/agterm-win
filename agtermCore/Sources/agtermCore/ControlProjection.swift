@@ -841,7 +841,7 @@ public struct ControlTree: Codable, Sendable, Equatable {
     public var remote: ControlRemoteWindow?
     /// catalogViewers is how many Macs mirror the projected window as a remote window, omitted at none.
     public var catalogViewers: Int?
-    /// wslServers is agterm for Windows' WSL agterm-servers, the read side of `wsl.start` and `wsl.launch`; a Mac omits it.
+    /// wslServers is agterm-win's WSL agterm-servers, the read side of `wsl.start` and `wsl.launch`; a Mac omits it.
     public var wslServers: [ControlWSLServer]?
     /// The Live sessions reset state: app-global like `app`, omitted when nothing is pending and no launch
     /// has consumed a marker. The read side of `zmx.reset`.

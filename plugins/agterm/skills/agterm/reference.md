@@ -2408,12 +2408,6 @@ address; `http` to any other host name opens in the browser. `mailto`, `ftp` and
 unaffected. The setting is the one in Settings > General > Open links in. App-global; refuses a target or
 `--window`. Read back `linkOpenMode` at the top of `tree --json`. No event reports a change.
 
-`agtermctl wsl list` - agterm for Windows only, refused on a Mac and agterm-server: each WSL distribution that can hold
-an agterm-server, as `{distribution, started, connected, launch?}` in `wsl` (`launch` is `atLaunch` or `manual`, omitted
-while unchosen); `tree --json` carries the same list as top-level `wslServers`. `agtermctl wsl start DISTRIBUTION` starts
-that server without asking about launch. `agtermctl wsl launch DISTRIBUTION on|off` sets whether it starts as agterm
-opens; `off` also stops the first-start question. Both reply with the list.
-
 ## config
 
 `agtermctl config reload` - re-read and apply the ghostty config; returns `result.count` = the ghostty

@@ -70,10 +70,10 @@ public enum TerminalInput {
         return [0x1B, 0x5B, 0x4D, byte(code), byte(column), byte(row)]
     }
 
-    /// wheel is what a wheel turn sends to an alternate screen without mouse reporting: three cursor keys a notch.
-    public static func wheel(up: Bool, notches: Int, applicationCursor: Bool) -> String {
+    /// wheel is what a wheel turn sends to an alternate screen without mouse reporting: `lines` cursor keys a notch.
+    public static func wheel(up: Bool, notches: Int, applicationCursor: Bool, lines: Int = 3) -> String {
         let key = sequence(for: up ? .up : .down, applicationCursor: applicationCursor) ?? ""
-        return String(repeating: key, count: max(notches, 1) * 3)
+        return String(repeating: key, count: max(notches, 1) * max(lines, 1))
     }
 
     /// autoscrollLines is how far a selection drag held `y` pixels down a view `height` pixels tall scrolls a tick:

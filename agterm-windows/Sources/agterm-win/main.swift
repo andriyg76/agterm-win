@@ -76,8 +76,11 @@ MainActor.assumeIsolated {
     Keys.load(configDirectory: configDirectory)
     TerminalAppearance.themes = TerminalThemes(userDirectory: configDirectory.appendingPathComponent("themes"),
                                                bundledDirectory: bundled("themes", source: "Resources/themes"))
-    // a window without the sidebar draws with the saved appearance too
-    TerminalAppearance.use(NativeSettings.load(from: stateDirectory.appendingPathComponent("native.json")).appearance)
+    // a window without the sidebar draws and takes the mouse as Settings say too
+    let saved = NativeSettings.load(from: stateDirectory.appendingPathComponent("native.json"))
+    TerminalAppearance.use(saved.appearance)
+    NativeTerminal.rightClickPastes = saved.general.rightClickPastes
+    NativeTerminal.scrollLines = saved.general.scrollLines
 
     let arguments = CommandLine.arguments
     if let flag = arguments.firstIndex(of: "--local") {

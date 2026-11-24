@@ -3,6 +3,7 @@ import Testing
 import agtermCore
 @testable import agtermctlKit
 
+#if os(Windows)
 struct WSLCommandsTests {
     private func request(_ argv: [String]) throws -> ControlRequest {
         guard let command = try Agtermctl.parseAsRoot(argv) as? any RequestCommand else {
@@ -32,3 +33,4 @@ struct WSLCommandsTests {
         #expect(SocketClient.formatResponse(ControlResponse(ok: true, result: ControlResult(wsl: []))) == "no WSL distributions")
     }
 }
+#endif

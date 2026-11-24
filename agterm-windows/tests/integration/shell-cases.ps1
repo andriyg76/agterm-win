@@ -22,11 +22,15 @@ function Save-Bitmap([System.Drawing.Bitmap]$Bitmap, [string]$Path) {
     try { $Bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png) } finally { $Bitmap.Dispose() }
 }
 
-# Save-Snapshot draws the window itself, PW_RENDERFULLCONTENT taking Direct2D's content even where something covers it.
-function Save-Snapshot($Shell, [string]$Label) {
+# Save-Snapshot draws the shell's window, or `$Window` when given, itself: PW_RENDERFULLCONTENT takes Direct2D's content
+# even where something covers it.
+function Save-Snapshot($Shell, [string]$Label, [IntPtr]$Window = [IntPtr]::Zero) {
     try {
-        $Shell.Process.Refresh()
-        $window = $Shell.Process.MainWindowHandle
+        $window = $Window
+        if ($window -eq [IntPtr]::Zero) {
+            $Shell.Process.Refresh()
+            $window = $Shell.Process.MainWindowHandle
+        }
         if ($window -eq [IntPtr]::Zero) { return }
         $rect = New-Object AgtermSnapshot+Rect
         [AgtermSnapshot]::GetWindowRect($window, [ref]$rect) | Out-Null
@@ -124,6 +128,17 @@ $shellCases = [ordered]@{
         $failures
     }
 
+    # session new --cwd starts the shell there, which names the session after it
+    "session-cwd" = {
+        param($Shell)
+        $state = $Shell.State
+        $id = New-PowerShellSession $state @("--cwd", "C:\Windows\System32")
+        if (-not $id) { return @("session new failed") }
+        $node = Wait-Until { $n = Get-Node $state $id; if ($n.cwd -eq "C:\Windows\System32") { $n } } 30
+        if (-not $node) { return @("cwd is '$((Get-Node $state $id).cwd)', not C:\Windows\System32") }
+        if ($node.name -ne "System32") { @("name is '$($node.name)', not System32") }
+    }
+
     # notify and a program's OSC 9 count on a session out of view; selecting it clears the count
     "notifications" = {
         param($Shell)
@@ -206,6 +221,7 @@ $shellCases = [ordered]@{
 
 . (Join-Path $PSScriptRoot "title-bar-cases.ps1")
 . (Join-Path $PSScriptRoot "palette-cases.ps1")
+. (Join-Path $PSScriptRoot "settings-cases.ps1")
 
 # seeds a case's state directory before its window starts; a keymap problem at launch would open a message box
 $shellPreparations = @{

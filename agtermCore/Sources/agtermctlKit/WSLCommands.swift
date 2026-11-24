@@ -3,10 +3,11 @@ import agtermCore
 
 // MARK: - wsl
 
+#if os(Windows)
 struct WSL: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "wsl",
-        abstract: "agterm for Windows: the agterm-server in each WSL distribution.",
+        abstract: "The agterm-server in each WSL distribution (agterm-win).",
         subcommands: [List.self, Start.self, Launch.self]
     )
 
@@ -44,3 +45,4 @@ struct WSL: ParsableCommand {
         }
     }
 }
+#endif

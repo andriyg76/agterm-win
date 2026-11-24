@@ -1,6 +1,6 @@
 import Foundation
 
-/// ControlWSLServer is one WSL distribution's agterm-server as agterm for Windows reports it.
+/// ControlWSLServer is one WSL distribution's agterm-server as agterm-win reports it.
 public struct ControlWSLServer: Codable, Sendable, Equatable {
     public let distribution: String
     /// started is whether the server was started this launch; connected whether its catalog is up now.
@@ -18,7 +18,8 @@ public struct ControlWSLServer: Codable, Sendable, Equatable {
     }
 }
 
-/// ControlWSL parses the `wsl.*` commands, which only agterm for Windows serves.
+#if os(Windows)
+/// ControlWSL parses the `wsl.*` commands, which only agterm-win serves.
 public enum ControlWSL {
     public enum Request: Equatable, Sendable {
         case list
@@ -49,9 +50,5 @@ public enum ControlWSL {
             return .failure(Rejection(message: "\(request.cmd.rawValue) is not a wsl command"))
         }
     }
-
-    /// refusal is what a Mac and agterm-server answer: they have no WSL.
-    public static func refusal(_ command: Command) -> String {
-        "\(command.rawValue) is only available in agterm for Windows"
-    }
 }
+#endif
