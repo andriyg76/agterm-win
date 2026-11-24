@@ -50,12 +50,14 @@ private final class FakeHost: NativeControlHost {
     func restartSession(_ id: UUID) async -> ControlResponse { ControlResponse(ok: true) }
     func selectSession(_ id: UUID) { selectedSession = id }
 
-    func type(_ text: String, into id: UUID) -> Bool {
+    var typedPanes: [NativePane?] = []
+    func type(_ text: String, into id: UUID, pane: NativePane?) -> Bool {
         typed.append((text, id))
+        typedPanes.append(pane)
         return true
     }
 
-    func screen(of id: UUID) -> (lines: [String], rows: Int)? { screens[id] }
+    func screen(of id: UUID, pane: NativePane?) -> (lines: [String], rows: Int)? { screens[id] }
     var bannersOff = false
     func notify(_ id: UUID, title: String, body: String) -> String? {
         notified.append(id)
@@ -117,6 +119,39 @@ private final class FakeHost: NativeControlHost {
     func overlaySelection(of id: UUID) -> String? { overlaySelections[id] }
 
     /// exitOverlay is the overlay's program ending without `--wait`, which closes it.
+    func setSplit(_ id: UUID, _ split: NativeSplit) { editLocal(id) { $0.split = split } }
+    func closeSplit(_ id: UUID) { editLocal(id) { $0.split = nil } }
+    var swaps = 0
+    func swapPanes(_ id: UUID) { swaps += 1 }
+    var scratchCommands: [String?] = []
+    func setScratch(_ id: UUID, shown: Bool, command: String?) {
+        scratchCommands.append(command)
+        editLocal(id) {
+            $0.scratch = shown
+            $0.scratchRunning = true
+        }
+    }
+    var quickShown = false
+    var quickShows = 0
+    func setQuick(shown: Bool) {
+        if shown { quickShows += 1 }
+        quickShown = shown
+    }
+    var quickTyped: [String] = []
+    func typeQuick(_ text: String) -> Bool {
+        guard quickShown else { return false }
+        quickTyped.append(text)
+        return true
+    }
+    var quickScreen: (lines: [String], rows: Int)?
+    var dashboard: NativeControl.Dashboard?
+    var recentSessions: [UUID] = []
+    func openDashboard(_ members: [DashboardMember], fontMode: DashboardFontMode) {
+        dashboard = .init(members: members, highlighted: members.first, fontMode: fontMode,
+                          fontSize: fontMode.appliedFontSize(memberCount: members.count, base: Double(fontPoints)))
+    }
+    func closeDashboard() { dashboard = nil }
+
     func exitOverlay(_ id: UUID, code: Int) {
         editLocal(id) {
             $0.overlay = nil
@@ -300,7 +335,7 @@ struct NativeControlTests {
     @Test func versionAndUnsupportedCommands() async {
         let host = FakeHost()
         #expect(await handle(ControlRequest(cmd: .version), host).result?.app?.version == "1.2.3")
-        #expect(await handle(ControlRequest(cmd: .sessionSplit), host).error == "session.split is not supported on Windows")
+        #expect(await handle(ControlRequest(cmd: .sessionLead), host).error == "session.lead is not supported on Windows")
     }
 
     private func overlay(_ cmd: agtermCore.Command, _ host: FakeHost, target: String? = nil, _ args: ControlArgs? = nil) async -> ControlResponse {
@@ -438,5 +473,106 @@ struct NativeControlTests {
         _ = await overlay(.sessionOverlayClose, host)
         #expect(host.closed.isEmpty && host.localSessions.map(\.id) == [a])
         #expect(await handle(ControlRequest(cmd: .tree), host).result?.tree?.workspaces[0].sessions[0].overlay == false)
+    }
+
+    @Test func splitTogglesAndReadsBackInTheTree() async {
+        let host = FakeHost()
+        let a = host.add("a")
+        host.selectedSession = a
+        #expect(await handle(ControlRequest(cmd: .sessionSplit, args: ControlArgs(axis: "horizontal")), host).ok)
+        var node = NativeControl.tree(host).workspaces[0].sessions[0]
+        #expect(node.split && node.hasSplit == true && node.splitAxis == "horizontal" && node.splitFocused == true && node.splitRatio == 0.5)
+        #expect(await handle(ControlRequest(cmd: .sessionSplit, args: ControlArgs(mode: "off")), host).ok)
+        node = NativeControl.tree(host).workspaces[0].sessions[0]
+        #expect(!node.split && node.hasSplit == true)
+        #expect(await handle(ControlRequest(cmd: .sessionSplit, args: ControlArgs(axis: "diagonal")), host).error == "invalid split axis: diagonal (vertical|horizontal)")
+        #expect(await handle(ControlRequest(cmd: .sessionSplitClose), host).ok)
+        #expect(NativeControl.tree(host).workspaces[0].sessions[0].hasSplit == false)
+        #expect(await handle(ControlRequest(cmd: .sessionSplitClose), host).ok)
+    }
+
+    @Test func focusResizeAndSwapNeedASplit() async {
+        let host = FakeHost()
+        host.selectedSession = host.add("a")
+        #expect(await handle(ControlRequest(cmd: .sessionFocus), host).error == "session has no split")
+        #expect(await handle(ControlRequest(cmd: .sessionSwap), host).error == "session has no split")
+        _ = await handle(ControlRequest(cmd: .sessionSplit), host)
+        #expect(await handle(ControlRequest(cmd: .sessionFocus, args: ControlArgs(pane: "left")), host).ok)
+        #expect(host.localSessions[0].split?.focused == false)
+        #expect(await handle(ControlRequest(cmd: .sessionFocus), host).ok)
+        #expect(host.localSessions[0].split?.focused == true)
+        #expect(await handle(ControlRequest(cmd: .sessionResize, args: ControlArgs(ratio: 0.99)), host).result?.ratio == 0.95)
+        let grown = await handle(ControlRequest(cmd: .sessionResize, args: ControlArgs(ratioDelta: -0.2)), host).result?.ratio ?? 0
+        #expect(abs(grown - 0.75) < 1e-9)
+        #expect(await handle(ControlRequest(cmd: .sessionResize), host).error == "session.resize requires --split-ratio, --grow-left, or --grow-right")
+        #expect(await handle(ControlRequest(cmd: .sessionSwap), host).ok && host.swaps == 1)
+    }
+
+    @Test func scratchShowsHidesAndACommandReplacesIt() async {
+        let host = FakeHost()
+        let a = host.add("a"), b = host.add("b")
+        host.selectedSession = a
+        #expect(await handle(ControlRequest(cmd: .sessionScratch, target: b.uuidString, args: ControlArgs(mode: "on")), host).ok)
+        #expect(host.selectedSession == a && NativeControl.tree(host).workspaces[0].sessions[1].scratch)
+        #expect(await handle(ControlRequest(cmd: .sessionScratch, target: b.uuidString, args: ControlArgs(mode: "on")), host).ok)
+        #expect(host.scratchCommands.count == 1)
+        _ = await handle(ControlRequest(cmd: .sessionScratch, target: b.uuidString, args: ControlArgs(mode: "on", command: "dir", follow: true)), host)
+        #expect(host.scratchCommands.last == "dir" && host.selectedSession == b)
+        #expect(await handle(ControlRequest(cmd: .sessionScratch, target: b.uuidString), host).ok)
+        #expect(!NativeControl.tree(host).workspaces[0].sessions[1].scratch)
+        #expect(await handle(ControlRequest(cmd: .sessionScratch, args: ControlArgs(mode: "up")), host).error == "invalid scratch mode: up")
+    }
+
+    @Test func typeAndTextTakeAPaneAndRefuseAnUnknownOne() async {
+        let host = FakeHost()
+        host.selectedSession = host.add("a")
+        _ = await handle(ControlRequest(cmd: .sessionType, args: ControlArgs(text: "x", pane: "scratch")), host)
+        _ = await handle(ControlRequest(cmd: .sessionType, args: ControlArgs(text: "x")), host)
+        #expect(host.typedPanes == [.scratch, nil])
+        #expect(await handle(ControlRequest(cmd: .sessionText, args: ControlArgs(pane: "middle")), host).error == "invalid pane: middle (left|right|scratch)")
+    }
+
+    @Test func aServerSessionsPanesAreRefused() async {
+        let host = FakeHost()
+        let server = ControlSessionNode(id: UUID().uuidString, name: "zsh", cwd: "~", active: false, split: false, backedByZmx: true)
+        host.serverWorkspaces = [ControlWorkspaceNode(id: UUID().uuidString, name: "dev", active: false, sessions: [server])]
+        for cmd in [agtermCore.Command.sessionSplit, .sessionScratch, .sessionFocus, .sessionSwap] {
+            #expect(await handle(ControlRequest(cmd: cmd, target: server.id), host).error == NativeControl.serverPanesRefusal)
+        }
+        #expect(await handle(ControlRequest(cmd: .sessionType, target: server.id, args: ControlArgs(text: "x", pane: "right")), host).error
+            == NativeControl.serverPanesRefusal)
+    }
+
+    @Test func quickShowsPinnedTypesAndReadsBack() async {
+        let host = FakeHost()
+        #expect(await handle(ControlRequest(cmd: .quickType, args: ControlArgs(text: "x")), host).error == "quick terminal not open")
+        #expect(await handle(ControlRequest(cmd: .quick, args: ControlArgs(mode: "show")), host).ok)
+        #expect(await handle(ControlRequest(cmd: .quick, args: ControlArgs(mode: "show")), host).ok && host.quickShows == 2)
+        #expect(NativeControl.tree(host).quickVisible == true)
+        #expect(await handle(ControlRequest(cmd: .quickType, args: ControlArgs(text: "dir")), host).ok && host.quickTyped == ["dir"])
+        host.quickScreen = (["a", "b", ""], 3)
+        #expect(await handle(ControlRequest(cmd: .quickText), host).result?.text == "a\nb")
+        #expect(await handle(ControlRequest(cmd: .quick), host).ok && !host.quickShown)
+        #expect(await handle(ControlRequest(cmd: .quick, args: ControlArgs(mode: "open")), host).error == "invalid quick mode: open")
+    }
+
+    @Test func dashboardOpensOnSessionsAndPanesAndReadsBack() async {
+        let host = FakeHost()
+        let a = host.add("a"), b = host.add("b")
+        host.selectedSession = a
+        _ = await handle(ControlRequest(cmd: .sessionSplit), host)
+        let reply = await handle(ControlRequest(cmd: .dashboard, args: ControlArgs(targets: [a.uuidString, "\(b.uuidString):right", "nope"], fontSize: 9)), host)
+        #expect(reply.ok && reply.result?.text == "unresolved: \(b.uuidString):right, nope")
+        let tree = NativeControl.tree(host)
+        #expect(tree.dashboardMembers == ["\(a.uuidString):left", "\(a.uuidString):right"])
+        #expect(tree.dashboardHighlighted == "\(a.uuidString):left" && tree.dashboardFontSize == 9 && tree.dashboardFontMode == "fixed")
+        #expect(await handle(ControlRequest(cmd: .dashboard, args: ControlArgs(close: true)), host).ok && NativeControl.tree(host).dashboardMembers == nil)
+        #expect(await handle(ControlRequest(cmd: .dashboard, args: ControlArgs(mru: true)), host).error == "no recent sessions")
+        host.recentSessions = [b, a]
+        _ = await handle(ControlRequest(cmd: .dashboard, args: ControlArgs(mru: true)), host)
+        #expect(host.dashboard?.members.first?.session == b && host.dashboard?.members.count == 3)
+        #expect(await handle(ControlRequest(cmd: .dashboard), host).error == "dashboard requires at least one session id")
+        #expect(await handle(ControlRequest(cmd: .dashboard, args: ControlArgs(targets: ["x:up"])), host).error
+            == "dashboard: invalid session id 'x:up' — use <id>, <id>:left, or <id>:right")
     }
 }

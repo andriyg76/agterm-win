@@ -56,6 +56,8 @@ final class NativeTerminal {
     var onWindowCommand: ((NativeMenu.Command) -> Void)?
     /// onFontSize takes a font command's new size, for a window that sizes all its terminals together.
     var onFontSize: ((Float) -> Void)?
+    /// onFocus runs when the terminal takes the keyboard, so a split session knows which pane has it.
+    var onFocus: (() -> Void)?
 
     /// open runs `commandLine` in a top-level terminal window.
     static func open(commandLine: String) {
@@ -128,7 +130,8 @@ final class NativeTerminal {
         let generation = generation, window = window
         do {
             console = try PseudoConsole(commandLine: commandLine, directory: directory, environment: environment, columns: Int16(clamping: grid.columns), rows: Int16(clamping: grid.rows),
-                                        onOutput: { [unowned self] in enqueue($0, generation: generation, window: window) },
+                                        // weak: the reader thread can deliver ConPTY's last output after a closed pane's terminal is gone
+                                        onOutput: { [weak self] in self?.enqueue($0, generation: generation, window: window) },
                                         onExit: { PostMessageW(window, nativeExitMessage, WPARAM($0), LPARAM(generation)) })
             log("native: started \(commandLine) at \(grid.columns)x\(grid.rows)")
         } catch {
@@ -244,6 +247,7 @@ final class NativeTerminal {
 
     fileprivate func focus(_ focused: Bool) {
         if let terminal { nt_set_focus(terminal, focused ? 1 : 0) }
+        if focused { onFocus?() }
     }
 
     private var modifiers: TerminalInput.Modifiers {
@@ -362,8 +366,7 @@ final class NativeTerminal {
         case .fontBigger, .fontSmaller, .fontReset:
             let next = NativeMenu.points(after: command, from: points)
             if let onFontSize { onFontSize(next) } else { setFontSize(next) }
-        case .newSession, .newServerSession, .renameSession, .restartSession, .closeSession, .nextSession, .previousSession, .find, .quit,
-             .editKeymap, .reloadKeymap, .settings, .sessionPalette, .commandPalette:
+        default:
             if let onWindowCommand { onWindowCommand(command) } else if command == .quit { DestroyWindow(window) }
         }
     }

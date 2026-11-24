@@ -151,7 +151,7 @@ void nt_palette_close(void *palette);
 int32_t nt_palette_visible(void *palette);
 
 // The window's own title bar. A button's `kind` is 0 an action icon, 1 a caption button, 2 close; `state` is 0 at
-// rest, 1 hovered, 2 pressed; `glyph` is a Segoe MDL2 Assets code point.
+// rest, 1 hovered, 2 pressed, 3 disabled; `glyph` is a Segoe MDL2 Assets code point.
 typedef struct {
     int32_t left, right;
     uint16_t glyph;

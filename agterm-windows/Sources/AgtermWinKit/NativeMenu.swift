@@ -3,7 +3,8 @@
 public enum NativeMenu {
     public enum Command: Int, CaseIterable, Sendable {
         case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, newServerSession, renameSession, restartSession, closeSession, nextSession, previousSession, find, quit,
-             editKeymap, reloadKeymap, settings, sessionPalette, commandPalette
+             editKeymap, reloadKeymap, settings, sessionPalette, commandPalette, toggleSplit, toggleHorizontalSplit, closeSplit, swapPanes,
+             focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard
 
         public var title: String {
             switch self {
@@ -28,6 +29,15 @@ public enum NativeMenu {
             case .settings: "Settings…"
             case .sessionPalette: "Go to Session…"
             case .commandPalette: "Command Palette…"
+            case .toggleSplit: "Split Side by Side"
+            case .toggleHorizontalSplit: "Split Top and Bottom"
+            case .closeSplit: "Close Split"
+            case .swapPanes: "Swap Panes"
+            case .focusLeftPane: "Focus Left or Top Pane"
+            case .focusRightPane: "Focus Right or Bottom Pane"
+            case .toggleScratch: "Scratch"
+            case .quickTerminal: "Quick Terminal"
+            case .dashboard: "Dashboard"
             }
         }
 
@@ -53,7 +63,14 @@ public enum NativeMenu {
             case .settings: "Ctrl+,"
             case .sessionPalette: "Ctrl+P"
             case .commandPalette: "Ctrl+Shift+P"
-            case .editKeymap, .reloadKeymap: ""
+            case .toggleSplit: "Alt+Shift+="
+            case .toggleHorizontalSplit: "Alt+Shift+-"
+            case .focusLeftPane: "Alt+Left"
+            case .focusRightPane: "Alt+Right"
+            case .toggleScratch: "Ctrl+Shift+J"
+            case .quickTerminal: "Ctrl+`"
+            case .dashboard: "Ctrl+Shift+G"
+            case .editKeymap, .reloadKeymap, .closeSplit, .swapPanes: ""
             }
         }
     }
@@ -182,13 +199,49 @@ public enum NativeMenu {
                 .command(.nextSession, enabled: sessionCount > 1, shortcuts), .command(.previousSession, enabled: sessionCount > 1, shortcuts)]
     }
 
-    /// window is the ☰ menu: the sidebar's menu, Find, the terminal's menu, the keymap's commands, and Quit.
+    /// View is what the View submenu reads from the window: what the selected session can do and what is shown.
+    public struct View: Equatable, Sendable {
+        /// canSplit is a selected session that takes a split and a scratch: a local one.
+        public var canSplit = false
+        public var hasSplit = false
+        public var scratchShown = false
+        public var quickShown = false
+        public var canDashboard = false
+        public var dashboardOpen = false
+
+        public init(canSplit: Bool = false, hasSplit: Bool = false, scratchShown: Bool = false, quickShown: Bool = false,
+                    canDashboard: Bool = false, dashboardOpen: Bool = false) {
+            self.canSplit = canSplit
+            self.hasSplit = hasSplit
+            self.scratchShown = scratchShown
+            self.quickShown = quickShown
+            self.canDashboard = canDashboard
+            self.dashboardOpen = dashboardOpen
+        }
+    }
+
+    /// view is the View submenu: the selected session's panes and scratch, the quick terminal and the dashboard.
+    public static func view(_ view: View, shortcuts: Shortcuts = [:]) -> [Entry] {
+        var scratch = Entry.command(.toggleScratch, enabled: view.canSplit, shortcuts)
+        scratch.checked = view.scratchShown
+        var quick = Entry.command(.quickTerminal, shortcuts)
+        quick.checked = view.quickShown
+        var dashboard = Entry.command(.dashboard, enabled: view.canDashboard || view.dashboardOpen, shortcuts)
+        dashboard.checked = view.dashboardOpen
+        return [.command(.toggleSplit, enabled: view.canSplit, shortcuts), .command(.toggleHorizontalSplit, enabled: view.canSplit, shortcuts),
+                .command(.focusLeftPane, enabled: view.hasSplit, shortcuts), .command(.focusRightPane, enabled: view.hasSplit, shortcuts),
+                .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), .separator, scratch, quick, dashboard]
+    }
+
+    /// window is the ☰ menu: the sidebar's menu, the palettes and Find, View, the terminal's menu, the keymap's commands, and Quit.
     public static func window(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
                               sessionCount: Int, canRenameSession: Bool = false, canRestartSession: Bool = false, hasSelection: Bool,
-                              canPaste: Bool, shortcuts: Shortcuts = [:]) -> [Entry] {
+                              canPaste: Bool, view: View = View(), shortcuts: Shortcuts = [:]) -> [Entry] {
         sessions(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession,
                  sessionCount: sessionCount, canRenameSession: canRenameSession, canRestartSession: canRestartSession, shortcuts: shortcuts)
-            + [.separator, .command(.sessionPalette, shortcuts), .command(.commandPalette, shortcuts), .command(.find, shortcuts)] + terminal(hasSelection: hasSelection, canPaste: canPaste, shortcuts: shortcuts)
+            + [.separator, .command(.sessionPalette, shortcuts), .command(.commandPalette, shortcuts), .command(.find, shortcuts),
+               Entry(title: "View", shortcut: "", pick: nil, enabled: true, children: Self.view(view, shortcuts: shortcuts))]
+            + terminal(hasSelection: hasSelection, canPaste: canPaste, shortcuts: shortcuts)
             + [.separator, .command(.settings), .command(.editKeymap), .command(.reloadKeymap), .separator, .command(.quit)]
     }
 

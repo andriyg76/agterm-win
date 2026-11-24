@@ -17,11 +17,12 @@ public protocol NativeControlHost: AnyObject {
     func renameSession(_ id: UUID, to name: String) async -> ControlResponse
     func restartSession(_ id: UUID) async -> ControlResponse
     func selectSession(_ id: UUID)
-    /// type sends `text` to the session's program; false when it has no terminal running here.
-    func type(_ text: String, into id: UUID) -> Bool
-    /// screen is the session's lines, oldest first, and how many of the last ones are on screen; nil when the session
-    /// has no terminal here.
-    func screen(of id: UUID) -> (lines: [String], rows: Int)?
+    /// type sends `text` to the session's program in `pane`, the one on screen when nil; false when that pane has no
+    /// terminal running here.
+    func type(_ text: String, into id: UUID, pane: NativePane?) -> Bool
+    /// screen is the pane's lines, oldest first, and how many of the last ones are on screen; nil when the pane has no
+    /// terminal here.
+    func screen(of id: UUID, pane: NativePane?) -> (lines: [String], rows: Int)?
     /// notify shows a `notify` for the session and returns why no banner was shown, nil when one was.
     func notify(_ id: UUID, title: String, body: String) -> String?
     var fontPoints: Float { get }
@@ -51,6 +52,26 @@ public protocol NativeControlHost: AnyObject {
     /// overlayScreen and overlaySelection read the overlay's terminal, as `screen(of:)` reads the session's.
     func overlayScreen(of id: UUID) -> (lines: [String], rows: Int)?
     func overlaySelection(of id: UUID) -> String?
+    /// setSplit gives a local session `split`, starting its second shell when it has none.
+    func setSplit(_ id: UUID, _ split: NativeSplit)
+    /// closeSplit ends a local session's split pane and whatever it runs.
+    func closeSplit(_ id: UUID)
+    /// swapPanes exchanges a split session's two terminals, focus following its terminal.
+    func swapPanes(_ id: UUID)
+    /// setScratch shows or hides a local session's scratch, starting its shell, or `command`, when it has none; a
+    /// `command` replaces a running scratch.
+    func setScratch(_ id: UUID, shown: Bool, command: String?)
+    var quickShown: Bool { get }
+    /// setQuick shows the quick terminal pinned, as `quick show` does on a Mac, or hides it.
+    func setQuick(shown: Bool)
+    /// typeQuick and quickScreen reach the quick terminal; false and nil before it was ever shown.
+    func typeQuick(_ text: String) -> Bool
+    var quickScreen: (lines: [String], rows: Int)? { get }
+    var dashboard: NativeControl.Dashboard? { get }
+    /// recentSessions are the window's sessions, most recently selected first.
+    var recentSessions: [UUID] { get }
+    func openDashboard(_ members: [DashboardMember], fontMode: DashboardFontMode)
+    func closeDashboard()
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -70,6 +91,13 @@ public enum NativeControl {
         public var overlay: NativeOverlay?
         /// overlayExitCode is how the last overlay's program exited, until another opens.
         public var overlayExitCode: Int?
+        /// split is the session's second pane, nil without one.
+        public var split: NativeSplit?
+        public var splitCwd: String?
+        /// scratch is whether the scratch is shown; scratchRunning whether its shell runs, shown or not.
+        public var scratch = false
+        public var scratchRunning = false
+        public var scratchCwd: String?
 
         public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, unseen: Int = 0, cwd: String = "",
                     title: String? = nil, overlay: NativeOverlay? = nil, overlayExitCode: Int? = nil) {
@@ -83,6 +111,21 @@ public enum NativeControl {
             self.title = title
             self.overlay = overlay
             self.overlayExitCode = overlayExitCode
+        }
+    }
+
+    /// Dashboard is the open dashboard as `tree` reads it back.
+    public struct Dashboard: Equatable, Sendable {
+        public var members: [DashboardMember]
+        public var highlighted: DashboardMember?
+        public var fontMode: DashboardFontMode
+        public var fontSize: Double?
+
+        public init(members: [DashboardMember], highlighted: DashboardMember?, fontMode: DashboardFontMode, fontSize: Double?) {
+            self.members = members
+            self.highlighted = highlighted
+            self.fontMode = fontMode
+            self.fontSize = fontSize
         }
     }
 
@@ -116,16 +159,16 @@ public enum NativeControl {
         case .sessionType:
             guard let text = request.args?.text else { return failure("session.type requires text") }
             guard !text.contains("\0") else { return failure("text must not contain a NUL byte") }
-            return await withSession(request.target, host: host) { id in
-                host.type(text, into: id) ? ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
-                    : failure("session not realized")
+            return await withPane(request, host: host) { id, pane in
+                host.type(text, into: id, pane: pane) ? ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+                    : failure(pane == nil ? "session not realized" : "no \(pane!.rawValue) pane")
             }
         case .sessionText:
             let args = request.args
             if args?.all == true, args?.lines != nil { return failure("--all and --lines are exclusive") }
             if let lines = args?.lines, lines <= 0 { return failure("--lines must be positive") }
-            return await withSession(request.target, host: host) { id in
-                guard let screen = host.screen(of: id) else { return failure("session not realized") }
+            return await withPane(request, host: host) { id, pane in
+                guard let screen = host.screen(of: id, pane: pane) else { return failure(pane == nil ? "session not realized" : "no \(pane!.rawValue) pane") }
                 let text = text(screen.lines, rows: screen.rows, all: args?.all == true, last: args?.lines)
                 return ControlResponse(ok: true, result: ControlResult(id: id.uuidString, text: text))
             }
@@ -169,8 +212,29 @@ public enum NativeControl {
         case .wslList, .wslStart, .wslLaunch:
             return wsl(request, host: host)
         #endif
+        case .sessionSplit, .sessionSplitClose, .sessionSwap, .sessionFocus, .sessionResize, .sessionScratch:
+            return await panes(request, host: host)
+        case .quick, .quickType, .quickText:
+            return quick(request, host: host)
+        case .dashboard:
+            return dashboard(request, host: host)
         default:
             return failure("\(request.cmd.rawValue) is not supported on Windows")
+        }
+    }
+
+    /// withPane resolves the session and `--pane`; a server session takes no pane, since its split and scratch are not
+    /// shown here.
+    private static func withPane(_ request: ControlRequest, host: NativeControlHost,
+                                 _ body: (UUID, NativePane?) async -> ControlResponse) async -> ControlResponse {
+        var pane: NativePane?
+        if let name = request.args?.pane {
+            guard let parsed = NativePane(controlName: name) else { return failure("invalid pane: \(name) (left|right|scratch)") }
+            pane = parsed
+        }
+        return await withSession(request.target, host: host) { id in
+            if pane != nil, host.isServerSession(id) { return failure(NativeControl.serverPanesRefusal) }
+            return await body(id, pane)
         }
     }
 
@@ -274,15 +338,21 @@ public enum NativeControl {
     public static func tree(_ host: NativeControlHost) -> ControlTree {
         let selected = host.selectedSession
         let locals = host.localSessions.map { local in
-            ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: local.id == selected, split: false,
-                               backedByZmx: nil, overlay: local.overlay != nil, overlaySizePercent: local.overlay?.sizePercent,
+            ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: local.id == selected,
+                               split: local.split?.shown == true, hasSplit: local.split != nil, backedByZmx: nil,
+                               splitAxis: local.split?.axisName, splitRatio: local.split?.ratio, splitFocused: local.split?.focused,
+                               overlay: local.overlay != nil, overlaySizePercent: local.overlay?.sizePercent, scratch: local.scratch,
                                ended: local.exited ? true : nil, restoreCommand: local.commandLine,
                                unseen: local.unseen > 0 ? local.unseen : local.attention ? 1 : nil, fontSize: Double(host.fontPoints),
+                               splitCwd: local.split == nil ? nil : local.splitCwd, scratchCwd: local.scratchRunning ? local.scratchCwd : nil,
                                hiddenOverlays: local.overlay?.hidden == true ? ["session"] : nil)
         }
         let local = locals.isEmpty ? [] : [ControlWorkspaceNode(id: localWorkspace.uuidString, name: "Local",
                                                                 active: locals.contains { $0.active }, sessions: locals)]
-        var tree = ControlTree(workspaces: local + host.serverWorkspaces)
+        let dashboard = host.dashboard
+        var tree = ControlTree(workspaces: local + host.serverWorkspaces, quickVisible: host.quickShown,
+                               dashboardMembers: dashboard?.members.map(\.controlRef), dashboardHighlighted: dashboard?.highlighted?.controlRef,
+                               dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
         tree.wslServers = host.wslServers
         return tree
     }

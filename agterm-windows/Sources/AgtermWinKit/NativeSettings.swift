@@ -1,4 +1,5 @@
 import Foundation
+import agtermCore
 
 /// NativeSettings is what the native window keeps between launches, in its state directory.
 public struct NativeSettings: Codable, Equatable, Sendable {
@@ -27,13 +28,35 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         public var customName: String?
         public var commandLine: String
         public var directory: String?
+        /// split is the session's second pane, started again in its folder; nil without one.
+        public var split: Split?
 
-        public init(title: String, customName: String? = nil, commandLine: String, directory: String? = nil) {
+        public init(title: String, customName: String? = nil, commandLine: String, directory: String? = nil, split: Split? = nil) {
             self.title = title
             self.customName = customName
             self.commandLine = commandLine
             self.directory = directory
+            self.split = split
         }
+    }
+
+    /// Split is a saved split: its layout, and the folder its pane was last in.
+    public struct Split: Codable, Equatable, Sendable {
+        public var axis: SplitAxis
+        public var ratio: Double
+        public var shown: Bool
+        public var focused: Bool
+        public var directory: String?
+
+        public init(_ split: NativeSplit, directory: String?) {
+            axis = split.axis
+            ratio = split.ratio
+            shown = split.shown
+            focused = split.focused
+            self.directory = directory
+        }
+
+        public var layout: NativeSplit { NativeSplit(axis: axis, ratio: ratio, shown: shown, focused: focused) }
     }
 
     public var fontPoints: Float = NativeMenu.defaultPoints

@@ -10,7 +10,9 @@ public struct WindowsKeymap: Sendable {
         (.newSession, .newSession), (.newServerSession, .newRemoteSession), (.renameSession, .renameSession),
         (.closeSession, .closeSession), (.nextSession, .nextSession), (.previousSession, .previousSession),
         (.find, .toggleSearch), (.fontBigger, .increaseFontSize), (.fontSmaller, .decreaseFontSize), (.fontReset, .resetFontSize),
-        (.sessionPalette, .sessionPalette), (.commandPalette, .commandPalette),
+        (.sessionPalette, .sessionPalette), (.commandPalette, .commandPalette), (.toggleSplit, .toggleSplit),
+        (.toggleHorizontalSplit, .toggleHorizontalSplit), (.focusLeftPane, .focusLeftPane), (.focusRightPane, .focusRightPane),
+        (.toggleScratch, .toggleScratch), (.quickTerminal, .quickTerminal), (.dashboard, .dashboard),
     ]
 
     /// reserved are the fixed chords of commands with no built-in action; a binding on one never fires.
@@ -92,6 +94,9 @@ public struct WindowsKeymap: Sendable {
         return labels
     }
 
+    /// globalHotkey is `global-hotkey`'s chord as RegisterHotKey takes it, which summons the quick terminal from any app.
+    public var globalHotkey: Hotkey? { keymap.globalHotkey.flatMap(Self.hotkey) }
+
     /// usesWinKey is whether a binding starts with the Win key, which only a low-level hook sees.
     public var usesWinKey: Bool { binds.contains { $0.keybind.first?.mods.contains(.command) == true } }
 
@@ -157,6 +162,34 @@ public struct WindowsKeymap: Sendable {
         case 0xDE: "'"
         default: nil
         }
+    }
+
+    /// virtualKey is the Windows virtual-key code of a key the grammar names, the inverse of `keyName`.
+    public static func virtualKey(_ name: String) -> Int32? {
+        (0x08...0xDE).first { keyName(Int32($0)) == name }.map(Int32.init)
+    }
+
+    /// Hotkey is a chord as RegisterHotKey takes it: MOD_ALT, MOD_CONTROL, MOD_SHIFT and MOD_WIN, and the virtual key.
+    public struct Hotkey: Equatable, Sendable {
+        public let modifiers: UInt32
+        public let key: UInt32
+
+        public init(modifiers: UInt32, key: UInt32) {
+            self.modifiers = modifiers
+            self.key = key
+        }
+    }
+
+    /// hotkey is `global-hotkey`'s chord for RegisterHotKey; nil for a key Windows has no code for here or a chord with no
+    /// modifier, which would take the key from every application.
+    public static func hotkey(_ chord: Chord) -> Hotkey? {
+        guard !chord.mods.isEmpty, let key = virtualKey(chord.key) else { return nil }
+        var modifiers: UInt32 = 0x4000  // MOD_NOREPEAT
+        if chord.mods.contains(.option) { modifiers |= 0x1 }
+        if chord.mods.contains(.control) { modifiers |= 0x2 }
+        if chord.mods.contains(.shift) { modifiers |= 0x4 }
+        if chord.mods.contains(.command) { modifiers |= 0x8 }
+        return Hotkey(modifiers: modifiers, key: UInt32(key))
     }
 
     /// label is a chord as Windows menus write one: Ctrl+Shift+T, Win+Left, F2.

@@ -30,6 +30,9 @@ their own state directory and drive it with the staged `agtermctl` (session name
 They save PNG snapshots beside their results: the window at key steps and when it stops (`final.png`), and the
 whole desktop after a `notify` to show its banner; CI uploads them in the `integration-results-<arch>` artifact.
 
+`panes-cases.ps1` drives split panes, the scratch, the quick terminal and the dashboard with agtermctl, the title bar's
+buttons and the keymap's chords, and reads back the tree, each pane's text and which terminals are on screen.
+
 `title-bar-cases.ps1` sends the window the messages Windows sends its title bar (hit tests, clicks, presses on
 minimize, maximize and close), then reads the outcome back and checks the pixels the bar painted.
 

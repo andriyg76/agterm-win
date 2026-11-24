@@ -11,11 +11,15 @@ struct TitleBarTests {
         #expect(bar.span(of: .close) == .init(left: 1254, right: 1300))
         #expect(bar.span(of: .maximize) == .init(left: 1208, right: 1254))
         #expect(bar.span(of: .minimize) == .init(left: 1162, right: 1208))
-        #expect(bar.span(of: .find) == .init(left: 1122, right: 1162))
+        #expect(bar.span(of: .settings) == .init(left: 1122, right: 1162))
+        #expect(bar.span(of: .find) == .init(left: 1082, right: 1122))
+        #expect(bar.span(of: .dashboard) == .init(left: 1042, right: 1082))
+        #expect(bar.span(of: .split) == .init(left: 1002, right: 1042))
+        #expect(bar.span(of: .quick) == .init(left: 962, right: 1002))
     }
 
-    @Test func titleStartsAtTheTerminalAndStopsBeforeFind() {
-        #expect(bar.title == .init(left: 250, right: 1112))
+    @Test func titleStartsAtTheTerminalAndStopsBeforeTheTrailingButtons() {
+        #expect(bar.title == .init(left: 250, right: 952))
         #expect(TitleBar(width: 1300, sidebarWidth: 0, dpi: 96).title.left == 90)
         #expect(TitleBar(width: 200, sidebarWidth: 240, dpi: 96).title.isEmpty)
     }
@@ -31,7 +35,11 @@ struct TitleBarTests {
         #expect(bar.hit(x: 10, y: 20, topBorder: 6) == .button(.menu))
         #expect(bar.hit(x: 60, y: 20, topBorder: 6) == .button(.newSession))
         #expect(bar.hit(x: 600, y: 20, topBorder: 6) == .caption)
-        #expect(bar.hit(x: 1130, y: 20, topBorder: 6) == .button(.find))
+        #expect(bar.hit(x: 1130, y: 20, topBorder: 6) == .button(.settings))
+        #expect(bar.hit(x: 1090, y: 20, topBorder: 6) == .button(.find))
+        #expect(bar.hit(x: 1050, y: 20, topBorder: 6) == .button(.dashboard))
+        #expect(bar.hit(x: 1010, y: 20, topBorder: 6) == .button(.split))
+        #expect(bar.hit(x: 970, y: 20, topBorder: 6) == .button(.quick))
         #expect(bar.hit(x: 1170, y: 20, topBorder: 6) == .button(.minimize))
         #expect(bar.hit(x: 1220, y: 20, topBorder: 6) == .button(.maximize))
         #expect(bar.hit(x: 1299, y: 20, topBorder: 6) == .button(.close))
@@ -52,6 +60,9 @@ struct TitleBarTests {
         #expect(TitleBar.Button.find.tip([.find: "Ctrl+F"]) == "Find… (Ctrl+F)")
         #expect(TitleBar.Button.find.tip([.find: ""]) == "Find…")
         #expect(TitleBar.Button.close.tip() == nil)
+        #expect(TitleBar.Button.settings.tip() == "Settings… (Ctrl+,)")
+        #expect(TitleBar.Button.dashboard.tip() == "Dashboard (Ctrl+Shift+G)")
+        #expect(TitleBar.Button.split.command == .toggleSplit && TitleBar.Button.quick.command == .quickTerminal)
         #expect(TitleBar.Button.allCases.filter(\.isCaption) == [.minimize, .maximize, .close])
     }
 }
