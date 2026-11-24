@@ -124,6 +124,17 @@ $shellCases = [ordered]@{
         $failures
     }
 
+    # session new --cwd starts the shell there, which names the session after it
+    "session-cwd" = {
+        param($Shell)
+        $state = $Shell.State
+        $id = New-PowerShellSession $state @("--cwd", "C:\Windows\System32")
+        if (-not $id) { return @("session new failed") }
+        $node = Wait-Until { $n = Get-Node $state $id; if ($n.cwd -eq "C:\Windows\System32") { $n } } 30
+        if (-not $node) { return @("cwd is '$((Get-Node $state $id).cwd)', not C:\Windows\System32") }
+        if ($node.name -ne "System32") { @("name is '$($node.name)', not System32") }
+    }
+
     # notify and a program's OSC 9 count on a session out of view; selecting it clears the count
     "notifications" = {
         param($Shell)

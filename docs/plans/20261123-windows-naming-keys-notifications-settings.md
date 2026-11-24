@@ -66,7 +66,13 @@ The native Windows server port waits until the client reaches parity with the WS
 - `theme.list` / `theme.set NAME | --light L --dark D | --dark none` match the macOS command and read-back.
 - Not yet: the sidebar and window chrome keep their dark colors; selection-foreground is not applied; a Settings
   window open during `theme.set` keeps showing its own values.
-- Next pages: Notifications, then General (WSL distribution, session restore).
+- Settings is now three tabs, as on macOS: General, Appearance, Notifications.
+- General, from macOS's General where it applies: where a new session opens (home, the selected session's folder,
+  or a folder), where it goes (end, after the selected one), asking before closing a local session, right-click
+  pastes (off: Windows keeps its menu, Shift+right-click opens it when on), lines a wheel notch scrolls, and the WSL
+  distribution agterm-server runs in (next start; `--wsl` wins). `session new --cwd` now starts there.
+- Not on General yet: restore mode (agterm-win restores fresh shells in their last folder; live would need a local
+  zmx per session, re-run a foreground-command reader) and opening links in an overlay (no overlays yet).
 
 ## Later: font ligatures
 

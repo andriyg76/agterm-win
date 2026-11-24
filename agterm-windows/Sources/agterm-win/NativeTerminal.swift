@@ -31,6 +31,9 @@ final class NativeTerminal {
     /// theme and fontFamily are what every terminal draws with, a new one included; the shell sets them from Settings.
     static var theme: TerminalTheme?
     static var fontFamily: String?
+    /// rightClickPastes and scrollLines are Settings ▸ General's, for every terminal.
+    static var rightClickPastes = false
+    static var scrollLines = GeneralSettings.defaultScrollLines
     /// onExit runs when the started program exits.
     var onExit: (() -> Void)?
     /// onAttention runs when the program rings the bell.
@@ -261,9 +264,9 @@ final class NativeTerminal {
         if reportsMouse {
             for _ in 0..<notches { report(delta > 0 ? 64 : 65, x: x, y: y, release: false) }
         } else if mouseModes & 16 != 0 {
-            send(TerminalInput.wheel(up: delta > 0, notches: Int(notches), applicationCursor: applicationCursor))
+            send(TerminalInput.wheel(up: delta > 0, notches: Int(notches), applicationCursor: applicationCursor, lines: Self.scrollLines))
         } else {
-            nt_scroll(terminal, Int32(delta) / 40)
+            nt_scroll(terminal, Int32(delta) * Int32(Self.scrollLines) / 120)
         }
     }
 
@@ -326,6 +329,8 @@ final class NativeTerminal {
             report(held, x: x, y: y, release: true)
         } else if button == 0, let terminal {
             nt_select_end(terminal)
+        } else if button == 2, Self.rightClickPastes, GetKeyState(VK_SHIFT) >= 0 {
+            perform(.paste)
         } else if button == 2 {
             var point = POINT(x: x, y: y)
             ClientToScreen(window, &point)

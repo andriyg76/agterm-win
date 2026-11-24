@@ -24,7 +24,9 @@ private final class FakeHost: NativeControlHost {
 
     func isServerSession(_ id: UUID) -> Bool { serverWorkspaces.flatMap(\.sessions).contains { $0.id == id.uuidString } }
 
-    func newLocalSession(name: String?, command: String?, select: Bool) -> UUID? {
+    var cwds: [String?] = []
+    func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> UUID? {
+        cwds.append(cwd)
         let id = add(name ?? "Windows PowerShell", command: command ?? "powershell.exe")
         if select { selectedSession = id }
         return id
@@ -163,7 +165,8 @@ struct NativeControlTests {
         let host = FakeHost()
         let workspace = UUID()
         host.serverWorkspaces = [ControlWorkspaceNode(id: workspace.uuidString, name: "dev", active: false, sessions: [])]
-        let local = await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(name: "logs", command: "cmd.exe /k")), host)
+        let local = await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(name: "logs", cwd: #"C:\dev"#, command: "cmd.exe /k")), host)
+        #expect(host.cwds == [#"C:\dev"#])
         #expect(local.ok && host.localSessions.map(\.name) == ["logs"] && host.selectedSession?.uuidString == local.result?.id)
         #expect(await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(workspace: "dev-no")), host).error == "no such workspace: dev-no")
         #expect(await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(workspace: workspace.uuidString)), host).ok)

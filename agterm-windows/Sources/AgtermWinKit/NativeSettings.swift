@@ -39,6 +39,7 @@ public struct NativeSettings: Codable, Equatable, Sendable {
     public var fontPoints: Float = NativeMenu.defaultPoints
     public var appearance = Appearance()
     public var notifications = NotificationSettings()
+    public var general = GeneralSettings()
     /// frame is the window's restored (not maximized) rectangle in screen pixels.
     public var frame: Frame?
     public var maximized = false
@@ -74,6 +75,7 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         fontPoints = try container.decodeIfPresent(Float.self, forKey: .fontPoints) ?? NativeMenu.defaultPoints
         appearance = try container.decodeIfPresent(Appearance.self, forKey: .appearance) ?? Appearance()
         notifications = try container.decodeIfPresent(NotificationSettings.self, forKey: .notifications) ?? NotificationSettings()
+        general = try container.decodeIfPresent(GeneralSettings.self, forKey: .general) ?? GeneralSettings()
         frame = try container.decodeIfPresent(Frame.self, forKey: .frame)
         maximized = try container.decodeIfPresent(Bool.self, forKey: .maximized) ?? false
         localSessions = try container.decodeIfPresent([LocalSession].self, forKey: .localSessions) ?? []
