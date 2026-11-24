@@ -5,6 +5,10 @@ import PackageDescription
 // scripts/make-icon.sh writes the icon resource from agterm's app icon; it is committed
 let iconResource = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path + "/Resources/agterm.res"
 let webviewArch = ProcessInfo.processInfo.environment["AGTERM_WEBVIEW2_ARCH"] ?? "x64"
+let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+func posixPath(_ url: URL) -> String { url.path.replacingOccurrences(of: "\\", with: "/") }
+let webviewInclude = posixPath(packageRoot.appendingPathComponent("vendor/webview2/include", isDirectory: true))
+let webviewLib = posixPath(packageRoot.appendingPathComponent("vendor/webview2/lib/\(webviewArch)", isDirectory: true))
 
 let package = Package(
     name: "agterm-win",
