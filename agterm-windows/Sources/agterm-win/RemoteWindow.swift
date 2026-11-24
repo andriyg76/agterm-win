@@ -117,7 +117,8 @@ final class RemoteWindow: RemoteCatalogEffects {
             return
         }
         let effects = RemotePresentationEffects(
-            status: { _ in }, snapshotStatus: { _ in }, hud: { _ in },
+            status: { _ in }, snapshotStatus: { _ in },
+            hud: { [weak self] hud in self?.onReplicaHud?(id, hud) },
             notify: { [weak self] in self?.onNotification(id, $0) },
             connection: { log("presentation for \(id): \($0)") },
             overlayRequest: { [weak self] overlay in
@@ -143,9 +144,6 @@ final class RemoteWindow: RemoteCatalogEffects {
             },
             pickDismiss: { [weak self] ref in
                 self?.onReplicaPickDismiss?(id, ref)
-            },
-            hud: { [weak self] hud in
-                self?.onReplicaHud?(id, hud)
             },
             warn: { log("presentation for \(id): \($0)") })
         let client = RemotePresentationClient(argv: argv, presentationVersion: binding.presentationVersion, transport: transport,
