@@ -90,7 +90,7 @@ on x64; the next stage does not start before that.
 | **E** | Ask, pick, HUD (`presents: true`) | `agtermCore` + integration per surface |
 | **D** | Page overlays (HTML/URL/…) | `agtermCore` + integration `overlay-html` (+ remote gate rows) |
 
-### Stage A — local program overlay (in progress; PR to `windows-port`)
+### Stage A — local program overlay (CI green on PR #26, 2026-11-24)
 
 - `session.overlay.open|close|resize|result|text|copy|hide|show|toggle` on a **local** session; `NativeControl+Overlay.swift`
   owns refusals and read-back (`overlay`, `overlaySizePercent`, `hiddenOverlays`).
