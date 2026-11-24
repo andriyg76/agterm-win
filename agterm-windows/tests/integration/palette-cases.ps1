@@ -107,7 +107,10 @@ $shellCases["palettes"] = {
         $reply = Invoke-Ctl $state @("session", "new", "--name", $name, "--command", "cmd.exe /d /k")
         if (-not $reply.ok) { return @("session new $name failed: $($reply | ConvertTo-Json -Compress)") }
     }
-    if (-not (Bring-Front $window)) { return @("the window could not be brought to the front, even by a click, so no key reaches it") }
+    if (-not (Bring-Front $window)) {
+        $front = [AgtermInput]::GetForegroundWindow()
+        return @("the window could not be brought to the front, even by a click, so no key reaches it; in front: '$([AgtermWin32]::ClassOf($front))' '$([AgtermWin32]::TextOf($front))'")
+    }
 
     Note "Ctrl+P"
     $palette = Open-Palette $window $false

@@ -153,6 +153,22 @@ function Get-Shot([IntPtr]$Window) {
     [pscustomobject]@{ Bitmap = $bitmap; X = $origin.X - $rect.Left; Y = $origin.Y - $rect.Top }
 }
 
+# Show-Pixels writes a client rectangle into the log as text, one character per 2x2 pixels: '#' bright, '+' mid,
+# '.' near the bar's background, for a check whose picture is not at hand.
+function Show-Pixels($Shot, [string]$Label, [int]$Left, [int]$Right, [int]$Top, [int]$Bottom) {
+    Write-Host "    $Label pixels ($Left..$Right x $Top..$Bottom):"
+    for ($y = $Top; $y -lt $Bottom; $y += 2) {
+        $line = ""
+        for ($x = $Left; $x -lt $Right; $x += 2) {
+            $px = $x + $Shot.X; $py = $y + $Shot.Y
+            if ($px -lt 0 -or $py -lt 0 -or $px -ge $Shot.Bitmap.Width -or $py -ge $Shot.Bitmap.Height) { $line += " "; continue }
+            $c = $Shot.Bitmap.GetPixel($px, $py); $v = ($c.R + $c.G + $c.B) / 3
+            $line += if ($v -gt 0x90) { "#" } elseif ($v -gt 0x50) { "+" } elseif ($v -gt 0x30) { "-" } else { "." }
+        }
+        Write-Host "    |$line|"
+    }
+}
+
 # Get-InkCount counts the pixels in a client rectangle well off the bar's #252526: a glyph's or the title's.
 function Get-InkCount($Shot, [int]$Left, [int]$Right, [int]$Top, [int]$Bottom) {
     $ink = 0
@@ -217,7 +233,10 @@ $shellCases["title-bar"] = {
         }
         foreach ($part in $bar.Spans.Keys) {
             $span = $bar.Spans[$part]
-            if ((Get-InkCount $shot $span[0] $span[1] 0 $bar.Height) -lt 4) { $failures += "the $part button drew no glyph" }
+            if ((Get-InkCount $shot $span[0] $span[1] 0 $bar.Height) -lt 4) {
+                $failures += "the $part button drew no glyph"
+                Show-Pixels $shot $part $span[0] $span[1] 0 $bar.Height
+            }
         }
         if ((Get-InkCount $shot $bar.Title[0] ([Math]::Min($bar.Title[1], $bar.Title[0] + 200)) 0 $bar.Height) -lt 20) {
             $failures += "the bar drew no title"
@@ -226,8 +245,9 @@ $shellCases["title-bar"] = {
         Save-Bitmap $shot.Bitmap (Join-Path $Shell.Dir "title-bar.png")
     }
 
-    Note "+"
+    Note "+: counting sessions"
     $before = (Get-SessionNodes $state).Count
+    Note "+: clicking with $before session(s)"
     Send-Click $window (Get-Centre $bar "new session") $bar.Middle
     $added = Wait-Until { $nodes = Get-SessionNodes $state; if ($nodes.Count -eq $before + 1) { $nodes } }
     if (-not $added) { $failures += "+ left $((Get-SessionNodes $state).Count) session(s), not $($before + 1)" }
