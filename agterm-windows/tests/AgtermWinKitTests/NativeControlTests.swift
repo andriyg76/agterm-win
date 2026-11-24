@@ -72,12 +72,46 @@ private final class FakeHost: NativeControlHost {
     var themeCatalog = ThemeCatalog(names: ["Dracula", "Nord"])
     var systemIsDark = false
     func setAppearance(_ appearance: Appearance) { self.appearance = appearance }
+
+    var wslServers = [ControlWSLServer(distribution: "Ubuntu", started: false, connected: false, launch: nil)]
+    var startRefusal: String?
+    func startWSLServer(_ distribution: String) -> String? {
+        guard startRefusal == nil else { return startRefusal }
+        wslServers = wslServers.map {
+            $0.distribution == distribution ? ControlWSLServer(distribution: distribution, started: true, connected: false, launch: $0.launch) : $0
+        }
+        return nil
+    }
+    func setWSLLaunch(_ distribution: String, atLaunch: Bool) {
+        wslServers = wslServers.map {
+            $0.distribution == distribution ? ControlWSLServer(distribution: distribution, started: $0.started, connected: $0.connected,
+                                                               launch: atLaunch ? "atLaunch" : "manual") : $0
+        }
+    }
 }
 
 @MainActor
 struct NativeControlTests {
     private func handle(_ request: ControlRequest, _ host: FakeHost) async -> ControlResponse {
         await NativeControl.handle(request, host: host, version: "1.2.3")
+    }
+
+    @Test func wslStartAndLaunchAnswerWithEveryServer() async {
+        let host = FakeHost()
+        #expect(await handle(ControlRequest(cmd: .wslList), host).result?.wsl == host.wslServers)
+        let started = await handle(ControlRequest(cmd: .wslStart, args: ControlArgs(name: "ubuntu")), host)
+        #expect(started.ok && started.result?.wsl?.first?.started == true)
+        let launch = await handle(ControlRequest(cmd: .wslLaunch, args: ControlArgs(name: "Ubuntu", mode: "off")), host)
+        #expect(launch.result?.wsl?.first?.launch == "manual")
+        #expect(await handle(ControlRequest(cmd: .tree), host).result?.tree?.wslServers == host.wslServers)
+    }
+
+    @Test func wslRefusesAnUnknownDistributionAndPassesAStartRefusalOn() async {
+        let host = FakeHost()
+        #expect(await handle(ControlRequest(cmd: .wslStart, args: ControlArgs(name: "Arch")), host).error == "no WSL distribution named Arch")
+        #expect(await handle(ControlRequest(cmd: .wslLaunch, args: ControlArgs(name: "Ubuntu")), host).error == "wsl.launch requires on or off")
+        host.startRefusal = "asking"
+        #expect(await handle(ControlRequest(cmd: .wslStart, args: ControlArgs(name: "Ubuntu")), host).error == "asking")
     }
 
     @Test func treeListsLocalSessionsAheadOfTheServersWorkspaces() async {

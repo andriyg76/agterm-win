@@ -778,7 +778,7 @@ final class ControlServer {
                 .sessionDetach, .sessionReattach, .workspaceDetach, .workspaceReattach,
                 .restoreClear, .restoreCapture, .restoreMode, .zmxList, .zmxPrune, .zmxKill, .zmxKillPane, .zmxReset, .zmxTree,
                 .zmxAttach, .zmxAttachGroup, .zmxPresent, .zmxScreen, .catalogSubscribe, .catalogOp, .sessionOverlayJobRun, .sessionOverlayPageServe, .dashboard, .version, .updateCheck,
-                .recentList, .recentOpen, .recentClear, .sessionRemoteNew:
+                .recentList, .recentOpen, .recentClear, .sessionRemoteNew, .wslList, .wslStart, .wslLaunch:
             return ControlResponse(ok: false, error: "control dispatcher did not handle \(request.cmd.rawValue)")
         case .debugAppearance:
             return setDebugAppearance(args: request.args)

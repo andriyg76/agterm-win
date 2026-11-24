@@ -91,6 +91,8 @@ public struct ControlDispatcher {
             return await dispatchWindowCommand(request)
         case .dashboard:
             return dispatchDashboard(request)
+        case .wslList, .wslStart, .wslLaunch:
+            return ControlResponse(ok: false, error: ControlWSL.refusal(request.cmd))
         case .debugAppearance:
             // UI-test-only seam handled app-side in `ControlServer` (needs AppKit + `ContentView.isUITestLaunch`).
             return nil

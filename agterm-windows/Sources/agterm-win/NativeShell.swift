@@ -199,10 +199,10 @@ final class NativeShell {
     }
 
     /// startServer connects to `distribution`'s agterm-server, installing it first when `installing`; while nothing is
-    /// chosen for the distribution, it first asks whether the server starts at launch.
-    private func startServer(_ distribution: String, installing: Bool = false) {
+    /// chosen for the distribution, a start that is `asking` first asks whether the server starts at launch.
+    private func startServer(_ distribution: String, installing: Bool = false, asking ask: Bool = true) {
         guard server(distribution) == nil, !asking.contains(distribution) else { return }
-        if ServerLaunch.asks(settings.serverLaunch[distribution]) {
+        if ask, ServerLaunch.asks(settings.serverLaunch[distribution]) {
             asking.insert(distribution)
             askServerLaunch(distribution)
             asking.remove(distribution)
@@ -1513,6 +1513,25 @@ extension NativeShell: NativeControlHost {
     func reloadKeymap() -> Int { Keys.reload(owner: window, quiet: true) }
 
     func setFontPoints(_ points: Float) { setFontSize(points) }
+
+    var wslServers: [ControlWSLServer] {
+        ServerLaunch.listed(available: menuServers, choices: settings.serverLaunch).map { distribution in
+            let started = server(distribution)
+            return ControlWSLServer(distribution: distribution, started: started != nil, connected: started?.remote.connected == true,
+                                    launch: settings.serverLaunch[distribution]?.rawValue)
+        }
+    }
+
+    func startWSLServer(_ distribution: String) -> String? {
+        guard !asking.contains(distribution) else { return "agterm-server in \(Self.label(of: distribution)) is asking whether it starts at launch" }
+        startServer(distribution, asking: false)
+        return nil
+    }
+
+    func setWSLLaunch(_ distribution: String, atLaunch: Bool) {
+        settings.serverLaunch[distribution] = atLaunch ? .atLaunch : .manual
+        saveSettings()
+    }
 }
 
 /// withWideStrings lends `strings`, each NUL-terminated, to `body` as one array of pointers, valid for the call only.

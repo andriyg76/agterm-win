@@ -204,6 +204,10 @@ renumbering. Do not reintroduce a count anywhere.
   `restore.clear`, `restore.mode`, `version`, `update.check`
 - `recent.list`, `recent.open`, `recent.clear`, `session.undo`
 - `zmx.list`, `zmx.screen`, `zmx.prune`, `zmx.kill`, `zmx.kill.pane`, `zmx.reset`, `zmx.tree`, `zmx.attach`, `zmx.attach.group`, `zmx.present`
+- `wsl.list`, `wsl.start`, `wsl.launch`: served only by agterm for Windows (`NativeControl`); `ControlDispatcher`
+  refuses them with `ControlWSL.refusal`, which agterm-server reaches through it too. `ControlWSL.parse` owns the
+  validation both sides share. Read back the reply's `wsl` list and top-level `tree.wslServers`. `wsl.start` never
+  asks the first-start question: a modal dialog would hold the socket's one-at-a-time accept loop.
 - `catalog.subscribe`, `catalog.op`: served by agterm-server, and by a Mac in Live sessions mode for the window the
   stream's hello or the op's `--window` names (`ControlServer+MacCatalog`); an `opID` request never reaches a Mac's
   remote route

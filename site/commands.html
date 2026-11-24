@@ -205,6 +205,7 @@
             <a href="#keymap" style="color: #bfbab0; padding: 7px 12px; border-radius: 7px" class="hv9">keymap</a>
             <a href="#hooks" style="color: #bfbab0; padding: 7px 12px; border-radius: 7px" class="hv9">hooks</a>
             <a href="#browser" style="color: #bfbab0; padding: 7px 12px; border-radius: 7px" class="hv9">browser</a>
+            <a href="#wsl" style="color: #bfbab0; padding: 7px 12px; border-radius: 7px" class="hv9">wsl</a>
             <a href="#config" style="color: #bfbab0; padding: 7px 12px; border-radius: 7px" class="hv9">config</a>
             <a href="#restore" style="color: #bfbab0; padding: 7px 12px; border-radius: 7px" class="hv9">restore</a>
             <a href="#recent" style="color: #bfbab0; padding: 7px 12px; border-radius: 7px" class="hv9">recent</a>
@@ -4308,6 +4309,50 @@
                 pane overlay, or one the presenting Mac shows, is not replaced. A plain http link
                 uses the overlay only for an unqualified host name such as localhost, a .local name or a private or link-local IP address;
                 http to any other host opens in the browser. mailto, ftp and file links are unaffected. Same setting as Settings ▸ General ▸ Open links in.
+              </p>
+            </div>
+          </section>
+
+          <section id="wsl" style="scroll-margin-top: 88px; padding-top: 56px">
+            <h2
+              style="
+                font-family: &quot;JetBrains Mono&quot;, monospace;
+                font-weight: 700;
+                font-size: 28px;
+                letter-spacing: -0.02em;
+                margin: 0 0 16px;
+                padding-bottom: 12px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+              "
+            >
+              wsl
+            </h2>
+
+            <div style="background: #22272b; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 11px; padding: 18px 20px; margin-bottom: 12px">
+              <div style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13.5px; color: #6d82f3; line-height: 1.6; word-break: break-word">
+                agtermctl wsl list
+              </div>
+              <div style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11.5px; color: #6b727a; margin-top: 6px">wsl.list</div>
+              <p style="font-size: 15px; line-height: 1.65; color: #cbc6bc; margin: 10px 0 0">
+                agterm for Windows only; a Mac and agterm-server refuse every <span style="font-family: &quot;JetBrains Mono&quot;, monospace">wsl</span> command. List each WSL distribution that can hold an agterm-server: <span style="font-family: &quot;JetBrains Mono&quot;, monospace">{distribution, started, connected, launch?}</span> in <span style="font-family: &quot;JetBrains Mono&quot;, monospace">wsl</span>, <span style="font-family: &quot;JetBrains Mono&quot;, monospace">launch</span> being <span style="font-family: &quot;JetBrains Mono&quot;, monospace">atLaunch</span> or <span style="font-family: &quot;JetBrains Mono&quot;, monospace">manual</span> and omitted while no choice is made. The same list is <span style="font-family: &quot;JetBrains Mono&quot;, monospace">wslServers</span> at the top of <span style="font-family: &quot;JetBrains Mono&quot;, monospace">tree --json</span>.
+              </p>
+            </div>
+            <div style="background: #22272b; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 11px; padding: 18px 20px; margin-bottom: 12px">
+              <div style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13.5px; color: #6d82f3; line-height: 1.6; word-break: break-word">
+                agtermctl wsl start DISTRIBUTION
+              </div>
+              <div style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11.5px; color: #6b727a; margin-top: 6px">wsl.start</div>
+              <p style="font-size: 15px; line-height: 1.65; color: #cbc6bc; margin: 10px 0 0">
+                Start that distribution's agterm-server, as New Session ▸ Start agterm-server in does, without asking whether it starts at launch. Starting one already started answers ok. Replies with the <span style="font-family: &quot;JetBrains Mono&quot;, monospace">wsl list</span> result.
+              </p>
+            </div>
+            <div style="background: #22272b; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 11px; padding: 18px 20px; margin-bottom: 12px">
+              <div style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13.5px; color: #6d82f3; line-height: 1.6; word-break: break-word">
+                agtermctl wsl launch DISTRIBUTION on|off
+              </div>
+              <div style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11.5px; color: #6b727a; margin-top: 6px">wsl.launch</div>
+              <p style="font-size: 15px; line-height: 1.65; color: #cbc6bc; margin: 10px 0 0">
+                Set whether that distribution's server starts as agterm opens, as its check box in Settings ▸ agterm-server does. <span style="font-family: &quot;JetBrains Mono&quot;, monospace">off</span> is a choice too, so starting it from the menu no longer asks. Replies with the <span style="font-family: &quot;JetBrains Mono&quot;, monospace">wsl list</span> result.
               </p>
             </div>
           </section>
