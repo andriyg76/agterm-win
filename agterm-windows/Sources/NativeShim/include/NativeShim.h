@@ -170,8 +170,14 @@ typedef struct {
     int32_t kind, state;
 } nt_title_button;
 // nt_title_bar_paint answers the window's WM_PAINT: the bar across the top `height` pixels, the background below it.
+typedef struct {
+    int32_t left, right;
+    const uint16_t *label;
+    int32_t lit;
+} nt_menu_tab;
 void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, const uint16_t *title, int32_t title_left,
-                        int32_t title_right, const nt_title_button *buttons, int32_t count, int32_t active);
+                        int32_t title_right, const nt_title_button *buttons, int32_t count, int32_t active,
+                        const nt_menu_tab *tabs, int32_t tab_count);
 // A tooltip over rectangles of `parent`'s client; nt_tooltip_set with an empty text removes the tool `id`.
 void *nt_tooltip_create(void *parent);
 void nt_tooltip_set(void *tip, void *parent, uintptr_t id, int32_t left, int32_t top, int32_t right, int32_t bottom,

@@ -1,4 +1,5 @@
 #include "NativeShim.h"
+#include "NativeChrome.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -311,6 +312,15 @@ extern "C" int32_t nt_palette_query(void *panel, uint16_t *out, int32_t capacity
 extern "C" void nt_palette_close(void *panel) { ShowWindow(static_cast<HWND>(panel), SW_HIDE); }
 
 extern "C" int32_t nt_palette_visible(void *panel) { return IsWindowVisible(static_cast<HWND>(panel)) ? 1 : 0; }
+
+extern "C" void nt_palette_apply_chrome(void *panel) {
+    Palette *palette = of(static_cast<HWND>(panel));
+    if (!palette) return;
+    DeleteObject(palette->brush);
+    palette->brush = CreateSolidBrush(nt_chrome_pal_bg());
+    InvalidateRect(palette->panel, nullptr, TRUE);
+    InvalidateRect(palette->list, nullptr, TRUE);
+}
 
 // see NativeShim.cpp: the shim stays clear of the MSVC STL
 #ifdef _YVALS_CORE_H_

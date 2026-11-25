@@ -1,14 +1,11 @@
-// Hosted Swift uses an older clang than the VS 2026 STL on windows-11-arm runners.
-#define _ALLOW_COMPILER_AND_STL_VERSION_MISMATCH
 #include "NativeShim.h"
 
-#include <WebView2.h>
+#include "../../vendor/webview2/include/WebView2.h"
 #include <wrl.h>
 
 #include <shlwapi.h>
 #include <stdio.h>
-#include <string>
-#include <unordered_map>
+#include <string.h>
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
@@ -16,6 +13,7 @@ using Microsoft::WRL::ComPtr;
 namespace {
 
 constexpr UINT kPageSetup = WM_APP + 40;
+constexpr int kMaxPages = 32;
 
 struct PageView {
   HWND parent = nullptr;
@@ -23,17 +21,53 @@ struct PageView {
   ComPtr<ICoreWebView2Controller> controller;
   ComPtr<ICoreWebView2> web;
   int32_t state = 0; // 0 loading, 1 loaded, 2 failed
-  std::wstring error;
-  std::wstring title;
-  std::wstring pendingPath;
-  std::wstring pendingUrl;
+  wchar_t error[256]{};
+  wchar_t title[512]{};
+  wchar_t pendingPath[MAX_PATH]{};
+  wchar_t pendingUrl[2048]{};
   bool pendingFile = false;
 };
 
-std::unordered_map<HWND, PageView *> pages;
+PageView *g_pages[kMaxPages]{};
+HWND g_pageHosts[kMaxPages]{};
+
 PageView *pageOf(HWND host) {
-  auto it = pages.find(host);
-  return it == pages.end() ? nullptr : it->second;
+  for (int i = 0; i < kMaxPages; ++i) {
+    if (g_pageHosts[i] == host) return g_pages[i];
+  }
+  return nullptr;
+}
+
+bool reservePage(HWND host, PageView *view) {
+  for (int i = 0; i < kMaxPages; ++i) {
+    if (g_pageHosts[i] == nullptr) {
+      g_pageHosts[i] = host;
+      g_pages[i] = view;
+      return true;
+    }
+  }
+  return false;
+}
+
+void releasePage(HWND host) {
+  for (int i = 0; i < kMaxPages; ++i) {
+    if (g_pageHosts[i] == host) {
+      g_pageHosts[i] = nullptr;
+      g_pages[i] = nullptr;
+      return;
+    }
+  }
+}
+
+void fileUri(wchar_t *out, size_t outChars, const wchar_t *path) {
+  if (outChars < 9) return;
+  wcscpy_s(out, outChars, L"file:///");
+  size_t used = wcslen(out);
+  if (used + 1 >= outChars) return;
+  wcscpy_s(out + used, outChars - used, path);
+  for (wchar_t *c = out; *c; ++c) {
+    if (*c == L'\\') *c = L'/';
+  }
 }
 
 LRESULT CALLBACK pageHostProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -44,7 +78,7 @@ LRESULT CALLBACK pageHostProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         [view](HRESULT result, ICoreWebView2Environment *env) -> HRESULT {
           if (FAILED(result) || !env) {
             view->state = 2;
-            view->error = L"WebView2 environment failed";
+            wcscpy_s(view->error, L"WebView2 environment failed");
             return result;
           }
           return env->CreateCoreWebView2Controller(
@@ -53,7 +87,7 @@ LRESULT CALLBACK pageHostProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                   [view](HRESULT result, ICoreWebView2Controller *controller) -> HRESULT {
                     if (FAILED(result) || !controller) {
                       view->state = 2;
-                      view->error = L"WebView2 controller failed";
+                      wcscpy_s(view->error, L"WebView2 controller failed");
                       return result;
                     }
                     view->controller = controller;
@@ -74,29 +108,27 @@ LRESULT CALLBACK pageHostProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                               args->get_IsSuccess(&success);
                               if (success) {
                                 view->state = 1;
-                                view->error.clear();
+                                view->error[0] = 0;
                                 PWSTR title = nullptr;
                                 view->web->get_DocumentTitle(&title);
                                 if (title) {
-                                  view->title = title;
+                                  wcscpy_s(view->title, title);
                                   CoTaskMemFree(title);
                                 }
                               } else {
                                 view->state = 2;
-                                view->error = L"navigation failed";
+                                wcscpy_s(view->error, L"navigation failed");
                               }
                               return S_OK;
                             })
                             .Get(),
                         &navToken);
-                    if (view->pendingFile && !view->pendingPath.empty()) {
-                      std::wstring uri = L"file:///" + view->pendingPath;
-                      for (wchar_t &c : uri) {
-                        if (c == L'\\') c = L'/';
-                      }
-                      view->web->Navigate(uri.c_str());
-                    } else if (!view->pendingUrl.empty()) {
-                      view->web->Navigate(view->pendingUrl.c_str());
+                    if (view->pendingFile && view->pendingPath[0]) {
+                      wchar_t uri[MAX_PATH + 16];
+                      fileUri(uri, sizeof(uri) / sizeof(uri[0]), view->pendingPath);
+                      view->web->Navigate(uri);
+                    } else if (view->pendingUrl[0]) {
+                      view->web->Navigate(view->pendingUrl);
                     }
                     return S_OK;
                   })
@@ -116,7 +148,7 @@ void ensureHostClass() {
   wc.lpfnWndProc = pageHostProc;
   wc.hInstance = GetModuleHandleW(nullptr);
   wc.lpszClassName = L"agterm-page";
-  wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));  // IDC_ARROW, narrow without UNICODE
+  wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
   RegisterClassExW(&wc);
   registered = true;
 }
@@ -133,7 +165,11 @@ extern "C" void *nt_page_create(void *parent) {
   auto *view = new PageView();
   view->parent = parentHwnd;
   view->host = host;
-  pages[host] = view;
+  if (!reservePage(host, view)) {
+    delete view;
+    DestroyWindow(host);
+    return nullptr;
+  }
   PostMessageW(host, kPageSetup, 0, 0);
   return host;
 }
@@ -144,7 +180,7 @@ extern "C" void nt_page_destroy(void *page) {
   if (view) {
     if (view->controller) view->controller->Close();
     delete view;
-    pages.erase(host);
+    releasePage(host);
   }
   DestroyWindow(host);
 }
@@ -164,15 +200,13 @@ extern "C" void nt_page_navigate_file(void *page, const uint16_t *path) {
   PageView *view = pageOf(host);
   if (!view || !path) return;
   view->pendingFile = true;
-  view->pendingPath = reinterpret_cast<const wchar_t *>(path);
-  view->pendingUrl.clear();
+  wcscpy_s(view->pendingPath, reinterpret_cast<const wchar_t *>(path));
+  view->pendingUrl[0] = 0;
   view->state = 0;
   if (view->web) {
-    std::wstring uri = L"file:///" + view->pendingPath;
-    for (wchar_t &c : uri) {
-      if (c == L'\\') c = L'/';
-    }
-    view->web->Navigate(uri.c_str());
+    wchar_t uri[MAX_PATH + 16];
+    fileUri(uri, sizeof(uri) / sizeof(uri[0]), view->pendingPath);
+    view->web->Navigate(uri);
   }
 }
 
@@ -191,9 +225,9 @@ extern "C" void nt_page_navigate_url(void *page, const uint16_t *url) {
   PageView *view = pageOf(host);
   if (!view || !url) return;
   view->pendingFile = false;
-  view->pendingUrl = reinterpret_cast<const wchar_t *>(url);
+  wcscpy_s(view->pendingUrl, reinterpret_cast<const wchar_t *>(url));
   view->state = 0;
-  if (view->web) view->web->Navigate(view->pendingUrl.c_str());
+  if (view->web) view->web->Navigate(view->pendingUrl);
 }
 
 extern "C" int32_t nt_page_state(void *page) {
@@ -204,10 +238,10 @@ extern "C" int32_t nt_page_state(void *page) {
 extern "C" int32_t nt_page_title(void *page, uint16_t *out, int32_t capacity) {
   PageView *view = pageOf(static_cast<HWND>(page));
   if (!view || capacity <= 0) return 0;
-  const std::wstring &title = view->title;
-  int32_t length = static_cast<int32_t>(title.size());
+  const wchar_t *title = view->title;
+  int32_t length = static_cast<int32_t>(wcslen(title));
   if (out && length < capacity) {
-    memcpy(out, title.c_str(), static_cast<size_t>(length + 1) * sizeof(wchar_t));
+    memcpy(out, title, static_cast<size_t>(length + 1) * sizeof(wchar_t));
   }
   return length;
 }

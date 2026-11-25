@@ -1,5 +1,5 @@
-/// NativeMenu is what the native window's menus hold: the terminal's context menu, and the ☰ menu, which adds the
-/// window's own commands. Every command is also a shortcut, so a menu never holds the only way to do something.
+/// NativeMenu is what the native window's menus hold: the terminal's context menu, the title-bar menus, and the
+/// commands those add. Every command is also a shortcut, so a menu never holds the only way to do something.
 public enum NativeMenu {
     public enum Command: Int, CaseIterable, Sendable {
         case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, newServerSession, renameSession, restartSession, closeSession, nextSession, previousSession, find, quit,
@@ -233,16 +233,35 @@ public enum NativeMenu {
                 .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), .separator, scratch, quick, dashboard]
     }
 
-    /// window is the ☰ menu: the sidebar's menu, the palettes and Find, View, the terminal's menu, the keymap's commands, and Quit.
+    /// file is the File menu: sessions and the terminal's edit commands.
+    public static func file(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
+                            sessionCount: Int, canRenameSession: Bool = false, canRestartSession: Bool = false, hasSelection: Bool,
+                            canPaste: Bool, shortcuts: Shortcuts = [:]) -> [Entry] {
+        sessions(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession,
+                 sessionCount: sessionCount, canRenameSession: canRenameSession, canRestartSession: canRestartSession, shortcuts: shortcuts)
+            + [.separator] + terminal(hasSelection: hasSelection, canPaste: canPaste, shortcuts: shortcuts)
+    }
+
+    /// navigate is the Navigate menu: the palettes and Find.
+    public static func navigate(shortcuts: Shortcuts = [:]) -> [Entry] {
+        [.command(.sessionPalette, shortcuts), .command(.commandPalette, shortcuts), .command(.find, shortcuts)]
+    }
+
+    /// help is the Help menu: settings, the keymap, and Quit.
+    public static func help(shortcuts: Shortcuts = [:]) -> [Entry] {
+        [.command(.settings), .command(.editKeymap), .command(.reloadKeymap), .separator, .command(.quit)]
+    }
+
+    /// window is every menu tab flattened, which the command palette lists.
     public static func window(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
                               sessionCount: Int, canRenameSession: Bool = false, canRestartSession: Bool = false, hasSelection: Bool,
                               canPaste: Bool, view: View = View(), shortcuts: Shortcuts = [:]) -> [Entry] {
-        sessions(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession,
-                 sessionCount: sessionCount, canRenameSession: canRenameSession, canRestartSession: canRestartSession, shortcuts: shortcuts)
-            + [.separator, .command(.sessionPalette, shortcuts), .command(.commandPalette, shortcuts), .command(.find, shortcuts),
-               Entry(title: "View", shortcut: "", pick: nil, enabled: true, children: Self.view(view, shortcuts: shortcuts))]
-            + terminal(hasSelection: hasSelection, canPaste: canPaste, shortcuts: shortcuts)
-            + [.separator, .command(.settings), .command(.editKeymap), .command(.reloadKeymap), .separator, .command(.quit)]
+        file(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession, sessionCount: sessionCount,
+             canRenameSession: canRenameSession, canRestartSession: canRestartSession, hasSelection: hasSelection, canPaste: canPaste,
+             shortcuts: shortcuts)
+            + [.separator] + navigate(shortcuts: shortcuts)
+            + [Entry(title: "View", shortcut: "", pick: nil, enabled: true, children: Self.view(view, shortcuts: shortcuts))]
+            + [.separator] + help(shortcuts: shortcuts)
     }
 
     /// closeQuestion is what closing an agterm-server session asks: it ends that session's programs on the server.

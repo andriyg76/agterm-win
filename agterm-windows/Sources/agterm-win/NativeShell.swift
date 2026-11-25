@@ -120,12 +120,12 @@ final class NativeShell {
     private let settingsURL: URL
     var settings: NativeSettings
     var window: HWND?
-    private var tree: UnsafeMutableRawPointer?
+    var tree: UnsafeMutableRawPointer?
     private var notice: HWND?
     private var findBar: HWND?
     private var findFailed = false
     private var tooltip: UnsafeMutableRawPointer?
-    private var palette: UnsafeMutableRawPointer?
+    var palette: UnsafeMutableRawPointer?
     // the open palette, what it lists, and the rows its query leaves, which Enter's index refers to
     private var paletteMode: Palette.Mode?
     private var paletteRows: [Palette.Row] = []
@@ -133,6 +133,7 @@ final class NativeShell {
     // the title bar's button under the mouse, and the one a press started on, which acts if the release is on it too
     private var hovered: TitleBar.Button?
     private var pressed: TitleBar.Button?
+    private var pressedMenuTab: Int?
     private var windowActive = true
     private var shownTitle = "agterm"
     var remoteTerminal: NativeTerminal!
@@ -160,7 +161,7 @@ final class NativeShell {
     private var tagged: [Foundation.UUID] = []
     private var dimmed: [UInt8] = []
     private var items: [Foundation.UUID: UnsafeMutableRawPointer] = [:]
-    private let darkBrush = CreateSolidBrush(0x262525)
+    var darkBrush = CreateSolidBrush(0x262525)
     var dpi: UInt32 = 96
     private var control: ControlSocket?
     private let version: String
@@ -173,7 +174,10 @@ final class NativeShell {
     var recentSessions: [Foundation.UUID] = []
     /// dragging is the session whose divider the mouse is moving, and the area its panes share.
     var dragging: (id: Foundation.UUID, area: NativeOverlay.Rect)?
-    let highlightBrush = CreateSolidBrush(0x784F26)
+    /// sidebarDragging moves the sidebar divider in client pixels.
+    var sidebarDragging = false
+    var menuBarHighlight: Int?
+    var highlightBrush = CreateSolidBrush(0x784F26)
     /// closeSessionCoalesced swallows a second Close Session chord right after one dismissed an overlay; arm64 can deliver two.
     private var closeSessionCoalesced: Date?
 
@@ -192,6 +196,7 @@ final class NativeShell {
         settings = NativeSettings.load(from: settingsURL)
         TerminalAppearance.use(settings.appearance)
         applyGeneral()
+        applyChrome()
     }
 
     private func create(starting requested: [String], server requestedServer: String?, installServer: Bool) {
@@ -494,6 +499,7 @@ final class NativeShell {
     /// applyAppearance draws every terminal with `values`, without saving them.
     private func applyAppearance(_ values: SettingsWindow.Values) {
         let refit = TerminalAppearance.use(values.appearance)
+        applyChrome()
         for terminal in allTerminals {
             terminal.applyTheme()
             if refit { terminal.applyFontFamily() }
@@ -508,7 +514,7 @@ final class NativeShell {
                                                          notifications: settings.notifications, general: settings.general,
                                                          serverAtLaunch: Set(ServerLaunch.atLaunch(settings.serverLaunch))),
                             themes: TerminalAppearance.themes.catalog.names, fonts: TerminalAppearance.monospaceFonts,
-                            distributions: listed,
+                            distributions: listed, chrome: chromePalette,
                             preview: { [unowned self] in applyAppearance($0) },
                             finish: { [unowned self] kept in
                                 guard let kept else { return }
@@ -617,8 +623,9 @@ final class NativeShell {
     }
 
     fileprivate func editColors(_ context: HDC?) -> LRESULT {
-        SetTextColor(context, findFailed ? 0x6B6BF0 : 0xE0E0E0)
-        SetBkColor(context, 0x262525)
+        let palette = chromePalette
+        SetTextColor(context, findFailed ? palette.chromeAccent : palette.chromeText)
+        SetBkColor(context, palette.palBg)
         return LRESULT(Int(bitPattern: darkBrush))
     }
 
@@ -1608,7 +1615,6 @@ final class NativeShell {
 
     // MARK: sidebar
 
-    var sidebarWidth: Int32 { scaled(240) }
     func scaled(_ value: Int32) -> Int32 { MulDiv(value, Int32(dpi), 96) }
 
     var terminalsShown: [NativeTerminal] { [remoteTerminal] + locals.flatMap(\.terminals) }
@@ -1628,7 +1634,7 @@ final class NativeShell {
         return overlay.terminal
     }
 
-    private func layout() {
+    func layout() {
         guard let window else { return }
         var client = RECT()
         GetClientRect(window, &client)
@@ -1778,11 +1784,34 @@ final class NativeShell {
     /// focus gives the keyboard to what is in view: the dashboard's grid takes it in the window itself.
     func focus() { SetFocus(dashboard != nil ? window : visibleTerminal.window) }
 
-    /// windowMenu is the ☰ menu: new sessions from the launch profiles, the terminal's commands and the window's own.
-    private func windowMenu() {
-        var corner = POINT(x: titleBar.span(of: .menu).left, y: titleBar.height)
+    private var menuShortcuts: NativeMenu.Shortcuts { Keys.keymap.shortcuts }
+
+    /// menuBarEntries is one title-bar menu tab's popup, in the order MenuBarLayout lays them out.
+    private func menuBarEntries(tab: Int) -> [NativeMenu.Entry] {
+        let shortcuts = menuShortcuts
+        switch tab {
+        case 0:
+            return NativeMenu.file(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries, canCloseSession: canCloseSelected,
+                                   sessionCount: tagged.count, canRenameSession: canRename(selected),
+                                   canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
+                                   canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), shortcuts: shortcuts)
+        case 1: return NativeMenu.view(viewState, shortcuts: shortcuts)
+        case 2: return NativeMenu.navigate(shortcuts: shortcuts)
+        case 3: return NativeMenu.help(shortcuts: shortcuts)
+        default: return []
+        }
+    }
+
+    /// openMenuTab shows a title-bar menu tab under the label the user clicked.
+    private func openMenuTab(_ index: Int) {
+        let bar = titleBar
+        let gap = bar.actionWidth / 4
+        let limit = bar.span(of: .quick).left - gap
+        let start = bar.span(of: .newSession).right + gap
+        guard let span = MenuBarLayout.menuSpans(origin: start, limit: limit, dpi: dpi).first(where: { $0.index == index })?.span else { return }
+        var corner = POINT(x: span.left, y: bar.height)
         ClientToScreen(window, &corner)
-        run(showMenu(windowEntries, owner: window, at: corner))
+        run(showMenu(menuBarEntries(tab: index), owner: window, at: corner))
     }
 
     /// windowEntries is the ☰ menu as it stands now, which the command palette lists too.
@@ -2000,6 +2029,7 @@ final class NativeShell {
         case .top: return hitTop
         case .caption: return hitCaption
         case .button(let button): return button.hitCode ?? hitClient
+        case .menuTab: return hitClient
         case .outside: return hitClient
         }
     }
@@ -2028,13 +2058,42 @@ final class NativeShell {
         invalidateTitleBar()
     }
 
+    private func titlePoint(_ lParam: LPARAM) -> (x: Int32, y: Int32) {
+        (Int32(Int16(truncatingIfNeeded: lParam)), Int32(Int16(truncatingIfNeeded: lParam >> 16)))
+    }
+
+    private func menuTab(at x: Int32, y: Int32) -> Int? {
+        let bar = titleBar
+        guard y >= 0, y < bar.height else { return nil }
+        let gap = bar.actionWidth / 4
+        let limit = bar.span(of: .quick).left - gap
+        return bar.menuTab(x: x, y: y, dpi: dpi, limit: limit)
+    }
+
+    private func refreshMenuBarHighlight(x: Int32, y: Int32) {
+        let tab = menuTab(at: x, y: y)
+        guard tab != menuBarHighlight else { return }
+        menuBarHighlight = tab
+        invalidateTitleBar()
+    }
+
     fileprivate func mouseMoved(_ lParam: LPARAM) {
         if dragDivider(lParam) { return }
+        let (x, y) = titlePoint(lParam)
+        refreshMenuBarHighlight(x: x, y: y)
         hover(clientButton(lParam), frame: false)
     }
 
     fileprivate func mouseDown(_ lParam: LPARAM, double: Bool = false) {
         if bodyMouseDown(lParam, double: double) { return }
+        let (x, y) = titlePoint(lParam)
+        if y < titleBar.height, let tab = menuTab(at: x, y: y) {
+            pressedMenuTab = tab
+            menuBarHighlight = tab
+            SetCapture(window)
+            invalidateTitleBar()
+            return
+        }
         guard let button = clientButton(lParam) else { return }
         pressed = button
         SetCapture(window)
@@ -2043,6 +2102,14 @@ final class NativeShell {
 
     fileprivate func mouseUp(_ lParam: LPARAM) {
         if endDividerDrag() { return }
+        if let tab = pressedMenuTab {
+            pressedMenuTab = nil
+            ReleaseCapture()
+            let (x, y) = titlePoint(lParam)
+            if menuTab(at: x, y: y) == tab { openMenuTab(tab) }
+            invalidateTitleBar()
+            return
+        }
         guard let button = pressed, !button.isCaption else { return }
         pressed = nil
         ReleaseCapture()
@@ -2074,7 +2141,6 @@ final class NativeShell {
 
     fileprivate func act(_ button: TitleBar.Button) {
         switch button {
-        case .menu: windowMenu()
         case .minimize: ShowWindow(window, SW_MINIMIZE)
         case .maximize: ShowWindow(window, IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE)
         case .close: PostMessageW(window, UINT(WM_CLOSE), 0, 0)
@@ -2134,10 +2200,38 @@ final class NativeShell {
             return nt_title_button(left: span.left, right: span.right, glyph: button.glyph(maximized: maximized),
                                    kind: button == .close ? 2 : button.isCaption ? 1 : 0, state: state)
         }
-        buttons.withUnsafeBufferPointer { buttons in
-            nt_title_bar_paint(UnsafeMutableRawPointer(window), dpi, bar.height, Array(shownTitle.utf16) + [0], bar.title.left,
-                               bar.title.right, buttons.baseAddress, Int32(buttons.count), windowActive ? 1 : 0)
+        let gap = bar.actionWidth / 4
+        let limit = bar.span(of: .quick).left - gap
+        let start = bar.span(of: .newSession).right + gap
+        let spans = MenuBarLayout.menuSpans(origin: start, limit: limit, dpi: dpi)
+        var labels = spans.map { Array(MenuBarLayout.titles[$0.index].utf16) + [0] }
+        var tabs = spans.enumerated().map { offset, entry in
+            nt_menu_tab(left: entry.span.left, right: entry.span.right, label: nil,
+                        lit: menuBarHighlight == entry.index || pressedMenuTab == entry.index ? 1 : 0)
         }
+        let tabCount = Int32(spans.count)
+        withMenuTabLabels(&labels, tabs: &tabs) { tabPtr in
+            buttons.withUnsafeBufferPointer { buttons in
+                let title = Array(shownTitle.utf16) + [0]
+                title.withUnsafeBufferPointer { title in
+                    nt_title_bar_paint(UnsafeMutableRawPointer(window), dpi, bar.height, title.baseAddress, bar.title.left,
+                                       bar.title.right, buttons.baseAddress, Int32(buttons.count), windowActive ? 1 : 0,
+                                       tabPtr, tabCount)
+                }
+            }
+        }
+    }
+
+    /// withMenuTabLabels lends label pointers into `labels` for the paint call only.
+    private func withMenuTabLabels(_ labels: inout [[UInt16]], tabs: inout [nt_menu_tab], _ body: (UnsafePointer<nt_menu_tab>?) -> Void) {
+        func lend(_ index: Int) {
+            guard index < labels.count else { return tabs.withUnsafeBufferPointer { body($0.baseAddress) } }
+            labels[index].withUnsafeBufferPointer { label in
+                tabs[index].label = label.baseAddress
+                lend(index + 1)
+            }
+        }
+        lend(0)
     }
 }
 
@@ -2170,7 +2264,6 @@ private extension TitleBar.Button {
 
     func glyph(maximized: Bool) -> UInt16 {
         switch self {
-        case .menu: 0xE700
         case .newSession: 0xE710
         case .find: 0xE721
         case .quick: 0xE756

@@ -190,6 +190,9 @@ private final class FakeHost: NativeControlHost {
     }
     func closeDashboard() { dashboard = nil }
 
+    var sidebarWidthPoints: Double = AppStore.sidebarWidthDefault
+    func setSidebarWidth(points: Double) { sidebarWidthPoints = AppStore.clampSidebarWidth(points) }
+
     func exitOverlay(_ id: UUID, code: Int) {
         editLocal(id) {
             $0.overlay = nil
@@ -245,6 +248,15 @@ struct NativeControlTests {
     @Test func treeHasNoLocalGroupWithoutLocalSessions() async {
         let host = FakeHost()
         #expect(await handle(ControlRequest(cmd: .tree), host).result?.tree?.workspaces.isEmpty == true)
+    }
+
+    @Test func sidebarWidthSetsAndEchoesOnTree() async {
+        let host = FakeHost()
+        let set = await handle(ControlRequest(cmd: .sidebarWidth, args: ControlArgs(sidebarWidth: 271.3)), host)
+        #expect(set.ok == true)
+        #expect(set.result?.sidebarWidth == 271.3)
+        let tree = await handle(ControlRequest(cmd: .tree), host)
+        #expect(tree.result?.tree?.sidebarWidth == 271.3)
     }
 
     @Test func typeGoesToTheSelectedSessionWithoutATarget() async {
