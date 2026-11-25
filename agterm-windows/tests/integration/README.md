@@ -17,6 +17,9 @@ Run on the current desktop (windows open and close on their own; leave them be):
 powershell -ExecutionPolicy Bypass -File tests\integration\run.ps1 -App $env:TEMP\agterm-win-stage -Results $env:TEMP\agterm-results
 ```
 
+`-Case overlay*` runs only the cases whose names match, and `-StepSeconds 2` pauses after every step that changes
+the window, to watch a case run.
+
 CI runs the same cases on the runner desktop (`.github/workflows/windows.yml`).
 Or in Windows Sandbox, which keeps the host desktop free and starts from a clean machine with no network or WSL:
 

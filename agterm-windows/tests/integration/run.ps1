@@ -5,7 +5,11 @@
 param(
     [Parameter(Mandatory)][string]$App,
     [Parameter(Mandatory)][string]$Results,
-    [ValidateRange(5, 600)][int]$CaseTimeoutSeconds = 60
+    [ValidateRange(5, 600)][int]$CaseTimeoutSeconds = 60,
+    # wildcard names of the cases to run, all when omitted
+    [string[]]$Case = @("*"),
+    # a pause after every step that changes the window, to watch a case run
+    [ValidateRange(0, 30)][double]$StepSeconds = 0
 )
 $ErrorActionPreference = "Stop"
 $exe = Join-Path (Resolve-Path $App) "agterm-win.exe"
@@ -68,7 +72,9 @@ $cases = @(
                   "[process exited with code 0]") }
 )
 
-$outcomes = foreach ($case in $cases) {
+function Test-Selected([string]$Name) { [bool]($Case | ? { $Name -like $_ }) }
+
+$outcomes = foreach ($case in $cases | ? { Test-Selected $_.Name }) {
     $run = Invoke-Case $case.Name $case.Arguments
     $failures = @()
     if ($run.TimedOut) { $failures += "window did not close within $CaseTimeoutSeconds s" }
@@ -79,7 +85,7 @@ $outcomes = foreach ($case in $cases) {
     if (Test-Path $crash) { $failures += "crash: " + (Get-Content $crash -Raw).Trim() }
     Write-Verdict $case.Name $failures
 }
-$outcomes = @($outcomes) + @(foreach ($name in $shellCases.Keys) {
+$outcomes = @($outcomes) + @(foreach ($name in @($shellCases.Keys) | ? { Test-Selected $_ }) {
     if ($skip = ShellCaseSkipReason $name) { Write-Skip $name $skip }
     else { Write-Verdict $name (Invoke-ShellCase $name) }
 })

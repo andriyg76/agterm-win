@@ -73,6 +73,7 @@ function Invoke-Ctl([string]$State, [string[]]$Arguments) {
         $shell.Step++
         Start-Sleep -Milliseconds 250
         Save-Snapshot $shell ("{0:d2}-{1}" -f $shell.Step, ($words -join "-"))
+        if ($StepSeconds) { Start-Sleep -Milliseconds ([int]($StepSeconds * 1000)) }
     }
     $reply
 }
