@@ -47,5 +47,5 @@ for the Store listing's privacy policy URL, is [PRIVACY.md](../PRIVACY.md).
    (the one in the workflow's comment), GitHub as the trusted build system.
 4. In this repository: secret `SIGNPATH_API_TOKEN`, variable `SIGNPATH_ORGANIZATION_ID`. MFA on GitHub and SignPath
 
-**Release notes (`scripts/release-notes.ps1`):** the publish step lists commits and merged PRs on `windows-port` since the previous `v<AGTERM_VERSION>.<n>` tag. Optional secret **`OPENAI_API_KEY`** and variable **`OPENAI_MODEL`** (default `gpt-4o-mini`) ask the API to group features vs refactors; without the key, notes list PRs and commits directly.
+**Release notes (`scripts/release-notes.ps1`):** the publish step lists commits and merged PRs on `windows-port` since the previous `v<AGTERM_VERSION>.<n>` tag. Optional secret **`OPENAI_API_KEY`** and variable **`OPENAI_MODEL`** (default `GPT-6-Sol`) ask the API to group features vs refactors; without the key, notes list PRs and commits directly.
    for every member.
