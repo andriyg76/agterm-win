@@ -724,8 +724,9 @@ struct NativeControlTests {
         let id = host.add("a")
         let target = id.uuidString
         #expect(await handle(ControlRequest(cmd: .sessionContext, target: target, args: ControlArgs(text: " PR 12 ", mode: "set")), host).ok)
-        #expect(await handle(ControlRequest(cmd: .sessionInfo, target: target, args: ControlArgs(text: "**3** tests", mode: "set",
-                                                                                                   markdown: true)), host).ok)
+        let infoReply = await handle(ControlRequest(cmd: .sessionInfo, target: target, args: ControlArgs(text: "**3** tests", mode: "set",
+                                                                                                        markdown: true)), host)
+        #expect(infoReply.error == nil)
         var node = NativeControl.tree(host).workspaces[0].sessions[0]
         #expect(node.context == "PR 12" && node.info == "**3** tests" && node.infoMarkdown == true && node.infoHideAfter == 0)
         #expect(StatusGlyph.infoText(host.localSessions[0].info) == "3 tests")
