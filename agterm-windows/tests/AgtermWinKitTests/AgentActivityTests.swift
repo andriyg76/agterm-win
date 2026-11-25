@@ -31,7 +31,8 @@ struct AgentActivityTests {
     @Test func ifIdleSkipsABusyRowWithoutStamping() {
         var activity = AgentActivity()
         activity.apply(update(.active), hasSplit: false, now: Date(timeIntervalSince1970: 1))
-        #expect(!activity.apply(update(.active, ifIdle: true), hasSplit: false, now: Date(timeIntervalSince1970: 2)))
+        let applied = activity.apply(update(.active, ifIdle: true), hasSplit: false, now: Date(timeIntervalSince1970: 2))
+        #expect(!applied)
         #expect(activity.changedAt == Date(timeIntervalSince1970: 1))
     }
 
