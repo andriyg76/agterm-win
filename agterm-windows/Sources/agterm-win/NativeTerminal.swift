@@ -462,18 +462,12 @@ final class NativeTerminal {
 
     /// shortcut is what a key chord does: the fixed editing chords (WindowsKeymap.reserved; Ctrl+C copies only
     /// while there is a selection), then the keymap. A window command does nothing in a window without a sidebar.
-    private func shortcut(_ key: Int32, _ modifiers: TerminalInput.Modifiers) -> Shortcut? {
-        let letter = { (character: Character) in key == Int32(character.asciiValue!) }
-        if modifiers == [.shift, .control] {
-            if letter("C") { return .command(.copy) }
-            if letter("V") { return .command(.paste) }
-            if letter("A") { return .command(.selectAll) }
-            if letter("K") { return .command(.clearScrollback) }
-            if onWindowCommand != nil, letter("R") { return .command(.restartSession) }
-        }
-        if onWindowCommand != nil, modifiers == .control, key == VK_OEM_COMMA { return .command(.settings) }
-        if modifiers == .control, letter("C"), hasSelection { return .command(.copy) }
+    private func shortcut(_ key: Int32) -> Shortcut? {
         guard let chord = Keys.chord(virtualKey: key) else { return nil }
+        if let command = WindowsKeymap.fixedCommand(for: chord, hasSelection: hasSelection), command != .quit,
+           command != .settings || onWindowCommand != nil {
+            return .command(command)
+        }
         switch Keys.keymap.press(chord) {
         case .command(let command):
             let fontCommand = [.fontBigger, .fontSmaller, .fontReset].contains(command)
@@ -490,7 +484,7 @@ final class NativeTerminal {
             return true
         }
         let modifiers = modifiers
-        if let shortcut = shortcut(key, modifiers) {
+        if let shortcut = shortcut(key) {
             // TranslateMessage already queued the chord's WM_CHAR (^C, ^V, ^_), which must not type
             var queued = MSG()
             while PeekMessageW(&queued, window, UINT(WM_CHAR), UINT(WM_CHAR), UINT(PM_REMOVE)) {}

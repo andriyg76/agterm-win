@@ -165,3 +165,5 @@ SwiftUI guidance during development came from the [SwiftUI Agent Skill](https://
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more information.
+
+Windows keyboard defaults and planned feature assignments: [Windows shortcuts](docs/windows-shortcuts.md).

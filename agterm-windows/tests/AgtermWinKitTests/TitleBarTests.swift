@@ -58,11 +58,11 @@ struct TitleBarTests {
     }
 
     @Test func tipsNameTheCommandAndTheKeymapsChord() {
-        #expect(TitleBar.Button.newSession.tip() == "New Session (Ctrl+Shift+T)")
+        #expect(TitleBar.Button.newSession.tip() == "New Session (Ctrl+N)")
         #expect(TitleBar.Button.find.tip([.find: "Ctrl+F"]) == "Find… (Ctrl+F)")
         #expect(TitleBar.Button.find.tip([.find: ""]) == "Find…")
         #expect(TitleBar.Button.close.tip() == nil)
-        #expect(TitleBar.Button.settings.tip() == "Settings… (Ctrl+,)")
+        #expect(TitleBar.Button.settings.tip() == "Settings… (Ctrl+, / Ctrl+Alt+S)")
         #expect(TitleBar.Button.dashboard.tip() == "Dashboard (Ctrl+Shift+G)")
         #expect(TitleBar.Button.split.command == .toggleSplit && TitleBar.Button.quick.command == .quickTerminal)
         #expect(TitleBar.Button.allCases.filter(\.isCaption) == [.minimize, .maximize, .close])

@@ -32,7 +32,7 @@ function Write-Verdict([string]$Name, [string[]]$Failures) {
 function ShellCaseSkipReason([string]$Name) {
     $native = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -ErrorAction SilentlyContinue).PROCESSOR_ARCHITECTURE
     if ($Name -eq "overlay-keys" -and $native -eq "ARM64") {
-        return "arm64: Ctrl+Shift+W closes the session under a program overlay instead of dismissing the overlay (x64 passes; SendChord/GetFocus on windows-11-arm). Re-enable when fixed."
+        return "arm64: Ctrl+W closes the session under a program overlay instead of dismissing the overlay (x64 passes; SendChord/GetFocus on windows-11-arm). Re-enable when fixed."
     }
     return $null
 }

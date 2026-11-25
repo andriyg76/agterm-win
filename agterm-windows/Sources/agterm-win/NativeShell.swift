@@ -1013,13 +1013,25 @@ final class NativeShell {
         }
     }
 
+    var selectedOverlayHidden: Bool? {
+        guard let selected else { return nil }
+        if let overlay = serverOverlayState(for: selected)?.overlay { return overlay.hidden }
+        let session = locals.first { $0.id == selected }
+        return session?.pageOverlay?.hidden ?? session?.overlay?.state.hidden
+    }
+
     func windowCommand(_ command: NativeMenu.Command) {
         log("native shell: \(command)")
         if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .quit, .editKeymap, .reloadKeymap, .commandPalette].contains(command) {
             closeDashboard()
         }
         switch command {
-        case .newSession: if profiles.indices.contains(defaultProfile) { newSession(profiles[defaultProfile]) }
+        case .newSession:
+            if let server = selected.flatMap(server(of:)) {
+                newServerSession(on: server)
+            } else if profiles.indices.contains(defaultProfile) {
+                newSession(profiles[defaultProfile])
+            }
         case .newServerSession: newServerSession(on: currentServer)
         case .renameSession: startRename()
         case .restartSession: restartSelected()
@@ -1048,6 +1060,8 @@ final class NativeShell {
         case .swapPanes: if let selected { swapPanes(selected) }
         case .focusLeftPane, .focusRightPane: focusPaneKey(split: command == .focusRightPane)
         case .toggleScratch: if let selected, canSplit(selected) { setScratch(selected, shown: !(local(selected)?.scratchShown ?? false), command: nil) }
+        case .toggleOverlay:
+            if let selected, let hidden = selectedOverlayHidden { setOverlayHidden(selected, !hidden) }
         case .quickTerminal: toggleQuick()
         case .dashboard: toggleDashboard()
         default: visibleTerminal.perform(command)

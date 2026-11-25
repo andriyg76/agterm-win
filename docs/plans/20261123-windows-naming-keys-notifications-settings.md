@@ -18,6 +18,9 @@ The native Windows server port waits until the client reaches parity with the WS
 
 ## 2. Keymap — done on `claude/nice-einstein-u0a4qh`, not yet verified on Windows
 
+The original defaults described below are historical. Current assignments and pending features are tracked in
+[Windows shortcuts](../windows-shortcuts.md).
+
 - `<stateDir>\config\keymap.conf` (`%LOCALAPPDATA%\agterm-win\config`), the Mac format and parser.
   ☰ ▸ Edit Keymap… writes the commented starter when missing; Reload Keymap and startup show problems.
 - On Windows `BuiltinAction.defaultChord` is `windowsDefaultChord` (the old `Ctrl+Shift+…`), so the parser's
