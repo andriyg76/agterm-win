@@ -276,6 +276,9 @@ struct SocketClient {
         if let wsl = response.result?.wsl {
             return formatWSL(wsl)
         }
+        if let bar = response.result?.noticeBar {
+            return formatNoticeBar(bar)
+        }
         if let hooks = response.result?.hooks {
             return formatHooks(hooks)
         }
@@ -363,6 +366,15 @@ struct SocketClient {
             let launch = server.launch.map { $0 == "atLaunch" ? "starts at launch" : "manual" } ?? "asks on first start"
             return "\(server.distribution)\t\(state)\t\(launch)"
         }.joined(separator: "\n")
+    }
+
+    /// formatNoticeBar is the bar's position, then a line a notice: severity, text, its actions, and whether it is dismissed.
+    static func formatNoticeBar(_ bar: ControlNoticeBar) -> String {
+        let lines = bar.notices.map { notice in
+            ([notice.severity, notice.text, notice.actions?.joined(separator: ","), notice.dismissed == true ? "dismissed" : nil]
+                .compactMap { $0 }).joined(separator: "\t")
+        }
+        return (["bar at \(bar.position)"] + (lines.isEmpty ? ["no notices"] : lines)).joined(separator: "\n")
     }
 
     /// formatReceipt names an operation's outcome and the catalog epoch it belongs to.

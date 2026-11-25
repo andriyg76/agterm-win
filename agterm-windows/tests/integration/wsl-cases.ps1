@@ -21,10 +21,9 @@ function Get-ServerProcesses($Shell) {
         ? { $_.CommandLine -match "agtermctl" })
 }
 
+# Get-WSLBootstrapNotices are the notice bar's notices, as notice list reads them back.
 function Get-WSLBootstrapNotices($Shell) {
-    $window = Get-ShellWindow $Shell
-    if (-not $window) { return @() }
-    [AgtermWin32]::VisibleChildren($window, "Static") | ForEach-Object { [AgtermWin32]::TextOf($_) } | ? { $_ }
+    @((Invoke-Ctl $Shell.State @("notice", "list")).result.noticeBar.notices | % { $_.text } | ? { $_ })
 }
 
 function Get-AgtermWinLog([string]$State) {
@@ -194,6 +193,108 @@ $shellCases["wsl-install-unreachable"] = {
     if (-not $notice) { $failures += "sidebar notice does not report install failure" }
     if ((Get-WSLServer $state $absent).connected) { $failures += "unreachable install left the server connected" }
     Save-Snapshot $Shell "install-unreachable"
+    $failures
+}
+
+# Get-ScreenRect is a window's rectangle in screen pixels.
+function Get-ScreenRect([IntPtr]$Window) {
+    $rect = New-Object AgtermWin32+Rect
+    [AgtermWin32]::GetWindowRect($Window, [ref]$rect) | Out-Null
+    $rect
+}
+
+# Get-BarPixel is the color the notice bar painted at its own point, from a picture of the window.
+function Get-BarPixel([IntPtr]$Window, [IntPtr]$Bar, [int]$X, [int]$Y) {
+    $shot = Get-Shot $Window
+    $origin = Get-ScreenPoint $Window 0 0
+    $rect = Get-ScreenRect $Bar
+    try { $shot.Bitmap.GetPixel($rect.Left - $origin.X + $X + $shot.X, $rect.Top - $origin.Y + $Y + $shot.Y) } finally { $shot.Bitmap.Dispose() }
+}
+
+function Get-Brightness($Color) { ($Color.R + $Color.G + $Color.B) / 3 }
+
+# the unreachable distribution's error shows in the notice bar under the title bar; a drag takes it to the bottom and
+# notice position brings it back, the terminal reflowing each time; the close dismisses it; its colors follow the theme
+$shellPreparations["notice-bar"] = {
+    param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$absent`": `"atLaunch`"}}"
+}
+$shellCases["notice-bar"] = {
+    param($Shell)
+    [AgtermWin32]::SetThreadDpiAwarenessContext([IntPtr](-4)) | Out-Null
+    $state = $Shell.State
+    $failures = @()
+    $window = Get-ShellWindow $Shell
+    Invoke-Ctl $state @("theme", "set", "Dracula") | Out-Null
+    $notice = Wait-Until {
+        $list = Invoke-Ctl $state @("notice", "list")
+        $list.result.noticeBar.notices | ? { $_.severity -eq "error" -and $_.text -match "not reachable" } | Select-Object -First 1
+    } 30
+    if (-not $notice) { return @("no error notice: $((Invoke-Ctl $state @("notice", "list")) | ConvertTo-Json -Compress -Depth 5)") }
+    if ((@($notice.actions) -join ",") -ne "retry,openLog") { $failures += "the error offers '$(@($notice.actions) -join ",")'" }
+    if ((Invoke-Ctl $state @("tree")).result.tree.noticeBar.position -ne "top") { $failures += "tree does not read the bar at the top" }
+    $bar = Wait-Until { [AgtermWin32]::VisibleChildren($window, "agterm-notice-bar") | Select-Object -First 1 } 5
+    if (-not $bar) { return $failures + @("no notice bar on screen") }
+    if ([AgtermWin32]::TextOf($bar) -ne $notice.text) { $failures += "the bar reads '$([AgtermWin32]::TextOf($bar))'" }
+    $terminal = Get-Panes $window | Select-Object -First 1
+    if (-not $terminal) { return $failures + @("no terminal on screen") }
+    $client = New-Object AgtermWin32+Rect
+    [AgtermWin32]::GetClientRect($window, [ref]$client) | Out-Null
+    $bottomEdge = (Get-ScreenPoint $window 0 $client.Bottom).Y
+    $barRect = Get-ScreenRect $bar
+    $height = $barRect.Bottom - $barRect.Top
+    $dpi = [AgtermWin32]::GetDpiForWindow($window)
+    if ($height -ne [int][Math]::Floor((34 * $dpi + 48) / 96)) { $failures += "the bar is $height px at $dpi dpi" }
+    if ((Get-ScreenRect $terminal).Top -lt $barRect.Bottom) { $failures += "the terminal starts above the bar's bottom at the top" }
+    $stripe = Get-BarPixel $window $bar 1 ([int]($height / 2))
+    $background = Get-BarPixel $window $bar ([int](8 * $dpi / 96)) 3
+    if (-not ($stripe.R -gt $stripe.G + 40 -and $stripe.R -gt $stripe.B)) { $failures += "the error stripe is not red: $stripe" }
+    if ((Get-Brightness $background) -gt 0x60) { $failures += "the bar is not dark under Dracula: $background" }
+    Save-Snapshot $Shell "notice-top"
+
+    Note "drag to the bottom"
+    $x = [int](12 * $dpi / 96); $y = [int]($height / 2)
+    [AgtermWin32]::PostMessageW($bar, 0x0201, [IntPtr]1, [AgtermWin32]::At($x, $y)) | Out-Null
+    [AgtermWin32]::PostMessageW($bar, 0x0200, [IntPtr]1, [AgtermWin32]::At($x, $y + $client.Bottom)) | Out-Null
+    [AgtermWin32]::PostMessageW($bar, 0x0202, [IntPtr]::Zero, [AgtermWin32]::At($x, $y + $client.Bottom)) | Out-Null
+    if (-not (Wait-Until { (Invoke-Ctl $state @("notice", "list")).result.noticeBar.position -eq "bottom" } 5)) {
+        $failures += "the drop did not move the bar to the bottom"
+    }
+    $barRect = Get-ScreenRect $bar
+    if ($barRect.Bottom -ne $bottomEdge) { $failures += "the bar ends at $($barRect.Bottom), not the window's bottom $bottomEdge" }
+    $terminalRect = Get-ScreenRect $terminal
+    if ($terminalRect.Bottom -gt $barRect.Top) { $failures += "the terminal runs under the bar at the bottom" }
+    if ($terminalRect.Top -ge $barRect.Top -or $terminalRect.Top -gt (Get-ScreenPoint $window 0 ([int](48 * $dpi / 96))).Y) {
+        $failures += "the terminal did not move up to the title bar"
+    }
+    if ((Get-Saved $state).noticeBarPosition -ne "bottom") { $failures += "native.json keeps '$((Get-Saved $state).noticeBarPosition)'" }
+    Save-Snapshot $Shell "notice-bottom"
+
+    Note "light theme"
+    Invoke-Ctl $state @("theme", "set", "Atom One Light") | Out-Null
+    Start-Sleep -Milliseconds 500
+    $light = Get-BarPixel $window $bar ([int](8 * $dpi / 96)) 3
+    if ((Get-Brightness $light) -lt 0xB0) { $failures += "the bar is not light under Atom One Light: $light" }
+    Save-Snapshot $Shell "notice-bottom-light"
+
+    $top = Invoke-Ctl $state @("notice", "position", "top")
+    if ($top.result.noticeBar.position -ne "top") { $failures += "notice position top replied $($top | ConvertTo-Json -Compress -Depth 5)" }
+    if ((Get-ScreenRect $terminal).Top -lt (Get-ScreenRect $bar).Bottom) { $failures += "the terminal starts above the bar after notice position top" }
+    Save-Snapshot $Shell "notice-top-light"
+    $refused = Invoke-Ctl $state @("notice", "position", "middle")
+    if ($refused.ok) { $failures += "notice position middle was accepted" }
+
+    Note "close"
+    $barRect = Get-ScreenRect $bar
+    $at = [AgtermWin32]::At($barRect.Right - $barRect.Left - [int](12 * $dpi / 96), [int]($height / 2))
+    [AgtermWin32]::PostMessageW($bar, 0x0201, [IntPtr]1, $at) | Out-Null
+    [AgtermWin32]::PostMessageW($bar, 0x0202, [IntPtr]::Zero, $at) | Out-Null
+    $closed = Wait-Until { ((Invoke-Ctl $state @("notice", "list")).result.noticeBar.notices | ? { $_.dismissed }) } 5
+    if (-not $closed) { $failures += "the close did not dismiss the notice" }
+    if ([AgtermWin32]::IsWindowVisible($bar)) { $failures += "the bar stays on screen with its only notice dismissed" }
+    if ((Get-ScreenRect $terminal).Top -gt (Get-ScreenPoint $window 0 ([int](48 * $dpi / 96))).Y) { $failures += "the terminal did not take the bar's place" }
+    $again = Invoke-Ctl $state @("notice", "dismiss")
+    if ($again.ok -or $again.error -ne "no notice shown") { $failures += "a second dismiss replied $($again | ConvertTo-Json -Compress)" }
+    Save-Snapshot $Shell "notice-dismissed"
     $failures
 }
 

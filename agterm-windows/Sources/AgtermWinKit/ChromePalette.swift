@@ -73,7 +73,7 @@ public struct ChromePalette: Equatable, Sendable {
         return 0.299 * r + 0.587 * g + 0.114 * b
     }
 
-  private static func mix(_ a: UInt32, _ b: UInt32, _ t: Float) -> UInt32 {
+    static func mix(_ a: UInt32, _ b: UInt32, _ t: Float) -> UInt32 {
         let (ar, ag, ab) = components(a)
         let (br, bg, bb) = components(b)
         return rgb(ar + (br - ar) * t, ag + (bg - ag) * t, ab + (bb - ab) * t)

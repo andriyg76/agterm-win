@@ -10,6 +10,7 @@ struct NativeSettingsTests {
         settings.fontPoints = 14
         settings.sidebarWidthPoints = 280
         settings.sidebarTint = 12
+        settings.noticeBarPosition = .bottom
         settings.frame = .init(left: 10, top: 20, right: 1210, bottom: 820)
         settings.maximized = true
         settings.localSessions = [.init(title: "build", customName: "api", commandLine: "cmd.exe", directory: #"C:\dev"#), .init(title: "WSL Ubuntu", commandLine: "wsl.exe -d Ubuntu --cd ~")]
@@ -25,6 +26,13 @@ struct NativeSettingsTests {
         try Data(#"{"localSessions": [{"title": "Windows PowerShell", "commandLine": "powershell.exe -NoLogo"}]}"#.utf8).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         #expect(NativeSettings.load(from: url).localSessions == [.init(title: "Windows PowerShell", commandLine: "powershell.exe -NoLogo")])
+    }
+
+    @Test func anUnknownNoticeBarPositionFallsBackToTheTop() throws {
+        try Data(#"{"fontPoints": 13, "noticeBarPosition": "left"}"#.utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let settings = NativeSettings.load(from: url)
+        #expect(settings.noticeBarPosition == .top && settings.fontPoints == 13)
     }
 
     @Test func missingOrBrokenFilesGiveTheDefaults() throws {

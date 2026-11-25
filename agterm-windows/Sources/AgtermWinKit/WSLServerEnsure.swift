@@ -65,4 +65,11 @@ public enum WSLServerEnsure {
         default: return "\(label): install exited \(exitCode). See agterm-win.log."
         }
     }
+
+    /// installNotice is `installOutcome` as the notice bar shows it: an error offering the install again and the log.
+    public static func installNotice(exitCode: Int32, error: String?, label: String, source: String) -> NoticeBar.Message {
+        let text = installOutcome(exitCode: exitCode, error: error, label: label)
+        guard error?.isEmpty == false || (exitCode != 0 && exitCode != 3) else { return NoticeBar.Message(source: source, text: text, severity: .info) }
+        return NoticeBar.Message(source: source, text: text, severity: .error, actions: [.install, .openLog])
+    }
 }

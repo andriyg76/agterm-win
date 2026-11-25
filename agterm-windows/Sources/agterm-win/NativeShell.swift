@@ -101,8 +101,8 @@ final class NativeShell {
     private final class Server {
         let remote: RemoteWindow
         let group = Foundation.UUID()
-        /// bootstrapNotice is shown in the title-bar strip until the catalog connects or install refuses.
-        var bootstrapNotice: String?
+        /// bootstrapNotice is shown in the notice bar until the catalog connects or install refuses.
+        var bootstrapNotice: NoticeBar.Message?
 
         init(_ remote: RemoteWindow) { self.remote = remote }
 
@@ -121,7 +121,7 @@ final class NativeShell {
     var settings: NativeSettings
     var window: HWND?
     var tree: UnsafeMutableRawPointer?
-    private var notice: HWND?
+    var noticeWindow: NoticeBarWindow?
     private var findBar: HWND?
     private var findFailed = false
     private var tooltip: UnsafeMutableRawPointer?
@@ -229,8 +229,7 @@ final class NativeShell {
         tooltip = nt_tooltip_create(UnsafeMutableRawPointer(window))
         palette = nt_palette_create(UnsafeMutableRawPointer(window), dpi)
         tree = nt_tree_create(UnsafeMutableRawPointer(window), dpi)
-        notice = CreateWindowExW(0, Array("STATIC".utf16) + [0], nil, DWORD(WS_CHILD) | DWORD(SS_LEFT), 0, 0, 10, 10, window, nil,
-                                 instance, nil)
+        makeNoticeBar()
         findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
         remoteTerminal = makeTerminal()
         // OSC 9/777 of the server session this terminal attaches; the server sends only `notify` through its stream
@@ -397,12 +396,12 @@ final class NativeShell {
 
     /// prepareAndConnect probes agterm-server in WSL, installs or starts it when needed, then opens the catalog stream.
     private func prepareAndConnect(_ server: Server, forceInstall: Bool) {
-        server.bootstrapNotice = "Checking \(server.label)…"
+        server.bootstrapNotice = NoticeBar.Message(source: server.distribution, text: "Checking \(server.label)…", severity: .progress)
         layout()
         let host = server.remote.host
         let label = server.label
         DispatchQueue.global().async {
-            let finish: (String?) -> Void = { notice in
+            let finish: (NoticeBar.Message?) -> Void = { notice in
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         server.bootstrapNotice = notice
@@ -417,8 +416,8 @@ final class NativeShell {
                 release = try serverRelease()
             } catch {
                 log("server release info unavailable: \(error)")
-                let notice = "\(label): this build cannot download agterm-server (\(error)). Install from a release build or run install.sh in WSL."
-                finish(notice)
+                finish(NoticeBar.Message(source: host.distribution, text: "\(label): this build cannot download agterm-server (\(error)). "
+                                         + "Install from a release build or run install.sh in WSL.", severity: .error, actions: [.openLog]))
                 return
             }
             if forceInstall {
@@ -433,7 +432,7 @@ final class NativeShell {
             case .connect:
                 finish(nil)
             case .startServiceThenConnect:
-                Self.dispatchNotice(host.distribution, "\(label): starting agterm-server…")
+                Self.dispatchNotice(host.distribution, "\(label): starting agterm-server…", .progress)
                 let start = host.startService()
                 if start.ok {
                     finish(nil)
@@ -445,33 +444,33 @@ final class NativeShell {
             case .install(let reason):
                 finish(Self.runServerInstall(host: host, label: label, release: release, preamble: reason))
             case .refuse(let reason):
-                finish("\(label): \(reason)")
+                finish(NoticeBar.Message(source: host.distribution, text: "\(label): \(reason)", severity: .error, actions: [.retry, .openLog]))
             }
         }
     }
 
-    /// runServerInstall performs download, unpack and install.sh, reporting progress in the notice strip.
+    /// runServerInstall performs download, unpack and install.sh, reporting progress in the notice bar.
     nonisolated private static func runServerInstall(host: WSLHost, label: String, release: (version: String, checksums: String),
-                                                        preamble: String? = nil) -> String? {
-        if let preamble { dispatchNotice(host.distribution, "\(label): \(preamble)") }
+                                                        preamble: String? = nil) -> NoticeBar.Message? {
+        if let preamble { dispatchNotice(host.distribution, "\(label): \(preamble)", .progress) }
         do {
             let code = try host.installServer(version: release.version, checksums: release.checksums) { line in
                 log("server install: \(line)")
-                dispatchNotice(host.distribution, "\(label): \(line)")
+                dispatchNotice(host.distribution, "\(label): \(line)", .progress)
             }
             log("server install exited \(code)")
-            return WSLServerEnsure.installOutcome(exitCode: code, error: nil, label: label)
+            return WSLServerEnsure.installNotice(exitCode: code, error: nil, label: label, source: host.distribution)
         } catch {
             log("server install failed: \(error)")
-            return WSLServerEnsure.installOutcome(exitCode: 1, error: String(describing: error), label: label)
+            return WSLServerEnsure.installNotice(exitCode: 1, error: String(describing: error), label: label, source: host.distribution)
         }
     }
 
-    nonisolated private static func dispatchNotice(_ distribution: String, _ text: String) {
+    nonisolated private static func dispatchNotice(_ distribution: String, _ text: String, _ severity: NoticeBar.Severity) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
                 guard let server = shell.server(distribution) else { return }
-                server.bootstrapNotice = text
+                server.bootstrapNotice = NoticeBar.Message(source: distribution, text: text, severity: severity)
                 shell.layout()
             }
         }
@@ -1081,11 +1080,8 @@ final class NativeShell {
     /// placeOverlays lays each overlay over its session's area, shown only for the selected session while not hidden.
     /// A shown overlay disables the terminal under it, so a click beside a floating panel never reaches the session.
     func placeOverlays() {
-        guard let window else { return }
-        var client = RECT()
-        GetClientRect(window, &client)
-        let top = titleBar.height
-        let area = NativeOverlay.Rect(x: sidebarWidth, y: top, width: max(client.right - sidebarWidth, 1), height: max(client.bottom - top, 1))
+        guard window != nil else { return }
+        let area = sessionArea
         var remoteEnabled = true
         for session in locals {
             refreshPageOverlayState(session)
@@ -1663,25 +1659,53 @@ final class NativeShell {
         guard let window else { return }
         var client = RECT()
         GetClientRect(window, &client)
-        let width = sidebarWidth, height = client.bottom
-        let notices = servers.compactMap { server -> String? in
-            if let bootstrap = server.bootstrapNotice, !bootstrap.isEmpty { return bootstrap }
-            return server.remote.mirror.state.windowNotice(host: server.label)
-        }
-        let noticeText = notices.isEmpty ? nil : notices.joined(separator: "\n")
-        let top = titleBar.height
-        let noticeHeight = scaled(56) * Int32(notices.count)
-        ShowWindow(notice, noticeText == nil ? SW_HIDE : SW_SHOW)
-        SetWindowTextW(notice, Array((noticeText ?? "").utf16) + [0])
-        MoveWindow(notice, 8, top, width - 16, max(noticeHeight - 6, 0), true)
-        let treeTop = top + noticeHeight
-        MoveWindow(tree?.assumingMemoryBound(to: HWND__.self), 0, treeTop, width, height - treeTop, true)
+        let width = sidebarWidth
+        noticeWindow?.state.update(noticeMessages)
+        let content = contentSpan
+        noticeWindow?.place(y: noticeWindow?.state.position == .bottom ? content.bottom : titleBar.height, width: client.right)
+        MoveWindow(tree?.assumingMemoryBound(to: HWND__.self), 0, content.top, width, content.bottom - content.top, true)
         placeSessions()
         let findWidth = min(scaled(280), max(client.right - width - scaled(24), scaled(80)))
-        MoveWindow(findBar, client.right - findWidth - scaled(16), top + scaled(8), findWidth, scaled(28), true)
+        MoveWindow(findBar, client.right - findWidth - scaled(16), content.top + scaled(8), findWidth, scaled(28), true)
         updateTips()
         invalidateTitleBar()
         if paletteMode != nil || pickPalette != nil { placePalette() }
+    }
+
+    /// noticeMessages are each server's notice: its bootstrap step while one runs, else its catalog connection's.
+    private var noticeMessages: [NoticeBar.Message] {
+        servers.compactMap { server in
+            if let bootstrap = server.bootstrapNotice { return bootstrap }
+            let state = server.remote.mirror.state
+            guard let text = state.windowNotice(host: server.label) else { return nil }
+            let connecting = state == .connecting
+            return NoticeBar.Message(source: server.distribution, text: text, severity: connecting ? .progress : .error,
+                                     actions: connecting ? [] : [.openLog])
+        }
+    }
+
+    private func makeNoticeBar() {
+        let bar = NoticeBarWindow(parent: window, position: settings.noticeBarPosition, dpi: dpi, tooltip: tooltip)
+        bar.colors = { [unowned self] in NoticeBar.colors(chromePalette, theme: NativeTerminal.theme, severity: $0) }
+        bar.area = { [unowned self] in
+            var client = RECT()
+            GetClientRect(window, &client)
+            return (titleBar.height, client.bottom)
+        }
+        bar.onAction = { [unowned self] in noticeAction($0, $1) }
+        bar.onPosition = { [unowned self] in setNoticePosition($0) }
+        bar.onDismiss = { [unowned self] in _ = dismissNotice() }
+        noticeWindow = bar
+    }
+
+    /// noticeAction runs a notice's button: Retry probes its server again, Install reinstalls it, Open Log opens the log.
+    private func noticeAction(_ message: NoticeBar.Message, _ action: NoticeBar.Action) {
+        log("native shell: notice action \(action.rawValue) for \(message.source)")
+        switch action {
+        case .openLog: openLog()
+        case .retry, .install:
+            if let server = server(message.source) { prepareAndConnect(server, forceInstall: action == .install) }
+        }
     }
 
     private func catalogChanged() {
@@ -1788,6 +1812,7 @@ final class NativeShell {
         if let tree { nt_tree_set_dpi(tree, dpi) }
         if let findBar { nt_find_bar_set_dpi(UnsafeMutableRawPointer(findBar), dpi) }
         if let palette { nt_palette_set_dpi(palette, dpi) }
+        noticeWindow?.dpi = dpi
         allTerminals.forEach { $0.setDPI(dpi) }
         SetWindowPos(window, nil, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top,
                      UINT(SWP_NOZORDER | SWP_NOACTIVATE))
@@ -1802,7 +1827,7 @@ final class NativeShell {
             SetBkColor(context, ChromePalette.colorref(lit ? palette.palSel : palette.clientBg))
             return LRESULT(Int(bitPattern: lit ? highlightBrush : darkBrush))
         }
-        SetTextColor(context, 0x5AB4E5)
+        SetTextColor(context, ChromePalette.colorref(palette.chromeText))
         SetBkColor(context, ChromePalette.colorref(palette.clientBg))
         return LRESULT(Int(bitPattern: darkBrush))
     }
@@ -1913,7 +1938,7 @@ final class NativeShell {
         GetClientRect(window, &client)
         let area = max(client.right - sidebarWidth, 1)
         let width = max(min(scaled(640), area - scaled(32)), min(area, scaled(240)))
-        return (sidebarWidth + (area - width) / 2, titleBar.height + scaled(8), width)
+        return (sidebarWidth + (area - width) / 2, contentSpan.top + scaled(8), width)
     }
 
     private func placePalette() {

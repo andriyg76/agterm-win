@@ -76,6 +76,7 @@ public struct NativeSettings: Codable, Equatable, Sendable {
     /// sidebarWidthPoints is the stored divider position, the read side of `sidebar.width`.
     public var sidebarWidthPoints: Double = SidebarWidthLimits.defaultPoints
     public var sidebarTint: Int = 0
+    public var noticeBarPosition: NoticeBar.Position = .top
 
     public init() {}
 
@@ -113,6 +114,7 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         serverLaunch = try container.decodeIfPresent([String: ServerLaunch].self, forKey: .serverLaunch) ?? [:]
         sidebarWidthPoints = try container.decodeIfPresent(Double.self, forKey: .sidebarWidthPoints) ?? SidebarWidthLimits.defaultPoints
         sidebarTint = try container.decodeIfPresent(Int.self, forKey: .sidebarTint) ?? 0
+        noticeBarPosition = (try? container.decodeIfPresent(NoticeBar.Position.self, forKey: .noticeBarPosition)) ?? .top
         sidebarWidthPoints = SidebarWidthLimits.clamp(sidebarWidthPoints)
     }
 
@@ -130,10 +132,11 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         try container.encode(serverLaunch, forKey: .serverLaunch)
         try container.encode(sidebarWidthPoints, forKey: .sidebarWidthPoints)
         try container.encode(sidebarTint, forKey: .sidebarTint)
+        try container.encode(noticeBarPosition, forKey: .noticeBarPosition)
     }
 
     private enum CodingKeys: String, CodingKey {
         case fontPoints, appearance, notifications, general, frame, maximized, localSessions, selectedLocal, defaultProfile,
-             serverLaunch, sidebarWidthPoints, sidebarTint
+             serverLaunch, sidebarWidthPoints, sidebarTint, noticeBarPosition
     }
 }
