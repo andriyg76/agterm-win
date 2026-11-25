@@ -1,27 +1,26 @@
-# MSIX Store-virtualized test package
+# MSIX Store package (default virtualization)
 
-Use this to try agterm as Microsoft would ship it **without** the `unvirtualizedResources` capability: default
-file and registry write virtualization, same as omitting `desktop6:*Virtualization` disabled in the production manifest.
+Production manifest `AppxManifest.xml` follows Microsoft Store policy **without** `unvirtualizedResources`
+(10.6.3): file and registry writes from **agterm and agtermctl** use the package's redirected profile.
 
-Production manifest: `AppxManifest.xml`. Test manifest: `AppxManifest.store-virtualized.xml` (selected with
-`scripts/msix.ps1 -Virtualized`).
+Legacy manifest with `unvirtualizedResources` (winget-style `%LOCALAPPDATA%\agterm-win`): `AppxManifest.unvirtualized.xml`
+via `scripts/msix.ps1 -Unvirtualized` (not for Store submission).
 
 ## Build
 
 After `scripts/stage.ps1`:
 
 ```powershell
-.\scripts\msix.ps1 -Version 0.44.1.999 -Arch x64 -Stage build\release\stage -Output build\release -Virtualized -LayoutOnly
-# optional: pack unsigned .msix
-.\scripts\msix.ps1 -Version 0.44.1.999 -Arch x64 -Stage build\release\stage -Output build\release -Virtualized
+.\scripts\msix.ps1 -Version 0.44.1.999 -Arch x64 -Stage build\release\stage -Output build\release -LayoutOnly
+.\scripts\msix.ps1 -Version 0.44.1.999 -Arch x64 -Stage build\release\stage -Output build\release
 ```
 
-On a PR or push for `feature/msix-virtualized-test`, CI uploads `msix-virtualized-layout-<arch>` artifacts (the layout folder).
-The workflow gates on `github.head_ref` / `github.ref_name`, not `github.ref` (PR merges use `refs/pull/.../merge`).
+CI on branch `feature/msix-virtualized-test` uploads `msix-store-layout-<arch>` (layout under `msix/msix`).
 
 ## Install (Developer Mode)
 
-Settings → Privacy & security → For developers → **Developer Mode** on.
+Settings → Privacy & security → For developers → **Developer Mode** on, or run
+`packaging/msix/sideload/install-agterm-msix.bat` as administrator.
 
 Remove any prior test package:
 
@@ -32,17 +31,18 @@ Get-AppxPackage *agterm* | Remove-AppxPackage
 Register the layout (unsigned):
 
 ```powershell
-Add-AppxPackage -Register build\release\msix-virtualized\AppxManifest.xml
+Add-AppxPackage -Register build\release\msix\AppxManifest.xml
 ```
 
-Start **agterm (virtualized test)** from the Start menu. Use `agtermctl tree` from a new console.
+Start **agterm** from the Start menu, or `start-agterm-msix.bat` from the layout folder (see `packaging/msix/sideload/`).
 
 ## What to check
 
-1. Where state lives: `%LOCALAPPDATA%\agterm-win` vs `%LOCALAPPDATA%\Packages\*\LocalCache` / `LocalState`.
+1. Where agterm state lives: redirected `%LOCALAPPDATA%` under `Packages\<family>\…`, not `%LOCALAPPDATA%\agterm-win`.
 2. WSL: list distributions, start server, catalog sessions, reconnect after app restart.
-3. Local PowerShell/cmd session; write a file under `$env:USERPROFILE` and see it from another terminal.
-4. Compare with the same build run unpackaged: `build\release\stage\agterm-win.exe`.
+3. Local PowerShell/cmd session; user tools in the terminal still use the user's normal profile paths.
+4. `agtermctl tree` from the MSIX execution alias (same package context as agterm).
+5. Compare with unpackaged `build\release\stage\agterm-win.exe` or `-Unvirtualized` layout for migration notes.
 
 Unregister when done:
 
@@ -52,6 +52,5 @@ Get-AppxPackage *agterm* | Remove-AppxPackage
 
 ## CI
 
-GitHub Actions builds the virtualized layout on branch `feature/msix-virtualized-test` and attaches it as an artifact.
-Runners do **not** register the MSIX (no Developer Mode / interactive Store install in CI). Behavioral testing is on a
-physical machine or VM with Developer Mode.
+GitHub Actions builds the Store layout on `feature/msix-virtualized-test` and attaches it as an artifact.
+Runners do **not** register the MSIX. Behavioral testing is on a physical machine, VM, or Windows Sandbox with Developer Mode.

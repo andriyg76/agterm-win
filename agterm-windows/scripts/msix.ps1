@@ -1,7 +1,7 @@
 # Packs a stage.ps1 folder as the Microsoft Store's MSIX: packaging\msix\AppxManifest.xml, logos drawn from
 # Resources\agterm.png, and MakeAppx. The Store signs the package; the .msix itself is unsigned and does not install.
 #   scripts\msix.ps1 -Version 0.44.1.2 [-Arch x64|arm64] [-Stage build\release\stage] [-Output build\release] [-LayoutOnly]
-#   [-Virtualized] uses packaging\msix\AppxManifest.store-virtualized.xml (Store-like, no unvirtualizedResources).
+#   [-Unvirtualized] uses packaging\msix\AppxManifest.unvirtualized.xml (local only; Store rejects unvirtualizedResources).
 # Partner Center takes one .msix per architecture in the same submission and serves each device its own.
 # -LayoutOnly stops at the folder, which Developer Mode registers with Add-AppxPackage -Register <folder>\AppxManifest.xml.
 # The identity is what Partner Center reserved: AGTERM_MSIX_NAME, AGTERM_MSIX_PUBLISHER (its CN=...) and
@@ -12,7 +12,7 @@ param(
     [string]$Stage,
     [string]$Output,
     [switch]$LayoutOnly,
-    [switch]$Virtualized
+    [switch]$Unvirtualized
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -33,10 +33,15 @@ $tokens = @{
     Architecture         = $Arch
 }
 
-$layout = Join-Path $Output $(if ($Virtualized) { "msix-virtualized" } else { "msix" })
+$layout = Join-Path $Output $(if ($Unvirtualized) { "msix-unvirtualized" } else { "msix" })
 if (Test-Path $layout) { Remove-Item -Recurse -Force $layout }
 Copy-Item -Recurse $Stage $layout
-$manifestName = if ($Virtualized) { "AppxManifest.store-virtualized.xml" } else { "AppxManifest.xml" }
+$sideload = Join-Path $root "packaging\msix\sideload"
+if (Test-Path $sideload) {
+    Copy-Item (Join-Path $sideload "*.bat") $layout -ErrorAction SilentlyContinue
+    Copy-Item (Join-Path $sideload "*.ps1") $layout -ErrorAction SilentlyContinue
+}
+$manifestName = if ($Unvirtualized) { "AppxManifest.unvirtualized.xml" } else { "AppxManifest.xml" }
 $manifest = [IO.File]::ReadAllText((Join-Path $root "packaging\msix\$manifestName"))
 foreach ($name in $tokens.Keys) { $manifest = $manifest.Replace("{{$name}}", [Security.SecurityElement]::Escape($tokens[$name])) }
 [IO.File]::WriteAllText((Join-Path $layout "AppxManifest.xml"), $manifest, (New-Object System.Text.UTF8Encoding $false))
@@ -64,7 +69,7 @@ $makeappx = if ($env:AGTERM_MAKEAPPX) { $env:AGTERM_MAKEAPPX } else {
         Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
 }
 if (-not $makeappx) { throw "no makeappx.exe; install the Windows SDK or set AGTERM_MAKEAPPX" }
-$suffix = if ($Virtualized) { "-store-virtualized" } else { "" }
+$suffix = if ($Unvirtualized) { "-unvirtualized" } else { "" }
 $package = Join-Path $Output "agterm-win-$Version-$Arch$suffix.msix"
 & $makeappx pack /o /d $layout /p $package
 if ($LASTEXITCODE) { throw "makeappx failed" }
