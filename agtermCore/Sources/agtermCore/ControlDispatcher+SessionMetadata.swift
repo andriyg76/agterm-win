@@ -4,54 +4,19 @@ struct TintRejection: Error {
 }
 
 extension ControlDispatcher {
-    /// `session.context`: `set` takes `text`, `clear` takes none. An invalid value is REJECTED, never
-    /// normalized, so `clear` stays the only route to nil and a refused call leaves the previous context
-    /// standing. The mode is required rather than inferred from `text`, which is what makes "both" and
-    /// "neither" reachable errors for a raw socket client that never sees the CLI's own exclusivity check.
+    /// `session.context` and `session.info` parse in `ControlSessionMetadata`, so a refused write reaches no action and
+    /// leaves the previous value, and an info line's timer, standing.
     func dispatchSessionContext(_ request: ControlRequest) -> ControlResponse {
-        let args = request.args
-        let context: String?
-        switch args?.mode ?? "" {
-        case "set":
-            guard let text = args?.text else {
-                return ControlResponse(ok: false, error: "session.context set requires text")
-            }
-            switch Session.validateContext(text) {
-            case .valid(let value): context = value
-            case .invalid(let message): return ControlResponse(ok: false, error: message)
-            }
-        case "clear":
-            guard args?.text == nil else {
-                return ControlResponse(ok: false, error: "session.context clear takes no text")
-            }
-            context = nil
-        default:
-            return ControlResponse(ok: false, error: "invalid context mode: \(args?.mode ?? "") (set|clear)")
+        switch ControlSessionMetadata.context(request.args) {
+        case .failure(let rejection): ControlResponse(ok: false, error: rejection.message)
+        case .success(let context): actions.setSessionContext(request.target, window: request.args?.window, context: context)
         }
-        return actions.setSessionContext(request.target, window: args?.window, context: context)
     }
 
-    /// `session.info`: `set` takes `text` plus optional `markdown` and `hideAfter`, `clear` takes none of them.
-    /// The whole value is built and validated here, so a refused set reaches no action and leaves the line and
-    /// its timer standing.
     func dispatchSessionInfo(_ request: ControlRequest) -> ControlResponse {
-        let args = request.args
-        switch args?.mode ?? "" {
-        case "set":
-            guard let text = args?.text else {
-                return ControlResponse(ok: false, error: "session.info set requires text")
-            }
-            switch SessionInfo.make(source: text, markdown: args?.markdown ?? false, hideAfter: args?.hideAfter ?? 0) {
-            case .success(let info): return actions.setSessionInfo(request.target, window: args?.window, info: info)
-            case .failure(let rejection): return ControlResponse(ok: false, error: "session.info: \(rejection.message)")
-            }
-        case "clear":
-            guard args?.text == nil, args?.markdown == nil, args?.hideAfter == nil else {
-                return ControlResponse(ok: false, error: "session.info clear takes no text, markdown or hide-after")
-            }
-            return actions.setSessionInfo(request.target, window: args?.window, info: nil)
-        default:
-            return ControlResponse(ok: false, error: "invalid info mode: \(args?.mode ?? "") (set|clear)")
+        switch ControlSessionMetadata.info(request.args) {
+        case .failure(let rejection): ControlResponse(ok: false, error: rejection.message)
+        case .success(let info): actions.setSessionInfo(request.target, window: request.args?.window, info: info)
         }
     }
 

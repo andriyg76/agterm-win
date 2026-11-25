@@ -11,13 +11,19 @@ public enum SessionSidebar {
         public let isWorkspace: Bool
         public let ended: Bool
         public let children: [Item]
+        /// status and info are what an agent reported: the glyph at the row's edge and the line under its title.
+        public let status: AgentIndicator
+        public let info: String?
 
-        public init(id: UUID, title: String, isWorkspace: Bool, ended: Bool, children: [Item]) {
+        public init(id: UUID, title: String, isWorkspace: Bool, ended: Bool, children: [Item], status: AgentIndicator = AgentIndicator(),
+                    info: String? = nil) {
             self.id = id
             self.title = title
             self.isWorkspace = isWorkspace
             self.ended = ended
             self.children = children
+            self.status = status
+            self.info = info
         }
     }
 
@@ -51,7 +57,8 @@ public enum SessionSidebar {
         let count = unseen[session.id] ?? 0
         let marker = count > 0 ? "● \(NotificationRules.countLabel(count)) " : ""
         return Item(id: session.id, title: marker + (session.ended ? "\(session.displayName) (ended)" : session.displayName),
-                    isWorkspace: false, ended: session.ended, children: children)
+                    isWorkspace: false, ended: session.ended, children: children, status: session.agentIndicator,
+                    info: StatusGlyph.infoText(session.effectiveInfo))
     }
 
     /// localTitle is a local session's sidebar label: ● while it wants attention (a bell or notification since it was
