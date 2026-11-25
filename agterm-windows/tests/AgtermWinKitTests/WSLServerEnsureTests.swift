@@ -1,3 +1,4 @@
+import Foundation
 import AgtermWinKit
 import Testing
 
@@ -33,5 +34,12 @@ struct WSLServerEnsureTests {
         #expect(WSLServerEnsure.installNotice(exitCode: 0, error: "no network", label: "WSL Ubuntu", source: "Ubuntu").severity == .error)
         #expect(WSLServerEnsure.installNotice(exitCode: 3, error: nil, label: "WSL Ubuntu", source: "Ubuntu").severity == .info)
         #expect(WSLServerEnsure.installNotice(exitCode: 0, error: nil, label: "WSL Ubuntu", source: "Ubuntu").actions.isEmpty)
+    }
+
+    @Test func wslExeMessagesDecodeFromUTF16AndDistributionOutputFromUTF8() {
+        let message = "The Windows Subsystem for Linux is not installed.\r\n"
+        #expect(WSLServerEnsure.wslText(Data(message.utf16.flatMap { [UInt8($0 & 0xFF), UInt8($0 >> 8)] })) == message)
+        #expect(WSLServerEnsure.wslText(Data([0xFF, 0xFE, 0x41, 0x00])) == "A")
+        #expect(WSLServerEnsure.wslText(Data("sh: агент: not found\n".utf8)) == "sh: агент: not found\n")
     }
 }
