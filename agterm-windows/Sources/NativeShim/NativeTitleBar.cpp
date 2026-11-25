@@ -37,9 +37,9 @@ COLORREF fill(const nt_title_button &button) {
 
 }  // namespace
 
-extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, const uint16_t *text, int32_t title_left,
-                                   int32_t title_right, const nt_title_button *buttons, int32_t count, int32_t active,
-                                   const nt_menu_tab *tabs, int32_t tab_count) {
+extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, int32_t icon_width, int32_t icon_lit,
+                                   const uint16_t *text, int32_t title_left, int32_t title_right, const nt_title_button *buttons,
+                                   int32_t count, int32_t active, const nt_menu_tab *tabs, int32_t tab_count) {
     auto hwnd = static_cast<HWND>(window);
     PAINTSTRUCT paint;
     HDC dc = BeginPaint(hwnd, &paint);
@@ -63,6 +63,23 @@ extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, c
         HGDIOBJ previousFont = SelectObject(memory, fonts.text);
         FillRect(memory, &bar, backgroundBrush);
         SetBkMode(memory, TRANSPARENT);
+        if (icon_width > 0) {
+            RECT iconRect{0, 0, icon_width, height};
+            if (icon_lit) {
+                HBRUSH brush = CreateSolidBrush(nt_chrome_title_hover(0));
+                FillRect(memory, &iconRect, brush);
+                DeleteObject(brush);
+            }
+            HICON icon = reinterpret_cast<HICON>(GetClassLongPtrW(hwnd, GCLP_HICON));
+            if (!icon) icon = reinterpret_cast<HICON>(SendMessageW(hwnd, WM_GETICON, ICON_SMALL2, 0));
+            if (!icon) icon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1));
+            if (icon) {
+                int iconSize = MulDiv(16, static_cast<int>(dpi), 96);
+                int x = icon_width > iconSize ? (icon_width - iconSize) / 2 : 0;
+                int y = height > iconSize ? (height - iconSize) / 2 : 0;
+                DrawIconEx(memory, x, y, icon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
+            }
+        }
         for (int32_t i = 0; i < count; ++i) {
             const nt_title_button &button = buttons[i];
             RECT rect{button.left, 0, button.right, height};

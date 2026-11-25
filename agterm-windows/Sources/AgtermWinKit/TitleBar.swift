@@ -39,6 +39,8 @@ public struct TitleBar: Equatable, Sendable {
 
     public enum Hit: Equatable, Sendable {
         case button(Button)
+        /// appIcon is the window icon on the bar's left; a click opens the system menu.
+        case appIcon
         /// menuTab is a title-bar menu label; clicks stay on the client so the shell opens the popup.
         case menuTab(Int)
         /// caption drags the window and double-clicks maximize it.
@@ -77,6 +79,9 @@ public struct TitleBar: Equatable, Sendable {
         captionWidth = scaled(46)
     }
 
+    /// appIcon is the strip on the bar's left edge for the application icon and system menu.
+    public var appIcon: Span { Span(left: 0, right: actionWidth) }
+
     public func span(of button: Button) -> Span {
         if let index = Button.trailing.firstIndex(of: button) {
             let right = width - 3 * captionWidth - Int32(Button.trailing.count - 1 - index) * actionWidth
@@ -102,6 +107,7 @@ public struct TitleBar: Equatable, Sendable {
     public func hit(x: Int32, y: Int32, topBorder: Int32) -> Hit {
         guard y >= 0, y < height, x >= 0, x < width else { return .outside }
         if y < topBorder { return .top }
+        if x >= appIcon.left, x < appIcon.right { return .appIcon }
         let order: [Button] = [.close, .maximize, .minimize] + Button.trailing.reversed() + [.newSession]
         if let button = order.first(where: { x >= span(of: $0).left && x < span(of: $0).right }) { return .button(button) }
         let gap = actionWidth / 4

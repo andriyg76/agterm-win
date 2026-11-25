@@ -31,7 +31,8 @@ struct TitleBarTests {
     }
 
     @Test func hitTellsButtonsCaptionMenuTabsAndTheTopEdgeApart() {
-        #expect(bar.hit(x: 10, y: 20, topBorder: 6) == .caption)
+        #expect(bar.hit(x: 10, y: 20, topBorder: 6) == .appIcon)
+        #expect(bar.hit(x: bar.appIcon.right + 1, y: 20, topBorder: 6) == .caption)
         #expect(bar.hit(x: 300, y: 20, topBorder: 6) == .menuTab(0))
         #expect(bar.hit(x: 60, y: 20, topBorder: 6) == .caption)
         #expect(bar.hit(x: 260, y: 20, topBorder: 6) == .button(.newSession))
@@ -51,7 +52,8 @@ struct TitleBarTests {
 
     @Test func captionButtonsWinWhenTheWindowIsNarrow() {
         let narrow = TitleBar(width: 150, sidebarWidth: 240, dpi: 96)
-        #expect(narrow.hit(x: 20, y: 20, topBorder: 0) == .button(.minimize))
+        #expect(narrow.hit(x: 20, y: 20, topBorder: 0) == .appIcon)
+        #expect(narrow.hit(x: 50, y: 20, topBorder: 0) == .button(.minimize))
         #expect(narrow.hit(x: 149, y: 20, topBorder: 0) == .button(.close))
     }
 
