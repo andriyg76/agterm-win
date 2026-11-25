@@ -31,9 +31,12 @@ struct PageView {
   bool pendingFile = false;
 };
 
+void changed(PageView *view) { PostMessageW(GetAncestor(view->host, GA_ROOT), NT_PAGE_STATE, 0, 0); }
+
 void fail(PageView *view, const wchar_t *what, HRESULT result) {
   view->state = 2;
   swprintf_s(view->error, L"%ls (0x%08lX)", what, static_cast<unsigned long>(result));
+  changed(view);
 }
 
 PageView *g_pages[kMaxPages]{};
@@ -133,6 +136,7 @@ LRESULT CALLBACK pageHostProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                                 view->state = 2;
                                 swprintf_s(view->error, L"navigation failed (web error %d)", static_cast<int>(status));
                               }
+                              changed(view);
                               return S_OK;
                             })
                             .Get(),

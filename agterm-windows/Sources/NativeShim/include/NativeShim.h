@@ -183,7 +183,9 @@ void *nt_tooltip_create(void *parent);
 void nt_tooltip_set(void *tip, void *parent, uintptr_t id, int32_t left, int32_t top, int32_t right, int32_t bottom,
                     const uint16_t *text);
 
-// Page overlays (WebView2) in a child HWND. `state` is 0 loading, 1 loaded, 2 failed.
+// Page overlays (WebView2) in a child HWND. `state` is 0 loading, 1 loaded, 2 failed; each change posts
+// NT_PAGE_STATE to the top-level window, which reads it back.
+#define NT_PAGE_STATE 0x8105
 // `data_folder` is the WebView2 user data folder; null keeps WebView2's default beside the executable.
 void *nt_page_create(void *parent, const uint16_t *data_folder);
 void nt_page_destroy(void *page);
