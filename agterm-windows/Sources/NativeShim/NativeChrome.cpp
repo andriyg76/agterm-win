@@ -83,4 +83,5 @@ COLORREF nt_chrome_sb_bg() { return chrome.sbBg; }
 COLORREF nt_chrome_sb_text() { return chrome.sbActiveText; }
 COLORREF nt_chrome_sb_dim() { return chrome.sbDim; }
 COLORREF nt_chrome_sb_selected() { return chrome.chromeAccent; }
+COLORREF nt_chrome_sb_highlight() { return chrome.sbHighlight; }
 int32_t nt_chrome_is_dark() { return chrome.isDark; }

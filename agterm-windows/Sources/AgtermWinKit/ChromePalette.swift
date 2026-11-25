@@ -57,6 +57,11 @@ public struct ChromePalette: Equatable, Sendable {
                              titleDisabled: titleDisabled, clientBg: chromeBg)
     }
 
+    /// colorref is a palette color (0xRRGGBB) in Win32's COLORREF order, 0x00BBGGRR.
+    public static func colorref(_ rgb: UInt32) -> UInt32 {
+        (rgb & 0xFF) << 16 | (rgb & 0xFF00) | (rgb >> 16 & 0xFF)
+    }
+
     private static func color(_ theme: TerminalTheme?, index: Int, fallback: UInt32) -> UInt32 {
         theme?.palette[index] ?? fallback
     }

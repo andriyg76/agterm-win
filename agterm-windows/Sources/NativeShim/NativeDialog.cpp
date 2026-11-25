@@ -1,4 +1,5 @@
 #include "NativeShim.h"
+#include "NativeChrome.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -22,9 +23,11 @@ void append(wchar_t *buffer, size_t capacity, const wchar_t *text) {
     buffer[length] = 0;
 }
 
-// TaskDialogIndirect is only in comctl32 6, which agterm-win's manifest-less executable never loads by default: an
-// activation context from a manifest naming it loads that version beside the default one, for the dialog only.
-HANDLE commonControlsContext() {
+}  // namespace
+
+// TaskDialogIndirect and the themed controls are only in comctl32 6, which agterm-win's manifest-less executable never
+// loads by default: an activation context from a manifest naming it loads that version beside the default one.
+HANDLE nt_common_controls_context() {
     static HANDLE context = [] {
         static wchar_t path[MAX_PATH];
         DWORD length = GetTempPathW(MAX_PATH, path);
@@ -44,12 +47,10 @@ HANDLE commonControlsContext() {
     return context;
 }
 
-}  // namespace
-
 extern "C" int32_t nt_ask_choice(void *owner, const uint16_t *caption, const uint16_t *instruction, const uint16_t *content,
                                  const uint16_t *const *buttons, int32_t count) {
     auto text = [](const uint16_t *value) { return reinterpret_cast<const wchar_t *>(value); };
-    HANDLE context = commonControlsContext();
+    HANDLE context = nt_common_controls_context();
     ULONG_PTR cookie = 0;
     bool active = context != INVALID_HANDLE_VALUE && ActivateActCtx(context, &cookie);
     HMODULE comctl = active ? LoadLibraryW(L"comctl32.dll") : nullptr;

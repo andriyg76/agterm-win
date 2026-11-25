@@ -20,4 +20,6 @@ COLORREF nt_chrome_sb_bg();
 COLORREF nt_chrome_sb_text();
 COLORREF nt_chrome_sb_dim();
 COLORREF nt_chrome_sb_selected();
+COLORREF nt_chrome_sb_highlight();
 int32_t nt_chrome_is_dark();
+HANDLE nt_common_controls_context();

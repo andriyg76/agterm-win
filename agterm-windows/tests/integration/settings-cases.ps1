@@ -108,6 +108,35 @@ function Test-Colour([string]$Actual, [string]$Expected) {
     $true
 }
 
+# Get-ControlColour is the colour Settings draws `$Dx`, `$Dy` pixels into one of its controls, as rrggbb.
+function Get-ControlColour([IntPtr]$Settings, [IntPtr]$Control, [int]$Dx, [int]$Dy) {
+    $shot = Get-Shot $Settings
+    try {
+        $window = New-Object AgtermWin32+Rect
+        [AgtermWin32]::GetWindowRect($Settings, [ref]$window) | Out-Null
+        $rect = New-Object AgtermWin32+Rect
+        [AgtermWin32]::GetWindowRect($Control, [ref]$rect) | Out-Null
+        $c = $shot.Bitmap.GetPixel($rect.Left - $window.Left + $Dx, $rect.Top - $window.Top + $Dy)
+        "{0:x2}{1:x2}{2:x2}" -f $c.R, $c.G, $c.B
+    } finally { $shot.Bitmap.Dispose() }
+}
+
+# Test-SettingsChrome checks Settings is drawn in the chrome palette: its tab page in `$Page`, and with `-Dark` the OK
+# button and the folder field dark too, where Windows draws its own controls light.
+function Test-SettingsChrome([IntPtr]$Settings, [string]$Page, [string]$Label, [switch]$Dark) {
+    $tabs = [AgtermWin32]::VisibleChildren($Settings, "SysTabControl32") | Select-Object -First 1
+    $colour = Get-ControlColour $Settings $tabs 6 40
+    if (-not (Test-Colour $colour $Page)) { "with $Label Settings' page is #$colour, not #$Page" }
+    if (-not $Dark) { return }
+    foreach ($control in @(@("OK", [AgtermSettings]::GetDlgItem($Settings, 1)), @("the folder field", (Get-Control $Settings "customDirectory")))) {
+        $rect = New-Object AgtermWin32+Rect
+        [AgtermWin32]::GetWindowRect($control[1], [ref]$rect) | Out-Null
+        $colour = Get-ControlColour $Settings $control[1] 4 (($rect.Bottom - $rect.Top) / 2)
+        $level = ([Convert]::ToInt32($colour.Substring(0, 2), 16) + [Convert]::ToInt32($colour.Substring(2, 2), 16) + [Convert]::ToInt32($colour.Substring(4, 2), 16)) / 3
+        if ($level -gt 0x60) { "with $Label $($control[0]) is drawn #$colour" }
+    }
+}
+
 # Settings ▸ General's choices reach native.json and what New Session and notify do; each tab shows only its own
 # controls; an appearance change previews, Cancel puts it back, OK keeps it.
 $shellCases["settings"] = {
@@ -124,6 +153,8 @@ $shellCases["settings"] = {
     if (-not $settings) { return @("Settings did not open") }
     $failures = @()
     Save-Snapshot $Shell "settings-general" $settings
+    # ChromePalette's title bar color: the default background, #0c0c0c, 42% toward black
+    $failures += @(Test-SettingsChrome $settings "070707" "the default theme" -Dark)
     if ([AgtermSettings]::IsWindowEnabled((Get-Control $settings "customDirectory"))) { $failures += "the folder field is enabled before This folder" }
     Set-Row $settings "directory" 2
     if (-not [AgtermSettings]::IsWindowEnabled((Get-Control $settings "customDirectory"))) { $failures += "This folder left the folder field disabled" }
@@ -183,6 +214,8 @@ $shellCases["settings"] = {
     Set-Row $settings "theme" $dracula -List
     Start-Sleep -Milliseconds 500
     Save-Snapshot $Shell "settings-preview"
+    # the preview recolors Settings too: Dracula's #282a36 42% toward black
+    $failures += @(Test-SettingsChrome $settings "17181f" "Dracula previewed")
     Close-Settings $settings $false | Out-Null
     if ((Invoke-Ctl $state @("theme", "list")).result.theme -or (Get-Saved $state).appearance.theme) { $failures += "Cancel kept the previewed theme" }
     $settings = Open-Settings $Shell $window "appearance"

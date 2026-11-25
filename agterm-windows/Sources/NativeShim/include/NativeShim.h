@@ -126,6 +126,12 @@ void nt_find_bar_set_dpi(void *bar, uint32_t dpi);
 // has no cancel, so it always returns one.
 int32_t nt_ask_choice(void *owner, const uint16_t *caption, const uint16_t *instruction, const uint16_t *content,
                       const uint16_t *const *buttons, int32_t count);
+// A window of standard controls in the chrome palette. Controls created between nt_skin_controls_begin and
+// nt_skin_controls_end are comctl32 6's, which the visual styles reach; nt_skin_window then colors the window, its title
+// bar and its controls, and again after nt_set_chrome_colors.
+uintptr_t nt_skin_controls_begin(void);
+void nt_skin_controls_end(uintptr_t cookie);
+void nt_skin_window(void *window);
 // nt_track_menu shows a popup menu at a screen point and returns the picked command id, 0 when dismissed.
 int32_t nt_track_menu(void *menu, void *owner, int32_t x, int32_t y);
 

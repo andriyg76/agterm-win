@@ -15,18 +15,17 @@ extension NativeShell {
         colors.applyToShim()
         if let tree { nt_tree_apply_colors(tree) }
         if let palette { nt_palette_apply_chrome(palette) }
+        SettingsWindow.current?.applyChrome()
         refreshClientBrushes(colors)
         invalidateTitleBar()
         if let window { InvalidateRect(window, nil, false) }
     }
 
     private func refreshClientBrushes(_ palette: ChromePalette) {
-        let color = COLORREF(bitPattern: Int32(palette.clientBg & 0xFFFFFF))
         DeleteObject(darkBrush)
-        darkBrush = CreateSolidBrush(color)
-        let accent = COLORREF(bitPattern: Int32(palette.chromeAccent & 0xFFFFFF))
+        darkBrush = CreateSolidBrush(ChromePalette.colorref(palette.clientBg))
         DeleteObject(highlightBrush)
-        highlightBrush = CreateSolidBrush(accent)
+        highlightBrush = CreateSolidBrush(ChromePalette.colorref(palette.palSel))
     }
 
     /// sidebarWidth is the tree column in client pixels at the current DPI.
