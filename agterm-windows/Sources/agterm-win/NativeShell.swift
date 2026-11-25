@@ -1886,7 +1886,7 @@ final class NativeShell {
     private func systemMenu(atClient x: Int32, y: Int32) {
         var point = POINT(x: x, y: y)
         ClientToScreen(window, &point)
-        let lParam = LPARAM(Int(bitPattern: (UInt32(UInt16(bitPattern: point.y)) << 16) | UInt32(UInt16(bitPattern: point.x))))
+        let lParam = LPARAM(Int(UInt16(truncatingIfNeeded: point.y)) << 16 | Int(UInt16(truncatingIfNeeded: point.x)))
         systemMenu(lParam)
     }
 
