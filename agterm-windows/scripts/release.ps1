@@ -118,7 +118,14 @@ if (-not $LASTEXITCODE) {
     if ($LASTEXITCODE) { throw "gh release upload failed" }
     exit 0
 }
-$notes = "agterm-win $Version, locked to agterm ${agterm}: Windows 10 1809 or later, x64 or arm64. Installs per user, no admin."
-if (-not $signArguments) { $notes += " UNSIGNED: SmartScreen warns on first run." }
-gh release create "v$Version" $setup "$setup.sha256" --repo $repo --title "agterm-win $Version" --notes $notes
+$notesPath = Join-Path $out "release-notes.md"
+& (Join-Path $PSScriptRoot "release-notes.ps1") -Version $Version -OutFile $notesPath
+Add-Content $notesPath @"
+
+---
+
+Windows 10 1809 or later, x64 or arm64. Installs per user, no admin.
+"@
+if (-not $signArguments) { Add-Content $notesPath "`nUNSIGNED: SmartScreen warns on first run." }
+gh release create "v$Version" $setup "$setup.sha256" --repo $repo --title "agterm-win $Version" --notes-file $notesPath
 if ($LASTEXITCODE) { throw "gh release create failed" }
