@@ -41,10 +41,35 @@ struct NativeMenuTests {
     }
 
     @Test func picksRoundTripThroughMenuIDs() {
-        for pick in NativeMenu.Command.allCases.map(NativeMenu.Pick.command) + [.profile(0), .profile(7), .defaultProfile(2), .startServer(0), .startServer(5), .serverSession(0), .serverSession(3)] {
+        for pick in NativeMenu.Command.allCases.map(NativeMenu.Pick.command) + [.profile(0), .profile(7), .defaultProfile(2), .startServer(0), .startServer(5), .serverSession(0), .serverSession(3), .sidebarSession] {
             #expect(NativeMenu.Pick(id: pick.id) == pick)
         }
         #expect(NativeMenu.Pick(id: 0) == nil)
+    }
+
+    @Test func localSidebarOffersLocalLaunchAndSettingsWithoutSessionActionsOnTheWorkspace() {
+        let menu = NativeMenu.sidebar(profiles: profiles, defaultProfile: 1, servers: [], destination: nil,
+                                       canLaunch: true, canRename: nil, canRestart: false, canClose: false)
+        #expect(menu.map(\.title) == ["New Local Session", "Local Profiles", "Default Local Profile", "Settings…"])
+        #expect(menu.first?.pick == .sidebarSession && menu.first?.enabled == true)
+        #expect(menu[1].children.map(\.pick) == [.profile(0), .profile(1)])
+        #expect(menu[2].children.map(\.checked) == [false, true])
+    }
+
+    @Test func serverSidebarKeepsLocalProfilesInElsewhereAndDisablesDisconnectedLaunch() {
+        let servers = [NativeMenu.Server(label: "WSL Ubuntu", started: true, connected: true),
+                       NativeMenu.Server(label: "WSL Debian", started: true), NativeMenu.Server(label: "WSL Arch")]
+        let menu = NativeMenu.sidebar(profiles: profiles, defaultProfile: 0, servers: servers, destination: "WSL Debian / API",
+                                       canLaunch: false, canRename: false, canRestart: false, canClose: false)
+        #expect(menu.first?.title == "New Session in WSL Debian / API")
+        #expect(menu.first?.pick == .sidebarSession && menu.first?.enabled == false)
+        #expect(!menu.contains { $0.title == "Local Profiles" })
+        let elsewhere = menu.first { $0.title == "New Session Elsewhere" }?.children ?? []
+        #expect(elsewhere.first?.children.map(\.pick) == [.profile(0), .profile(1)])
+        #expect(elsewhere.first { $0.pick == .serverSession(0) }?.enabled == true)
+        #expect(elsewhere.first { $0.pick == .serverSession(1) }?.enabled == false)
+        #expect(elsewhere.last?.children.last?.pick == .startServer(2))
+        #expect(menu.last?.pick == .command(.closeSession) && menu.last?.enabled == false)
     }
 
     @Test func everyCommandNamesItsShortcut() {
