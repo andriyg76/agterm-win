@@ -41,6 +41,13 @@ The files are under `%LOCALAPPDATA%\agterm-win`, or the folder `AGTERM_WIN_STATE
 Terminal contents and scrollback stay in memory: they are not written to disk and are gone when a session
 closes.
 
+So that Claude Code and Codex can show their status in the sidebar, agterm-win installs status hooks on its first
+start and after each update, as agterm on a Mac does. It copies its PowerShell status scripts to
+`%USERPROFILE%\.config\agterm\agent-status`. It adds hook entries that run those scripts to
+`%USERPROFILE%\.claude\settings.json` and, when Codex is installed, to `config.toml` in Codex's folder
+(`CODEX_HOME`, else `%USERPROFILE%\.codex`). Each file it changes is first saved beside itself as `.bak`, and
+everything else in it is kept. The scripts only report a status to agterm-win's own control socket.
+
 Sessions served by agterm-server keep their state inside your WSL distribution, under the Linux account's
 `~/.local/state/agterm`, where they keep running after agterm-win closes.
 
@@ -52,7 +59,9 @@ out.
 Close agterm-win and delete `%LOCALAPPDATA%\agterm-win`, and on an install outside the Store the
 `HKCU\Software\Classes\AppUserModelId\andriyg76.agterm-win` registry key. Uninstalling, including from the Store, may leave that
 folder in place, so delete it yourself if you want nothing left behind. agterm-server's data in WSL is removed
-with `~/.local/state/agterm` there, or with the distribution.
+with `~/.local/state/agterm` there, or with the distribution. The status hooks are removed by deleting
+`%USERPROFILE%\.config\agterm\agent-status`, agterm-win's entries in `%USERPROFILE%\.claude\settings.json`, and the
+block between the `agterm-win agent-status` markers in Codex's `config.toml`.
 
 ## Children
 
