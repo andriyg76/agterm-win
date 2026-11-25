@@ -15,7 +15,7 @@ After `scripts/stage.ps1`:
 .\scripts\msix.ps1 -Version 0.44.1.999 -Arch x64 -Stage build\release\stage -Output build\release
 ```
 
-CI on branch `feature/msix-virtualized-test` uploads `msix-store-layout-<arch>` (layout under `msix/msix`).
+Every `windows` workflow run uploads `ci-installer-<arch>` (Inno setup), `ci-msix-<arch>` (`.msix`), and `msix-store-layout-<arch>` (registerable layout with sideload `.bat` files).
 
 ## Install (Developer Mode)
 
@@ -52,5 +52,5 @@ Get-AppxPackage *agterm* | Remove-AppxPackage
 
 ## CI
 
-GitHub Actions builds the Store layout on `feature/msix-virtualized-test` and attaches it as an artifact.
+GitHub Actions builds packages on every `windows` CI run (unsigned; not SignPath-signed).
 Runners do **not** register the MSIX. Behavioral testing is on a physical machine, VM, or Windows Sandbox with Developer Mode.
