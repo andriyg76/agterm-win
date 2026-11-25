@@ -137,7 +137,7 @@ struct WSLHost {
         let stderr = curl.readErrorsToEnd()
         curl.waitUntilExit()
         guard curl.terminationStatus == 0 else {
-            throw Failure.command("downloading \(url.absoluteString)", curl.terminationStatus, String(decoding: stderr, as: UTF8.self))
+            throw Failure.command("downloading \(url.absoluteString)", curl.terminationStatus, WSLServerEnsure.wslText(stderr))
         }
     }
 
@@ -175,7 +175,7 @@ struct WSLHost {
         let data = process.readToEnd()
         let stderr = process.readErrorsToEnd()
         process.waitUntilExit()
-        return (process.terminationStatus, String(decoding: data, as: UTF8.self), String(decoding: stderr, as: UTF8.self))
+        return (process.terminationStatus, String(decoding: data, as: UTF8.self), WSLServerEnsure.wslText(stderr))
     }
 
     private func run(_ line: String, what: String) throws -> Data {

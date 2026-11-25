@@ -83,6 +83,11 @@ public protocol NativeControlHost: AnyObject {
     func setSidebarWidth(points: Double)
     func openDashboard(_ members: [DashboardMember], fontMode: DashboardFontMode)
     func closeDashboard()
+    var noticeBar: NoticeBar.State { get }
+    /// setNoticePosition moves the notice bar and saves where it sits.
+    func setNoticePosition(_ position: NoticeBar.Position)
+    /// dismissNotice closes the notice the bar shows, false when it shows none.
+    func dismissNotice() -> Bool
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -229,6 +234,8 @@ public enum NativeControl {
         #if os(Windows)
         case .wslList, .wslStart, .wslLaunch:
             return wsl(request, host: host)
+        case .noticeList, .noticePosition, .noticeDismiss:
+            return notice(request, host: host)
         #endif
         case .sessionSplit, .sessionSplitClose, .sessionSwap, .sessionFocus, .sessionResize, .sessionScratch:
             return await panes(request, host: host)
@@ -356,6 +363,23 @@ public enum NativeControl {
         }
         return ControlResponse(ok: true, result: ControlResult(wsl: host.wslServers))
     }
+
+    /// notice answers the `notice.*` commands with the whole bar, so each reply is its own read-back.
+    private static func notice(_ request: ControlRequest, host: NativeControlHost) -> ControlResponse {
+        switch request.cmd {
+        case .noticePosition:
+            guard let position = request.args?.mode.flatMap(NoticeBar.Position.init(rawValue:)) else {
+                return failure("notice.position requires top or bottom")
+            }
+            host.setNoticePosition(position)
+        case .noticeDismiss:
+            guard host.dismissNotice() else { return failure("no notice shown") }
+        default: break
+        }
+        var result = ControlResult()
+        result.noticeBar = host.noticeBar.control
+        return ControlResponse(ok: true, result: result)
+    }
     #endif
 
     /// tree is the Local group, while it has sessions, ahead of the server's workspaces, as the sidebar shows them.
@@ -381,6 +405,7 @@ public enum NativeControl {
                                dashboardHighlighted: dashboard?.highlighted?.controlRef, dashboardFontSize: dashboard?.fontSize,
                                dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
         tree.wslServers = host.wslServers
+        tree.noticeBar = host.noticeBar.control
         return tree
     }
 

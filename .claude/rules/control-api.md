@@ -262,6 +262,12 @@ only answers `ControlActionsUnsupported`. `wsl.launch` writes the Settings ▸ G
 the socket's one-at-a-time accept loop. `ControlWSLServer` and both fields compile everywhere, so a Mac decodes a
 Windows reply.
 
+`notice.list`, `notice.position` and `notice.dismiss` (`agtermctl notice list|position top|bottom|dismiss`) are
+agterm-win's notice bar, compiled the same way. `NativeControl` serves them over `NoticeBar.State`; `position` saves
+`native.json`'s `noticeBarPosition`, and `dismiss` hides the shown notice until its text changes, refusing with
+`no notice shown`. Every reply carries `noticeBar`, which `tree` reports at top level; `ControlNoticeBar` compiles
+everywhere.
+
 ## Organization commands
 
 - `workspace.delete` deletes the last named workspace too, leaving the root, and never shows the GUI alert.

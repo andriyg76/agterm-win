@@ -16,6 +16,7 @@ extension NativeShell {
         if let tree { nt_tree_apply_colors(tree) }
         if let palette { nt_palette_apply_chrome(palette) }
         SettingsWindow.current?.applyChrome()
+        noticeWindow?.invalidate()
         refreshClientBrushes(colors)
         invalidateTitleBar()
         if let window { InvalidateRect(window, nil, false) }

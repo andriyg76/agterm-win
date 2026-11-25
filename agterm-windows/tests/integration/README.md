@@ -63,7 +63,8 @@ installing its client. Each case leaves `screen.txt`, its state directory (`agte
 `cases.json` under the results folder.
 `wsl-cases.ps1` start a distribution no machine has, so they need no WSL and run in Sandbox and on CI too: they read
 back what was started, asked and saved, and how WSL auto-ensure probes and reports failures. Cases `wsl-ensure-probe`,
-`wsl-ensure-reprobe`, and `wsl-install-unreachable` pin that behaviour; only a live install connects.
+`wsl-ensure-reprobe`, and `wsl-install-unreachable` pin that behaviour; only a live install connects. `notice-bar` uses
+that failure to drag the notice bar to the bottom, check the terminal reflows and the bar follows the theme, and close it.
 
 On a machine with a working agterm-server in WSL, run the optional gate (not part of CI):
 
