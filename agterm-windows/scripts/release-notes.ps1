@@ -103,7 +103,7 @@ Skip merge-commit noise and duplicate bullets. Do not invent issue numbers. Keep
 }
 
 $body = if ($env:OPENAI_API_KEY) {
-    $model = if ($env:OPENAI_MODEL) { $env:OPENAI_MODEL } else { "GPT-6-Sol" }
+    $model = if ($env:OPENAI_MODEL) { $env:OPENAI_MODEL } else { "GPT-6.1-terra" }
   try {
       Invoke-OpenAiNotes -ApiKey $env:OPENAI_API_KEY -Model $model
   } catch {
