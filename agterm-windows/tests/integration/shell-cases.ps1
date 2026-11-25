@@ -56,10 +56,25 @@ function Save-ScreenSnapshot($Shell, [string]$Label) {
     } catch { Write-Host "screen snapshot $Label failed: $_" }
 }
 
+# every command but these reads changes what the window shows, so Invoke-Ctl snapshots the window after it
+$readCommands = @("tree", "version", "text", "list", "result", "copy", "info", "read")
+$stepShells = @{}
+
 function Invoke-Ctl([string]$State, [string[]]$Arguments) {
+    # Windows PowerShell 5.1 turns a native program's redirected stderr into errors, which run.ps1's Stop would throw
+    $ErrorActionPreference = "Continue"
     $env:AGTERM_STATE_DIR = $State
     try { $out = (& $ctl @Arguments --json 2>&1 | Out-String).Trim() } finally { Remove-Item Env:AGTERM_STATE_DIR }
-    try { $out | ConvertFrom-Json } catch { [pscustomobject]@{ ok = $false; error = $out } }
+    $reply = try { $out | ConvertFrom-Json } catch { [pscustomobject]@{ ok = $false; error = $out } }
+    $shell = $stepShells[$State]
+    $first = [Array]::FindIndex([string[]]$Arguments, [Predicate[string]] { param($a) $a.StartsWith("-") })
+    $words = @(if ($first -lt 0) { $Arguments } else { $Arguments | Select-Object -First $first }) | ? { $_ -match '^[a-z][a-z-]*$' }
+    if ($shell -and $words -and -not ($words | ? { $readCommands -contains $_ })) {
+        $shell.Step++
+        Start-Sleep -Milliseconds 250
+        Save-Snapshot $shell ("{0:d2}-{1}" -f $shell.Step, ($words -join "-"))
+    }
+    $reply
 }
 
 function Wait-Until([scriptblock]$Condition, [int]$Seconds = 20) {
@@ -85,10 +100,13 @@ function Start-Shell([string]$Name, [scriptblock]$Prepare, $Launch) {
                    else { Start-Process -FilePath $exe -PassThru }
     } finally { Remove-Item Env:AGTERM_WIN_STATE_DIR }
     $ready = if ($Launch.CaseWaits) { $true } else { Wait-Until { (Invoke-Ctl $state @("tree")).ok } 30 }
-    [pscustomobject]@{ Dir = $dir; State = $state; Process = $process; Ready = [bool]$ready }
+    $shell = [pscustomobject]@{ Dir = $dir; State = $state; Process = $process; Ready = [bool]$ready; Step = 0 }
+    $stepShells[$state] = $shell
+    $shell
 }
 
 function Stop-Shell($Shell) {
+    $stepShells.Remove($Shell.State)
     Stop-Process -Id $Shell.Process.Id -Force -ErrorAction SilentlyContinue
     $Shell.Process.WaitForExit(10000) | Out-Null
     # a killed window leaves its AF_UNIX socket, which nothing can stat, and an artifact upload stops at it

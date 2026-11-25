@@ -27,7 +27,8 @@ powershell -ExecutionPolicy Bypass -File tests\integration\sandbox.ps1 -App $env
 Command-window cases read the terminal's text back; the full-window cases in `shell-cases.ps1` start the window on
 their own state directory and drive it with the staged `agtermctl` (session names, notifications, theme, keymap);
 `settings-cases.ps1` sets Settings' controls with their own messages and checks native.json and what the window then does.
-They save PNG snapshots beside their results: the window at key steps and when it stops (`final.png`), and the
+They save PNG snapshots beside their results: the window after every agtermctl command that changes it
+(`NN-<command>.png`, numbered in order), at the case's own key steps and when it stops (`final.png`), and the
 whole desktop after a `notify` to show its banner; CI uploads them in the `integration-results-<arch>` artifact.
 
 `panes-cases.ps1` drives split panes, the scratch, the quick terminal and the dashboard with agtermctl, the title bar's

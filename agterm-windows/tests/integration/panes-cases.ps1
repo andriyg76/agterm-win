@@ -33,7 +33,7 @@ $shellCases["split"] = {
         $failures += "tree reads split '$($node.split)' hasSplit '$($node.hasSplit)' axis '$($node.splitAxis)' focused '$($node.splitFocused)'"
     }
     $panes = Wait-Until { $p = Get-Panes $window; if ($p.Count -eq 2) { , $p } } 5
-    if (-not $panes) { $failures += "$((Get-Panes $window).Count) terminal(s) are visible, not 2" }
+    if (-not $panes) { $failures += "$(@(Get-Panes $window).Count) terminal(s) are visible, not 2" }
     if (-not (Wait-Until { (Get-PaneText $state $id "right") -match ">" } 30)) { return $failures + "the split's shell never showed a prompt" }
     Invoke-Ctl $state @("session", "type", "--target", $id, "--pane", "right", "echo split-pane-ok`r") | Out-Null
     if (-not (Wait-Until { (Get-PaneText $state $id "right") -match "split-pane-ok" })) { $failures += "the split pane did not run what was typed into it" }
@@ -71,7 +71,7 @@ $shellCases["split"] = {
     Invoke-Ctl $state @("session", "split", "off", "--target", $id) | Out-Null
     $node = Get-Node $state $id
     if ($node.split -or -not $node.hasSplit) { $failures += "split off left split '$($node.split)' hasSplit '$($node.hasSplit)'" }
-    if (-not (Wait-Until { (Get-Panes $window).Count -eq 1 } 5)) { $failures += "a hidden split left $((Get-Panes $window).Count) terminals visible" }
+    if (-not (Wait-Until { @(Get-Panes $window).Count -eq 1 } 5)) { $failures += "a hidden split left $(@(Get-Panes $window).Count) terminals visible" }
     Invoke-Ctl $state @("session", "split", "close", "--target", $id) | Out-Null
     if ((Get-Node $state $id).hasSplit) { $failures += "split close left the split" }
     $none = Invoke-Ctl $state @("session", "focus", "--target", $id)
@@ -94,7 +94,7 @@ $shellCases["panes-ui"] = {
     Note "split button"
     Send-Click $window (Get-Centre $bar "split") $bar.Middle
     if (-not (Wait-Until { (Get-Node $state $id).split } 5)) { return @("the split button did not split the session") }
-    if (-not (Wait-Until { (Get-Panes $window).Count -eq 2 } 5)) { $failures += "the split button left $((Get-Panes $window).Count) terminal(s) visible" }
+    if (-not (Wait-Until { @(Get-Panes $window).Count -eq 2 } 5)) { $failures += "the split button left $(@(Get-Panes $window).Count) terminal(s) visible" }
     Save-Snapshot $Shell "split-button"
 
     Note "scratch chord"
@@ -103,7 +103,7 @@ $shellCases["panes-ui"] = {
     [AgtermInput]::SendChord($terminal, 0x4A, $true)
     if (-not (Wait-Until { (Get-Node $state $id).scratch } 5)) { $failures += "Ctrl+Shift+J did not show the scratch" }
     else {
-        if (-not (Wait-Until { (Get-Panes $window).Count -eq 1 } 5)) { $failures += "the scratch left $((Get-Panes $window).Count) terminals visible, not itself alone" }
+        if (-not (Wait-Until { @(Get-Panes $window).Count -eq 1 } 5)) { $failures += "the scratch left $(@(Get-Panes $window).Count) terminals visible, not itself alone" }
         if (-not (Wait-Until { (Get-PaneText $state $id "scratch") -match ">" } 30)) { $failures += "the scratch's shell never showed a prompt" }
         Save-Snapshot $Shell "scratch"
         $scratch = Get-Panes $window | Select-Object -First 1

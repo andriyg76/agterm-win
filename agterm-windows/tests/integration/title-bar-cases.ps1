@@ -275,11 +275,11 @@ $shellCases["title-bar"] = {
     }
 
     Note "+: counting sessions"
-    $before = (Get-SessionNodes $state).Count
+    $before = @(Get-SessionNodes $state).Count
     Note "+: clicking with $before session(s)"
     Send-Click $window (Get-Centre $bar "new session") $bar.Middle
     $added = Wait-Until { $nodes = Get-SessionNodes $state; if ($nodes.Count -eq $before + 1) { $nodes } }
-    if (-not $added) { $failures += "+ left $((Get-SessionNodes $state).Count) session(s), not $($before + 1)" }
+    if (-not $added) { $failures += "+ left $(@(Get-SessionNodes $state).Count) session(s), not $($before + 1)" }
     elseif (-not (Wait-Until { $active = Get-SessionNodes $state | ? { $_.active }; $active -and $active.name -eq [AgtermWin32]::TextOf($window) })) {
         $failures += "after + the title is '$([AgtermWin32]::TextOf($window))', not the new session's name"
     }
