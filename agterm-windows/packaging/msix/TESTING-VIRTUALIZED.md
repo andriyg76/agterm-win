@@ -16,7 +16,8 @@ After `scripts/stage.ps1`:
 .\scripts\msix.ps1 -Version 0.44.1.999 -Arch x64 -Stage build\release\stage -Output build\release -Virtualized
 ```
 
-On a PR for `feature/msix-virtualized-test`, CI uploads `msix-virtualized-layout-<arch>` artifacts (the layout folder).
+On a PR or push for `feature/msix-virtualized-test`, CI uploads `msix-virtualized-layout-<arch>` artifacts (the layout folder).
+The workflow gates on `github.head_ref` / `github.ref_name`, not `github.ref` (PR merges use `refs/pull/.../merge`).
 
 ## Install (Developer Mode)
 

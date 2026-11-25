@@ -62,12 +62,12 @@ jobs:
       - run: ./scripts/stage.ps1 -Output "$env:RUNNER_TEMP\agterm-win"
       - run: ./scripts/msix.ps1 -Version "$(Get-Content AGTERM_VERSION -TotalCount 1).0" -Arch ${{ matrix.arch }} -Stage "$env:RUNNER_TEMP\agterm-win" -Output "$env:RUNNER_TEMP\msix"
       - name: Pack MSIX (Store-virtualized test layout)
-        if: contains(github.ref, 'msix-virtualized-test')
+        if: github.head_ref == 'feature/msix-virtualized-test' || github.ref_name == 'feature/msix-virtualized-test'
         run: |
           $agterm = Get-Content AGTERM_VERSION -TotalCount 1
           ./scripts/msix.ps1 -Version "$agterm.999" -Arch ${{ matrix.arch }} -Stage "$env:RUNNER_TEMP\agterm-win" -Output "$env:RUNNER_TEMP\msix-virtualized-test" -Virtualized -LayoutOnly
       - name: Upload Store-virtualized MSIX layout
-        if: contains(github.ref, 'msix-virtualized-test')
+        if: github.head_ref == 'feature/msix-virtualized-test' || github.ref_name == 'feature/msix-virtualized-test'
         uses: actions/upload-artifact@v7
         with:
           name: msix-virtualized-layout-${{ matrix.arch }}
