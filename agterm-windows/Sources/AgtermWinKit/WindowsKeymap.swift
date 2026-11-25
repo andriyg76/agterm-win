@@ -12,16 +12,22 @@ public struct WindowsKeymap: Sendable {
         (.find, .toggleSearch), (.fontBigger, .increaseFontSize), (.fontSmaller, .decreaseFontSize), (.fontReset, .resetFontSize),
         (.sessionPalette, .sessionPalette), (.commandPalette, .commandPalette), (.toggleSplit, .toggleSplit),
         (.toggleHorizontalSplit, .toggleHorizontalSplit), (.focusLeftPane, .focusLeftPane), (.focusRightPane, .focusRightPane),
-        (.toggleScratch, .toggleScratch), (.quickTerminal, .quickTerminal), (.dashboard, .dashboard),
+        (.toggleScratch, .toggleScratch), (.toggleOverlay, .toggleOverlay), (.quickTerminal, .quickTerminal), (.dashboard, .dashboard),
     ]
 
     /// reserved are the fixed chords of commands with no built-in action; a binding on one never fires.
     public static let reserved: [Chord: NativeMenu.Command] = [
         Chord(mods: [.control, .shift], key: "c"): .copy, Chord(mods: [.control, .shift], key: "v"): .paste,
-        Chord(mods: [.control, .shift], key: "a"): .selectAll, Chord(mods: [.control, .shift], key: "k"): .clearScrollback,
-        Chord(mods: [.control, .shift], key: "r"): .restartSession, Chord(mods: [.option], key: "f4"): .quit,
-        Chord(mods: [.control], key: ","): .settings,
+        Chord(mods: [.control, .shift], key: "a"): .selectAll, Chord(mods: [.control, .shift], key: "i"): .paste,
+        Chord(mods: [.control], key: "insert"): .copy, Chord(mods: [.shift], key: "insert"): .paste,
+        Chord(mods: [.option], key: "f4"): .quit, Chord(mods: [.control], key: ","): .settings,
+        Chord(mods: [.control, .option], key: "s"): .settings,
     ]
+
+    public static func fixedCommand(for chord: Chord, hasSelection: Bool) -> NativeMenu.Command? {
+        if chord == Chord(mods: [.control], key: "c"), hasSelection { return .copy }
+        return reserved[chord]
+    }
 
     public let keymap: Keymap
     public let diagnostics: [KeymapDiagnostic]
@@ -149,6 +155,7 @@ public struct WindowsKeymap: Sendable {
         case 0x26: "up"
         case 0x27: "right"
         case 0x28: "down"
+        case 0x2D: "insert"
         case 0xBA: ";"
         case 0xBB: "="
         case 0xBC: ","
@@ -200,7 +207,7 @@ public struct WindowsKeymap: Sendable {
         if chord.mods.contains(.option) { parts.append("Alt") }
         if chord.mods.contains(.shift) { parts.append("Shift") }
         let names = ["tab": "Tab", "space": "Space", "return": "Enter", "delete": "Backspace", "left": "Left", "right": "Right",
-                     "up": "Up", "down": "Down"]
+                     "up": "Up", "down": "Down", "insert": "Insert"]
         parts.append(names[chord.key] ?? chord.key.uppercased())
         return parts.joined(separator: "+")
     }

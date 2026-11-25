@@ -15,12 +15,13 @@ extension NativeShell {
     /// canSplit is whether `id` takes a split and a scratch: a local session; a server session's panes are not shown here.
     func canSplit(_ id: Foundation.UUID) -> Bool { locals.contains { $0.id == id } }
 
-    /// sessionArea is the terminal area beside the sidebar and under the title bar, which a session's panes share.
+    /// sessionArea is the terminal area beside the sidebar and between the title bar and the notice bar, which a
+    /// session's panes share.
     var sessionArea: Rect {
         var client = RECT()
         GetClientRect(window, &client)
-        let top = titleBar.height
-        return Rect(x: sidebarWidth, y: top, width: max(client.right - sidebarWidth, 1), height: max(client.bottom - top, 1))
+        let content = contentSpan
+        return Rect(x: sidebarWidth, y: content.top, width: max(client.right - sidebarWidth, 1), height: content.bottom - content.top)
     }
 
     var dividerThickness: Int32 { scaled(4) }
@@ -29,7 +30,8 @@ extension NativeShell {
         let session = local(selected)
         return NativeMenu.View(canSplit: session != nil && dashboard == nil, hasSplit: session?.splitTerminal != nil,
                                scratchShown: session?.scratchShown == true, quickShown: quickShown, canDashboard: !locals.isEmpty,
-                               dashboardOpen: dashboard != nil)
+                               dashboardOpen: dashboard != nil, canToggleOverlay: selectedOverlayHidden != nil,
+                               overlayShown: selectedOverlayHidden == false)
     }
 
     /// enabled is whether a title bar button can act now; one that cannot stays in place, drawn dimmed.

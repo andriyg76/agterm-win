@@ -109,12 +109,11 @@ int32_t nt_tree_label_edit(intptr_t notification, int64_t *tag, uint16_t *text, 
 void nt_tree_edit(void *tree, void *item);
 // nt_tree_set_edit_text replaces the text an in-place edit starts from (the label without its marks).
 void nt_tree_set_edit_text(void *tree, const uint16_t *text);
-// nt_tree_item_at is the tag of the item at a WM_CONTEXTMENU's screen point (0 off any item, a workspace row
-// included); for a keyboard menu (-1, -1) it is the selected item's, and the point moves to that item's corner.
+// nt_tree_item_at returns the row's tag, or 0 off any row. For a keyboard menu it moves the point to the caret row.
 int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y);
-// nt_tree_custom_draw answers a tree's NM_CUSTOMDRAW (-1 for any other WM_NOTIFY): dark selection, and items whose
-// tag's `dimmed` byte is set drawn grey.
-intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count);
+// Positive tags index the dimmed sessions. Negative tags index workspace launch buttons.
+intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count,
+                             const uint8_t *launchable, int64_t group_count);
 // nt_tree_decorate gives a session row an agent's status glyph (0xRRGGBB, pulsing when `blink`) at its right edge and an
 // info line under its title, which makes it two lines tall; null or empty strings draw nothing. A clear drops them.
 void nt_tree_decorate(void *tree, void *item, const uint16_t *glyph, uint32_t rgb, int32_t blink, const uint16_t *info);
@@ -195,9 +194,32 @@ void *nt_tooltip_create(void *parent);
 void nt_tooltip_set(void *tip, void *parent, uintptr_t id, int32_t left, int32_t top, int32_t right, int32_t bottom,
                     const uint16_t *text);
 
+// The window's notice bar, laid out by NoticeBar.Layout in its own pixels. Colors are COLORREFs (ChromePalette.colorref); a button's `state` is
+// 0 at rest, 1 hovered, 2 pressed; `edge_top`/`edge_bottom` draw the border on the edge that meets the content.
+typedef struct {
+    int32_t left, right;
+    const uint16_t *label;
+    int32_t state;
+} nt_notice_button;
+typedef struct {
+    const uint16_t *text;
+    const uint16_t *count;
+    uint16_t glyph;
+    int32_t stripe_right, grip_left, grip_right, icon_left, icon_right, text_left, text_right, count_left, count_right;
+    int32_t close_left, close_right, close_state;
+    const nt_notice_button *buttons;
+    int32_t button_count;
+    int32_t edge_top, edge_bottom;
+    uint32_t background, text_color, dim, border, accent, button, button_hover, button_pressed;
+} nt_notice_bar;
+void nt_notice_bar_paint(void *window, uint32_t dpi, const nt_notice_bar *bar);
+// nt_notice_bar_text_width is `text`'s width in the bar's font at `dpi`, in pixels.
+int32_t nt_notice_bar_text_width(uint32_t dpi, const uint16_t *text);
+
 // Page overlays (WebView2) in a child HWND. `state` is 0 loading, 1 loaded, 2 failed; each change posts
 // NT_PAGE_STATE to the top-level window, which reads it back.
 #define NT_PAGE_STATE 0x8105
+#define NT_TREE_LAUNCH 0x8106
 // `data_folder` is the WebView2 user data folder; null keeps WebView2's default beside the executable.
 void *nt_page_create(void *parent, const uint16_t *data_folder);
 void nt_page_destroy(void *page);

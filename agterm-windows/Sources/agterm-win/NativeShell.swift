@@ -105,8 +105,8 @@ final class NativeShell {
     private final class Server {
         let remote: RemoteWindow
         let group = Foundation.UUID()
-        /// bootstrapNotice is shown in the title-bar strip until the catalog connects or install refuses.
-        var bootstrapNotice: String?
+        /// bootstrapNotice is shown in the notice bar until the catalog connects or install refuses.
+        var bootstrapNotice: NoticeBar.Message?
 
         init(_ remote: RemoteWindow) { self.remote = remote }
 
@@ -125,7 +125,7 @@ final class NativeShell {
     var settings: NativeSettings
     var window: HWND?
     var tree: UnsafeMutableRawPointer?
-    private var notice: HWND?
+    var noticeWindow: NoticeBarWindow?
     private var findBar: HWND?
     private var findFailed = false
     private var tooltip: UnsafeMutableRawPointer?
@@ -158,14 +158,20 @@ final class NativeShell {
     private var pickPalette: PendingPick?
     private var profiles = LaunchProfiles.available(wslDistributions: [], powerShell7: NativeShell.powerShell7())
     var selected: Foundation.UUID?
-    // the server's sessions before New Session on Server, so the one it adds is selected when the catalog shows it
-    private var sessionsBeforeCreate: Set<Foundation.UUID>?
+    private var pendingCreatedSession: (server: Foundation.UUID, session: Foundation.UUID)?
     private var running: Foundation.UUID?
     // what the remote terminal was last given, so a session that ends or comes back is shown again
     private var runningLaunch: SessionSidebar.Launch?
-    // the tree's tags index these; 0 is a workspace row
+    private enum SidebarDestination: Equatable {
+        case local
+        case server(Foundation.UUID, workspace: Foundation.UUID?)
+    }
+    // Positive tree tags address sessions. Negative tags address the launch and selection targets of group rows.
     private var tagged: [Foundation.UUID] = []
+    private var sidebarGroups: [(destination: SidebarDestination, item: UnsafeMutableRawPointer)] = []
+    private var selectedSidebarGroup: SidebarDestination?
     private var dimmed: [UInt8] = []
+    private var launchableGroups: [UInt8] = []
     private var items: [Foundation.UUID: UnsafeMutableRawPointer] = [:]
     var darkBrush = CreateSolidBrush(0x262525)
     var dpi: UInt32 = 96
@@ -233,8 +239,7 @@ final class NativeShell {
         tooltip = nt_tooltip_create(UnsafeMutableRawPointer(window))
         palette = nt_palette_create(UnsafeMutableRawPointer(window), dpi)
         tree = nt_tree_create(UnsafeMutableRawPointer(window), dpi)
-        notice = CreateWindowExW(0, Array("STATIC".utf16) + [0], nil, DWORD(WS_CHILD) | DWORD(SS_LEFT), 0, 0, 10, 10, window, nil,
-                                 instance, nil)
+        makeNoticeBar()
         findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
         remoteTerminal = makeTerminal()
         // OSC 9/777 of the server session this terminal attaches; the server sends only `notify` through its stream
@@ -302,9 +307,11 @@ final class NativeShell {
         selected.flatMap(server(of:)) ?? servers.first { $0.remote.connected }
     }
 
-    private var serverEntries: [NativeMenu.Server] {
+    private var serverEntries: [NativeMenu.Server] { serverEntries(for: menuServers) }
+
+    private func serverEntries(for distributions: [String]) -> [NativeMenu.Server] {
         let current = currentServer?.distribution
-        return menuServers.map { distribution in
+        return distributions.map { distribution in
             let started = server(distribution)
             return NativeMenu.Server(label: Self.label(of: distribution), started: started != nil,
                                      connected: started?.remote.connected == true, current: distribution == current)
@@ -408,12 +415,12 @@ final class NativeShell {
 
     /// prepareAndConnect probes agterm-server in WSL, installs or starts it when needed, then opens the catalog stream.
     private func prepareAndConnect(_ server: Server, forceInstall: Bool) {
-        server.bootstrapNotice = "Checking \(server.label)…"
+        server.bootstrapNotice = NoticeBar.Message(source: server.distribution, text: "Checking \(server.label)…", severity: .progress)
         layout()
         let host = server.remote.host
         let label = server.label
         DispatchQueue.global().async {
-            let finish: (String?) -> Void = { notice in
+            let finish: (NoticeBar.Message?) -> Void = { notice in
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         server.bootstrapNotice = notice
@@ -428,8 +435,8 @@ final class NativeShell {
                 release = try serverRelease()
             } catch {
                 log("server release info unavailable: \(error)")
-                let notice = "\(label): this build cannot download agterm-server (\(error)). Install from a release build or run install.sh in WSL."
-                finish(notice)
+                finish(NoticeBar.Message(source: host.distribution, text: "\(label): this build cannot download agterm-server (\(error)). "
+                                         + "Install from a release build or run install.sh in WSL.", severity: .error, actions: [.openLog]))
                 return
             }
             if forceInstall {
@@ -444,7 +451,7 @@ final class NativeShell {
             case .connect:
                 finish(nil)
             case .startServiceThenConnect:
-                Self.dispatchNotice(host.distribution, "\(label): starting agterm-server…")
+                Self.dispatchNotice(host.distribution, "\(label): starting agterm-server…", .progress)
                 let start = host.startService()
                 if start.ok {
                     finish(nil)
@@ -456,33 +463,33 @@ final class NativeShell {
             case .install(let reason):
                 finish(Self.runServerInstall(host: host, label: label, release: release, preamble: reason))
             case .refuse(let reason):
-                finish("\(label): \(reason)")
+                finish(NoticeBar.Message(source: host.distribution, text: "\(label): \(reason)", severity: .error, actions: [.retry, .openLog]))
             }
         }
     }
 
-    /// runServerInstall performs download, unpack and install.sh, reporting progress in the notice strip.
+    /// runServerInstall performs download, unpack and install.sh, reporting progress in the notice bar.
     nonisolated private static func runServerInstall(host: WSLHost, label: String, release: (version: String, checksums: String),
-                                                        preamble: String? = nil) -> String? {
-        if let preamble { dispatchNotice(host.distribution, "\(label): \(preamble)") }
+                                                        preamble: String? = nil) -> NoticeBar.Message? {
+        if let preamble { dispatchNotice(host.distribution, "\(label): \(preamble)", .progress) }
         do {
             let code = try host.installServer(version: release.version, checksums: release.checksums) { line in
                 log("server install: \(line)")
-                dispatchNotice(host.distribution, "\(label): \(line)")
+                dispatchNotice(host.distribution, "\(label): \(line)", .progress)
             }
             log("server install exited \(code)")
-            return WSLServerEnsure.installOutcome(exitCode: code, error: nil, label: label)
+            return WSLServerEnsure.installNotice(exitCode: code, error: nil, label: label, source: host.distribution)
         } catch {
             log("server install failed: \(error)")
-            return WSLServerEnsure.installOutcome(exitCode: 1, error: String(describing: error), label: label)
+            return WSLServerEnsure.installNotice(exitCode: 1, error: String(describing: error), label: label, source: host.distribution)
         }
     }
 
-    nonisolated private static func dispatchNotice(_ distribution: String, _ text: String) {
+    nonisolated private static func dispatchNotice(_ distribution: String, _ text: String, _ severity: NoticeBar.Severity) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
                 guard let server = shell.server(distribution) else { return }
-                server.bootstrapNotice = text
+                server.bootstrapNotice = NoticeBar.Message(source: distribution, text: text, severity: severity)
                 shell.layout()
             }
         }
@@ -879,13 +886,13 @@ final class NativeShell {
 
     private var defaultProfile: Int { NativeMenu.defaultProfile(named: settings.defaultProfile, in: profiles) }
 
-    /// quickProfileCommandLine is what the quick terminal runs: the profile New Session's shortcut starts.
+    /// The quick terminal runs the default local profile.
     var quickProfileCommandLine: String? { profiles.indices.contains(defaultProfile) ? profiles[defaultProfile].commandLine : nil }
 
-    private func newServerSession(on server: Server?) {
+    private func newServerSession(on server: Server?, workspace: Foundation.UUID? = nil) {
         guard let server else { return }
         Task { @MainActor in
-            let response = await newSession(on: server)
+            let response = await newSession(on: server, workspace: workspace)
             log("native shell: new session on \(server.label): \(response.ok ? "ok" : response.error ?? "failed")")
             if !response.ok {
                 MessageBoxW(window, Array("New session on \(server.label) failed: \(response.error ?? "")".utf16) + [0],
@@ -894,15 +901,73 @@ final class NativeShell {
         }
     }
 
-    /// newSession asks `server` for a session in its current workspace, which is selected once its catalog shows it.
-    private func newSession(on server: Server) async -> ControlResponse {
-        guard server.remote.connected, let workspace = server.remote.store.currentWorkspaceID else {
-            return ControlResponse(ok: false, error: "no connection to \(server.label)")
+    private func newSession(on server: Server, workspace target: Foundation.UUID? = nil) async -> ControlResponse {
+        guard server.remote.connected else { return ControlResponse(ok: false, error: "no connection to \(server.label)") }
+        let store = server.remote.store
+        guard let workspace = target ?? store.currentWorkspaceID, store.workspaces.contains(where: { $0.id == workspace }) else {
+            return ControlResponse(ok: false, error: "workspace is unavailable on \(server.label)")
         }
-        sessionsBeforeCreate = Set(servers.flatMap { $0.remote.store.workspaces.flatMap(\.sessions) }.map(\.id))
         let response = await server.remote.perform(.newSession(workspace: workspace))
-        if !response.ok { sessionsBeforeCreate = nil }
+        if response.ok, let created = response.result?.id.flatMap(Foundation.UUID.init(uuidString:)) {
+            pendingCreatedSession = (server.group, created)
+            selectCreatedSession()
+        }
         return response
+    }
+
+    @discardableResult
+    private func selectCreatedSession() -> Bool {
+        guard let pendingCreatedSession,
+              sidebarServer(pendingCreatedSession.server)?.remote.session(pendingCreatedSession.session) != nil else { return false }
+        self.pendingCreatedSession = nil
+        select(pendingCreatedSession.session)
+        focus()
+        return true
+    }
+
+    private func sidebarDestination(for id: Foundation.UUID) -> SidebarDestination {
+        guard let server = server(of: id) else { return .local }
+        let workspace = server.remote.store.workspace(forSession: id)
+        return .server(server.group, workspace: workspace?.isRoot == true ? nil : workspace?.id)
+    }
+
+    private var activeSidebarDestination: SidebarDestination {
+        selectedSidebarGroup ?? selected.map(sidebarDestination(for:)) ?? .local
+    }
+
+    private func sidebarGroup(_ tag: Int64) -> SidebarDestination? {
+        guard tag < 0, tag >= -Int64(sidebarGroups.count) else { return nil }
+        return sidebarGroups[Int(-tag - 1)].destination
+    }
+
+    private func sidebarServer(_ id: Foundation.UUID) -> Server? { servers.first { $0.group == id } }
+
+    private func sidebarWorkspace(on server: Server, target: Foundation.UUID?) -> Workspace? {
+        let store = server.remote.store
+        guard let target else { return store.rootWorkspace }
+        return store.workspaces.first { $0.id == target }
+    }
+
+    private func canLaunchInSidebar(_ destination: SidebarDestination) -> Bool {
+        switch destination {
+        case .local: profiles.indices.contains(defaultProfile)
+        case .server(let id, let target):
+            if let server = sidebarServer(id), server.remote.connected {
+                sidebarWorkspace(on: server, target: target) != nil
+            } else {
+                false
+            }
+        }
+    }
+
+    private func launchInSidebar(_ destination: SidebarDestination) {
+        switch destination {
+        case .local:
+            if profiles.indices.contains(defaultProfile) { newSession(profiles[defaultProfile]) }
+        case .server(let id, let target):
+            guard let server = sidebarServer(id), let workspace = sidebarWorkspace(on: server, target: target) else { return }
+            newServerSession(on: server, workspace: workspace.id)
+        }
     }
 
     /// perform sends `operation` to the server holding session `id`.
@@ -934,8 +999,12 @@ final class NativeShell {
         locals.first { $0.id == id }?.name ?? serverSession(id)?.displayName
     }
 
-    private func startRename() {
-        guard let tree, canRename(selected), let selected, let item = items[selected] else { return }
+    private var requestedSidebarRename: Foundation.UUID?
+
+    private func startRename(_ id: Foundation.UUID?) {
+        guard let tree, let id, canRename(id), let item = items[id] else { return }
+        requestedSidebarRename = id
+        defer { requestedSidebarRename = nil }
         nt_tree_edit(tree, item)
     }
 
@@ -949,16 +1018,24 @@ final class NativeShell {
         let id = tag > 0 && Int(tag) <= tagged.count ? tagged[Int(tag) - 1] : nil
         switch stage {
         case 1:
-            guard let id, canRename(id), let tree, let name = name(of: id) else { return 1 }
+            guard let id, id == requestedSidebarRename, let tree, let name = name(of: id) else { return 1 }
             nt_tree_set_edit_text(tree, Array(name.utf16) + [0])
             return 0
         case 2:
             let name = String(decodingCString: text, as: UTF16.self)
-            if let id { rename(id, to: name) }
-            focus()
+            // A click on another row can end editing while TreeView is still handling that click.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if let id { rename(id, to: name) }
+                syncSidebarSelection()
+                focus()
+            }
             return 0
         default:
-            focus()
+            DispatchQueue.main.async { [weak self] in
+                self?.syncSidebarSelection()
+                self?.focus()
+            }
             return 0
         }
     }
@@ -979,8 +1056,8 @@ final class NativeShell {
         return serverConnected(id) && serverSession(id)?.ended == true
     }
 
-    private func restartSelected() {
-        guard canRestart(selected), let id = selected else { return }
+    private func restartFromUI(_ id: Foundation.UUID?) {
+        guard let id, canRestart(id) else { return }
         if let index = locals.firstIndex(where: { $0.id == id }) {
             locals[index].exited = false
             launch(locals[index])
@@ -991,22 +1068,23 @@ final class NativeShell {
         Task { @MainActor in _ = await perform(.restart(id, pane: .left, command: nil), on: id) }
     }
 
-    private var canCloseSelected: Bool {
-        locals.contains { $0.id == selected } || selected.map(serverConnected) == true
+    private func canClose(_ id: Foundation.UUID?) -> Bool {
+        locals.contains { $0.id == id } || id.map(serverConnected) == true
     }
 
-    private func closeSelected() {
-        if let selected, serverSession(selected) != nil {
-            closeServerSession(selected)
+    private func closeFromUI(_ id: Foundation.UUID?) {
+        guard let id, canClose(id) else { return }
+        if serverSession(id) != nil {
+            closeServerSession(id)
             return
         }
-        guard let selected, let session = locals.first(where: { $0.id == selected }) else { return }
+        guard let session = locals.first(where: { $0.id == id }) else { return }
         if settings.general.confirmCloseSession, !session.exited {
             let question = NativeMenu.closeLocalQuestion(session: session.name)
             guard MessageBoxW(window, Array(question.utf16) + [0], Array("agterm".utf16) + [0],
                               UINT(MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)) == IDOK else { return }
         }
-        closeLocal(selected)
+        closeLocal(id)
     }
 
     private func closeLocal(_ id: Foundation.UUID) {
@@ -1030,22 +1108,29 @@ final class NativeShell {
         }
     }
 
+    var selectedOverlayHidden: Bool? {
+        guard let selected else { return nil }
+        if let overlay = serverOverlayState(for: selected)?.overlay { return overlay.hidden }
+        let session = locals.first { $0.id == selected }
+        return session?.pageOverlay?.hidden ?? session?.overlay?.state.hidden
+    }
+
     func windowCommand(_ command: NativeMenu.Command) {
         log("native shell: \(command)")
         if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .quit, .editKeymap, .reloadKeymap, .commandPalette].contains(command) {
             closeDashboard()
         }
         switch command {
-        case .newSession: if profiles.indices.contains(defaultProfile) { newSession(profiles[defaultProfile]) }
+        case .newSession: launchInSidebar(activeSidebarDestination)
         case .newServerSession: newServerSession(on: currentServer)
-        case .renameSession: startRename()
-        case .restartSession: restartSelected()
+        case .renameSession: startRename(selected)
+        case .restartSession: restartFromUI(selected)
         case .closeSession:
             if let since = closeSessionCoalesced, Date().timeIntervalSince(since) < 0.25 { break }
             if dismissOverlayForCloseSession() {
                 closeSessionCoalesced = Date()
             } else {
-                closeSelected()
+                closeFromUI(selected)
             }
         case .nextSession, .previousSession:
             if let next = SessionSidebar.neighbor(of: selected, in: tagged, forward: command == .nextSession) {
@@ -1065,6 +1150,8 @@ final class NativeShell {
         case .swapPanes: if let selected { swapPanes(selected) }
         case .focusLeftPane, .focusRightPane: focusPaneKey(split: command == .focusRightPane)
         case .toggleScratch: if let selected, canSplit(selected) { setScratch(selected, shown: !(local(selected)?.scratchShown ?? false), command: nil) }
+        case .toggleOverlay:
+            if let selected, let hidden = selectedOverlayHidden { setOverlayHidden(selected, !hidden) }
         case .quickTerminal: toggleQuick()
         case .dashboard: toggleDashboard()
         default: visibleTerminal.perform(command)
@@ -1076,11 +1163,8 @@ final class NativeShell {
     /// placeOverlays lays each overlay over its session's area, shown only for the selected session while not hidden.
     /// A shown overlay disables the terminal under it, so a click beside a floating panel never reaches the session.
     func placeOverlays() {
-        guard let window else { return }
-        var client = RECT()
-        GetClientRect(window, &client)
-        let top = titleBar.height
-        let area = NativeOverlay.Rect(x: sidebarWidth, y: top, width: max(client.right - sidebarWidth, 1), height: max(client.bottom - top, 1))
+        guard window != nil else { return }
+        let area = sessionArea
         var remoteEnabled = true
         for session in locals {
             refreshPageOverlayState(session)
@@ -1658,25 +1742,53 @@ final class NativeShell {
         guard let window else { return }
         var client = RECT()
         GetClientRect(window, &client)
-        let width = sidebarWidth, height = client.bottom
-        let notices = servers.compactMap { server -> String? in
-            if let bootstrap = server.bootstrapNotice, !bootstrap.isEmpty { return bootstrap }
-            return server.remote.mirror.state.windowNotice(host: server.label)
-        }
-        let noticeText = notices.isEmpty ? nil : notices.joined(separator: "\n")
-        let top = titleBar.height
-        let noticeHeight = scaled(56) * Int32(notices.count)
-        ShowWindow(notice, noticeText == nil ? SW_HIDE : SW_SHOW)
-        SetWindowTextW(notice, Array((noticeText ?? "").utf16) + [0])
-        MoveWindow(notice, 8, top, width - 16, max(noticeHeight - 6, 0), true)
-        let treeTop = top + noticeHeight
-        MoveWindow(tree?.assumingMemoryBound(to: HWND__.self), 0, treeTop, width, height - treeTop, true)
+        let width = sidebarWidth
+        noticeWindow?.state.update(noticeMessages)
+        let content = contentSpan
+        noticeWindow?.place(y: noticeWindow?.state.position == .bottom ? content.bottom : titleBar.height, width: client.right)
+        MoveWindow(tree?.assumingMemoryBound(to: HWND__.self), 0, content.top, width, content.bottom - content.top, true)
         placeSessions()
         let findWidth = min(scaled(280), max(client.right - width - scaled(24), scaled(80)))
-        MoveWindow(findBar, client.right - findWidth - scaled(16), top + scaled(8), findWidth, scaled(28), true)
+        MoveWindow(findBar, client.right - findWidth - scaled(16), content.top + scaled(8), findWidth, scaled(28), true)
         updateTips()
         invalidateTitleBar()
         if paletteMode != nil || pickPalette != nil { placePalette() }
+    }
+
+    /// noticeMessages are each server's notice: its bootstrap step while one runs, else its catalog connection's.
+    private var noticeMessages: [NoticeBar.Message] {
+        servers.compactMap { server in
+            if let bootstrap = server.bootstrapNotice { return bootstrap }
+            let state = server.remote.mirror.state
+            guard let text = state.windowNotice(host: server.label) else { return nil }
+            let connecting = state == .connecting
+            return NoticeBar.Message(source: server.distribution, text: text, severity: connecting ? .progress : .error,
+                                     actions: connecting ? [] : [.openLog])
+        }
+    }
+
+    private func makeNoticeBar() {
+        let bar = NoticeBarWindow(parent: window, position: settings.noticeBarPosition, dpi: dpi, tooltip: tooltip)
+        bar.colors = { [unowned self] in NoticeBar.colors(chromePalette, theme: NativeTerminal.theme, severity: $0) }
+        bar.area = { [unowned self] in
+            var client = RECT()
+            GetClientRect(window, &client)
+            return (titleBar.height, client.bottom)
+        }
+        bar.onAction = { [unowned self] in noticeAction($0, $1) }
+        bar.onPosition = { [unowned self] in setNoticePosition($0) }
+        bar.onDismiss = { [unowned self] in _ = dismissNotice() }
+        noticeWindow = bar
+    }
+
+    /// noticeAction runs a notice's button: Retry probes its server again, Install reinstalls it, Open Log opens the log.
+    private func noticeAction(_ message: NoticeBar.Message, _ action: NoticeBar.Action) {
+        log("native shell: notice action \(action.rawValue) for \(message.source)")
+        switch action {
+        case .openLog: openLog()
+        case .retry, .install:
+            if let server = server(message.source) { prepareAndConnect(server, forceInstall: action == .install) }
+        }
     }
 
     private func catalogChanged() {
@@ -1686,11 +1798,7 @@ final class NativeShell {
         rebuild()
         layout()
         let workspaces = servers.flatMap { $0.remote.store.workspaces }
-        if let before = sessionsBeforeCreate, let created = workspaces.flatMap(\.sessions).first(where: { !before.contains($0.id) }) {
-            sessionsBeforeCreate = nil
-            select(created.id)
-            return
-        }
+        if selectCreatedSession() { return }
         guard !locals.contains(where: { $0.id == selected }) else { return }
         let next = SessionSidebar.selection(current: selected, in: workspaces)
         log("native shell: \(workspaces.lazy.flatMap(\.sessions).count) session(s), selecting \(next?.uuidString ?? "none")")
@@ -1700,39 +1808,59 @@ final class NativeShell {
     func rebuild() {
         guard let tree else { return }
         let unseen = settings.notifications.unseenCount ? serverUnseen : [:]
-        var sidebar = servers.map { SessionSidebar.server(id: $0.group, label: $0.label, workspaces: $0.remote.store.workspaces, unseen: unseen) }
-        if !locals.isEmpty {
-            let children = locals.map {
-                SessionSidebar.Item(id: $0.id, title: SessionSidebar.localTitle($0.name, exited: $0.exited, attention: $0.attention || $0.unseen > 0,
-                                                                         unseen: settings.notifications.unseenCount ? $0.unseen : 0),
-                                    isWorkspace: false, ended: $0.exited, children: [], status: $0.activity.indicator,
-                                    info: StatusGlyph.infoText($0.info))
-            }
-            sidebar.insert(SessionSidebar.Item(id: localWorkspaceID, title: "Local", isWorkspace: true, ended: false, children: children),
-                           at: 0)
+        let localChildren = locals.map {
+            SessionSidebar.Item(id: $0.id, title: SessionSidebar.localTitle($0.name, exited: $0.exited, attention: $0.attention || $0.unseen > 0,
+                                                                     unseen: settings.notifications.unseenCount ? $0.unseen : 0),
+                                isWorkspace: false, ended: $0.exited, children: [], status: $0.activity.indicator,
+                                info: StatusGlyph.infoText($0.info))
         }
         nt_tree_clear(tree)
         tagged = []
         dimmed = []
         items = [:]
-        func add(_ item: SessionSidebar.Item, under parent: UnsafeMutableRawPointer?) {
-            var tag: Int64 = 0
-            if !item.isWorkspace {
+        sidebarGroups = []
+        launchableGroups = []
+        var blinks = false
+        func add(_ item: SessionSidebar.Item, under parent: UnsafeMutableRawPointer?, server: Server? = nil) {
+            let destination: SidebarDestination?
+            let tag: Int64
+            if item.isWorkspace {
+                destination = server.map { .server($0.group, workspace: item.id == $0.group ? nil : item.id) } ?? .local
+                tag = -Int64(sidebarGroups.count + 1)
+            } else {
+                destination = nil
                 tagged.append(item.id)
                 dimmed.append(item.ended ? 1 : 0)
                 tag = Int64(tagged.count)
             }
             guard let node = nt_tree_add(tree, parent, Array(item.title.utf16) + [0], tag, 1) else { return }
-            if !item.isWorkspace {
+            if let destination {
+                sidebarGroups.append((destination, node))
+                launchableGroups.append(canLaunchInSidebar(destination) ? 1 : 0)
+            } else {
                 items[item.id] = node
                 decorate(node, item)
+                blinks = blinks || (item.status.blink && item.status.status != .idle)
             }
-            item.children.forEach { add($0, under: node) }
+            item.children.forEach { add($0, under: node, server: server) }
         }
-        sidebar.forEach { add($0, under: nil) }
-        if let selected, let item = items[selected] { nt_tree_select(tree, item) }
-        updateBlink(sidebar)
+        add(SessionSidebar.Item(id: localWorkspaceID, title: "Local", isWorkspace: true, ended: false, children: localChildren), under: nil)
+        for server in servers {
+            add(SessionSidebar.server(id: server.group, label: server.label, workspaces: server.remote.store.workspaces, unseen: unseen),
+                under: nil, server: server)
+        }
+        if let selectedSidebarGroup, !sidebarGroups.contains(where: { $0.destination == selectedSidebarGroup }) {
+            self.selectedSidebarGroup = nil
+        }
+        syncSidebarSelection()
+        updateBlink(blinks)
         titleChanged()
+    }
+
+    private func syncSidebarSelection() {
+        guard let tree else { return }
+        let group = selectedSidebarGroup.flatMap { destination in sidebarGroups.first { $0.destination == destination }?.item }
+        nt_tree_select(tree, group ?? selected.flatMap { items[$0] })
     }
 
     /// decorate draws an agent's status glyph and info line on a session row, as a Mac's sidebar shows them.
@@ -1745,9 +1873,7 @@ final class NativeShell {
     }
 
     /// updateBlink runs the pulse timer only while some row's status blinks.
-    private func updateBlink(_ sidebar: [SessionSidebar.Item]) {
-        func blinks(_ item: SessionSidebar.Item) -> Bool { (item.status.blink && item.status.status != .idle) || item.children.contains(where: blinks) }
-        let wanted = sidebar.contains(where: blinks)
+    private func updateBlink(_ wanted: Bool) {
         guard let window, wanted != blinking else { return }
         blinking = wanted
         if wanted {
@@ -1761,16 +1887,30 @@ final class NativeShell {
     fileprivate func blinkTick() {
         blinkDimmed.toggle()
         if let tree { _ = nt_tree_blink(tree, blinkDimmed ? 1 : 0) }
-        invalidateTitleBar()
     }
 
     fileprivate func customDraw(_ notification: LPARAM) -> LRESULT? {
-        let result = dimmed.withUnsafeBufferPointer { nt_tree_custom_draw(Int(notification), $0.baseAddress, Int64($0.count)) }
+        let result = dimmed.withUnsafeBufferPointer { sessions in
+            launchableGroups.withUnsafeBufferPointer { groups in
+                nt_tree_custom_draw(Int(notification), sessions.baseAddress, Int64(sessions.count), groups.baseAddress, Int64(groups.count))
+            }
+        }
         return result < 0 ? nil : LRESULT(result)
     }
 
+    fileprivate func sidebarLaunch(_ tag: Int64) {
+        guard let destination = sidebarGroup(tag), canLaunchInSidebar(destination) else { return }
+        launchInSidebar(destination)
+    }
+
     fileprivate func userSelected(_ tag: Int64) {
+        guard requestedSidebarRename == nil else { return }
+        if let destination = sidebarGroup(tag) {
+            selectedSidebarGroup = destination
+            return
+        }
         guard tag > 0, Int(tag) <= tagged.count else { return }
+        selectedSidebarGroup = nil
         select(tagged[Int(tag) - 1])
         focus()
     }
@@ -1778,6 +1918,7 @@ final class NativeShell {
     func select(_ id: Foundation.UUID) {
         if dashboard != nil { closeDashboard(refocus: false) }
         let previous = selected
+        if selected != id { selectedSidebarGroup = nil }
         selected = id
         // an --auto-reset status ends on the session entered and the one left, as a Mac's selection does
         for visited in Set([previous, id].compactMap { $0 }) { statusVisited(visited) }
@@ -1791,7 +1932,7 @@ final class NativeShell {
         if serverUnseen.removeValue(forKey: id) != nil { rebuild() }
         // banners already shown for the session say nothing new once it is in view
         if toastsReady { nt_toast_remove_group(Array(id.uuidString.utf16) + [0]) }
-        if let tree, let item = items[id] { nt_tree_select(tree, item) }
+        syncSidebarSelection()
         titleChanged()
         placeSessions()
         let owner = locals.contains(where: { $0.id == id }) ? nil : server(of: id)
@@ -1820,6 +1961,7 @@ final class NativeShell {
         if let tree { nt_tree_set_dpi(tree, dpi) }
         if let findBar { nt_find_bar_set_dpi(UnsafeMutableRawPointer(findBar), dpi) }
         if let palette { nt_palette_set_dpi(palette, dpi) }
+        noticeWindow?.dpi = dpi
         allTerminals.forEach { $0.setDPI(dpi) }
         SetWindowPos(window, nil, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top,
                      UINT(SWP_NOZORDER | SWP_NOACTIVATE))
@@ -1834,7 +1976,7 @@ final class NativeShell {
             SetBkColor(context, ChromePalette.colorref(lit ? palette.palSel : palette.clientBg))
             return LRESULT(Int(bitPattern: lit ? highlightBrush : darkBrush))
         }
-        SetTextColor(context, 0x5AB4E5)
+        SetTextColor(context, ChromePalette.colorref(palette.chromeText))
         SetBkColor(context, ChromePalette.colorref(palette.clientBg))
         return LRESULT(Int(bitPattern: darkBrush))
     }
@@ -1849,10 +1991,11 @@ final class NativeShell {
         let shortcuts = menuShortcuts
         switch tab {
         case 0:
-            return NativeMenu.file(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries, canCloseSession: canCloseSelected,
+            return NativeMenu.file(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries, canCloseSession: canClose(selected),
                                    sessionCount: tagged.count, canRenameSession: canRename(selected),
                                    canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
-                                   canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), shortcuts: shortcuts)
+                                   canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)),
+                                   localDefaultShortcut: activeSidebarDestination == .local, shortcuts: shortcuts)
         case 1: return NativeMenu.view(viewState, shortcuts: shortcuts)
         case 2: return NativeMenu.navigate(shortcuts: shortcuts)
         case 3: return NativeMenu.help(shortcuts: shortcuts)
@@ -1875,23 +2018,47 @@ final class NativeShell {
     /// windowEntries is the ☰ menu as it stands now, which the command palette lists too.
     private var windowEntries: [NativeMenu.Entry] {
         NativeMenu.window(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries,
-                          canCloseSession: canCloseSelected, sessionCount: tagged.count, canRenameSession: canRename(selected),
+                          canCloseSession: canClose(selected), sessionCount: tagged.count, canRenameSession: canRename(selected),
                           canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
-                          canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), view: viewState, shortcuts: Keys.keymap.shortcuts)
+                          canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), view: viewState,
+                          localDefaultShortcut: activeSidebarDestination == .local, shortcuts: Keys.keymap.shortcuts)
     }
 
-    /// treeMenu is the sidebar's menu, for the session under the right click, which it selects first.
     fileprivate func treeMenu(x: Int32, y: Int32) {
         guard let tree else { return }
         var point = POINT(x: x, y: y)
         let tag = nt_tree_item_at(tree, &point.x, &point.y)
-        if tag > 0, Int(tag) <= tagged.count { select(tagged[Int(tag) - 1]) }
-        if x != -1 || y != -1 { point = POINT(x: x, y: y) }
-        run(showMenu(NativeMenu.sessions(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries,
-                                         canCloseSession: canCloseSelected, sessionCount: tagged.count,
-                                         canRenameSession: canRename(selected), canRestartSession: canRestart(selected),
-                                         shortcuts: Keys.keymap.shortcuts),
-                     owner: window, at: point))
+        let session = tag > 0 && tag <= Int64(tagged.count) ? tagged[Int(tag) - 1] : nil
+        let destination = sidebarGroup(tag) ?? session.map(sidebarDestination(for:)) ?? .local
+        let destinationName: String?
+        switch destination {
+        case .local: destinationName = nil
+        case .server(let id, let target):
+            destinationName = sidebarServer(id).map { server in
+                if target != nil, let workspace = sidebarWorkspace(on: server, target: target) {
+                    return "\(server.label) / \(workspace.name)"
+                }
+                return server.label
+            }
+        }
+        let distributions = menuServers
+        let entries = NativeMenu.sidebar(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries(for: distributions),
+                                         destination: destinationName, canLaunch: canLaunchInSidebar(destination),
+                                         canRename: session.map { canRename($0) }, canRestart: canRestart(session),
+                                         canClose: canClose(session), shortcuts: menuShortcuts)
+        let pick = showMenu(entries, owner: window, at: point)
+        focus()
+        switch pick {
+        case .sidebarSession?: launchInSidebar(destination)
+        case .command(.renameSession)?: startRename(session)
+        case .command(.restartSession)?: restartFromUI(session)
+        case .command(.closeSession)?: closeFromUI(session)
+        case .serverSession(let index)? where distributions.indices.contains(index):
+            if let server = server(distributions[index]) { launchInSidebar(.server(server.group, workspace: nil)) }
+        case .startServer(let index)? where distributions.indices.contains(index): startServer(distributions[index])
+        case nil: break
+        default: run(pick)
+        }
     }
 
     /// run does what a menu or palette picked. The terminal takes focus first, so Find, Rename and the palettes keep
@@ -1945,7 +2112,7 @@ final class NativeShell {
         GetClientRect(window, &client)
         let area = max(client.right - sidebarWidth, 1)
         let width = max(min(scaled(640), area - scaled(32)), min(area, scaled(240)))
-        return (sidebarWidth + (area - width) / 2, titleBar.height + scaled(8), width)
+        return (sidebarWidth + (area - width) / 2, contentSpan.top + scaled(8), width)
     }
 
     private func placePalette() {
@@ -2468,6 +2635,9 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
         case UINT(NT_PALETTE_CLOSE):
             shell.closePalette(refocus: wParam == 0)
             return 0
+        case UINT(NT_TREE_LAUNCH):
+            shell.sidebarLaunch(Int64(lParam))
+            return 0
         case UINT(NT_FIND_NEXT):
             shell.findNext(newer: wParam != 0)
             return 0
@@ -2484,7 +2654,7 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             return 0
         case UINT(WM_CONTEXTMENU) where !NativeShell.fromKeyboard(lParam) && shell.onTitleButton(lParam):
             return 0
-        case UINT(WM_CONTEXTMENU):
+        case UINT(WM_CONTEXTMENU) where (shell.tree.map { UInt(bitPattern: $0) } ?? 0) == wParam:
             let x = Int32(Int16(truncatingIfNeeded: lParam)), y = Int32(Int16(truncatingIfNeeded: lParam >> 16))
             shell.treeMenu(x: x, y: y)
             return 0

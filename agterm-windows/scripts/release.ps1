@@ -51,7 +51,7 @@ if ($signArguments) {
 $iscc = Find-Tool $env:AGTERM_ISCC "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" "ISCC"
 
 # ── dependencies and build ───────────────────────────────────────────────────
-foreach ($fetch in "fetch-server", "fetch-zmx", "fetch-ghostty-vt") {
+foreach ($fetch in "fetch-server", "fetch-zmx", "fetch-ghostty-vt", "fetch-webview2") {
     if ($fetch -eq "fetch-server") { & (Join-Path $PSScriptRoot "$fetch.ps1") } else { & (Join-Path $PSScriptRoot "$fetch.ps1") -Arch $Arch }
 }
 
@@ -73,6 +73,7 @@ if (-not $SkipDmgCheck) {
     Remove-Item -Recurse -Force $dmgDir
 }
 
+$env:AGTERM_WEBVIEW2_ARCH = $Arch
 Push-Location $root
 try {
     swift build -c release
@@ -82,6 +83,7 @@ try {
     if ($LASTEXITCODE) { throw "swift build --product agtermctl failed" }
 } finally {
     Pop-Location
+    Remove-Item Env:AGTERM_WEBVIEW2_ARCH -ErrorAction SilentlyContinue
 }
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 & (Join-Path $PSScriptRoot "stage.ps1") -Configuration release -Output $stage
@@ -118,7 +120,14 @@ if (-not $LASTEXITCODE) {
     if ($LASTEXITCODE) { throw "gh release upload failed" }
     exit 0
 }
-$notes = "agterm-win $Version, locked to agterm ${agterm}: Windows 10 1809 or later, x64 or arm64. Installs per user, no admin."
-if (-not $signArguments) { $notes += " UNSIGNED: SmartScreen warns on first run." }
-gh release create "v$Version" $setup "$setup.sha256" --repo $repo --title "agterm-win $Version" --notes $notes
+$notesPath = Join-Path $out "release-notes.md"
+& (Join-Path $PSScriptRoot "release-notes.ps1") -Version $Version -OutFile $notesPath
+Add-Content $notesPath @"
+
+---
+
+Windows 10 1809 or later, x64 or arm64. Installs per user, no admin.
+"@
+if (-not $signArguments) { Add-Content $notesPath "`nUNSIGNED: SmartScreen warns on first run." }
+gh release create "v$Version" $setup "$setup.sha256" --repo $repo --title "agterm-win $Version" --notes-file $notesPath
 if ($LASTEXITCODE) { throw "gh release create failed" }

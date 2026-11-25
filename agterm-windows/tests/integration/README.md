@@ -18,7 +18,8 @@ powershell -ExecutionPolicy Bypass -File tests\integration\run.ps1 -App $env:TEM
 ```
 
 `-Case overlay*` runs only the cases whose names match, and `-StepSeconds 2` pauses after every step that changes
-the window, to watch a case run.
+the window, to watch a case run. (`run.ps1` keeps the filter in `$casePatterns`; do not name a loop variable `$case`
+while `-Case` is set — PowerShell treats `$Case` and `$case` as the same variable.)
 
 CI runs the same cases on the runner desktop (`.github/workflows/windows.yml`).
 Or in Windows Sandbox, which keeps the host desktop free and starts from a clean machine with no network or WSL:
@@ -53,7 +54,7 @@ passed and are recorded in `cases.json` under `skipped`.
 
 | Case | Where | Issue |
 |------|--------|--------|
-| `overlay-keys` | native **ARM64** (`windows-11-arm`) | After `SendChord` sends Ctrl+Shift+W to the overlay terminal, the session under the overlay is closed instead of dismissing the overlay only. The same case passes on x64. Suspect focus / duplicate Close Session delivery on the arm64 runner. Track in PR/overlay work; remove the skip when arm64 matches x64. |
+| `overlay-keys` | native **ARM64** (`windows-11-arm`) | After `SendChord` sends Ctrl+W to the overlay terminal, the session under the overlay is closed instead of dismissing the overlay only. The same case passes on x64. Suspect focus / duplicate Close Session delivery on the arm64 runner. Track in PR/overlay work; remove the skip when arm64 matches x64. |
 | `overlay-server-program` | — | CI runs the disconnected smoke (`$absent`, `no such session`, tree still answers). Set `AGTERM_WIN_GATE_WSL` to a live distribution with agterm-server for the full ctl overlay gate (see `docs/remote-linux-gate.md`). |
 | `presentation-surfaces` | — | Same disconnected smoke as `overlay-server-program`; live ask/pick/HUD checks are manual (`docs/remote-linux-gate.md`). |
 
@@ -62,7 +63,8 @@ installing its client. Each case leaves `screen.txt`, its state directory (`agte
 `cases.json` under the results folder.
 `wsl-cases.ps1` start a distribution no machine has, so they need no WSL and run in Sandbox and on CI too: they read
 back what was started, asked and saved, and how WSL auto-ensure probes and reports failures. Cases `wsl-ensure-probe`,
-`wsl-ensure-reprobe`, and `wsl-install-unreachable` pin that behaviour; only a live install connects.
+`wsl-ensure-reprobe`, and `wsl-install-unreachable` pin that behaviour; only a live install connects. `notice-bar` uses
+that failure to drag the notice bar to the bottom, check the terminal reflows and the bar follows the theme, and close it.
 
 On a machine with a working agterm-server in WSL, run the optional gate (not part of CI):
 

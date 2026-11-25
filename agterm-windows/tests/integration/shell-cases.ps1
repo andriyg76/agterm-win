@@ -274,9 +274,20 @@ $shellCases = [ordered]@{
         $terminal = [AgtermWin32]::VisibleChildren($frame, "agterm-native") | Select-Object -First 1
         Save-Snapshot $Shell "overlay-open"
         [AgtermInput]::FocusOn($terminal)
-        [AgtermInput]::SendChord($terminal, 0x57, $true)
-        if (-not (Wait-Until { -not (Get-Node $state $id).overlay } 5)) { $failures += "Ctrl+Shift+W left the overlay open" }
-        if (-not (Get-Node $state $id)) { $failures += "Ctrl+Shift+W closed the session under the overlay" }
+        [AgtermInput]::SendChord($terminal, 0x4A, $true)
+        if (-not (Wait-Until { @((Get-Node $state $id).hiddenOverlays) -contains "session" } 5)) {
+            $failures += "Ctrl+Shift+J did not hide the overlay"
+        }
+        $primary = [AgtermWin32]::VisibleChildren($window, "agterm-native") | Select-Object -First 1
+        [AgtermInput]::FocusOn($primary)
+        [AgtermInput]::SendChord($primary, 0x4A, $true)
+        if (-not (Wait-Until { @((Get-Node $state $id).hiddenOverlays) -notcontains "session" } 5)) {
+            $failures += "Ctrl+Shift+J did not restore the overlay"
+        }
+        [AgtermInput]::FocusOn($terminal)
+        [AgtermInput]::SendChord($terminal, 0x57, $false)
+        if (-not (Wait-Until { -not (Get-Node $state $id).overlay } 5)) { $failures += "Ctrl+W left the overlay open" }
+        if (-not (Get-Node $state $id)) { $failures += "Ctrl+W closed the session under the overlay" }
         if ([AgtermWin32]::VisibleChildren($window, "agterm-overlay").Count) { $failures += "the overlay's frame outlived it" }
         Invoke-Ctl $state @("session", "overlay", "open", "echo done", "--wait", "--target", $id) | Out-Null
         if (-not (Wait-Until { (Invoke-Ctl $state @("session", "overlay", "text", "--target", $id)).result.text -match "Press any key" })) {

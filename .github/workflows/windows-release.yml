@@ -69,6 +69,7 @@ jobs:
       - name: Build
         env:
           AGTERM_ALLOW_UNSIGNED: "1"
+          AGTERM_WEBVIEW2_ARCH: ${{ matrix.arch }}
         run: ./scripts/release.ps1 -Version $env:VERSION -Arch ${{ matrix.arch }}
       # the Store signs it, so it is an artifact for Partner Center rather than a release asset
       - name: MSIX
@@ -195,6 +196,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v7
         with:
           pattern: installer-[ax]*
@@ -204,6 +207,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
         run: |
           $agterm = Get-Content agterm-windows/AGTERM_VERSION -TotalCount 1
           $signed = @(Get-ChildItem publish -Recurse -Filter signed).Count -eq 2
@@ -214,9 +219,20 @@ jobs:
             "$($setup.FullName).sha256"
           }
           if ($assets.Count -ne 4) { throw "expected the x64 and arm64 installers, got $($assets -join ', ')" }
-          $notes = "agterm-win $env:VERSION, locked to agterm ${agterm}: Windows 10 1809 or later, x64 or arm64, installs per user without admin."
-          $notes += if ($signed) { "`n`nFree code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)." } else { "`n`nUnsigned: SmartScreen warns on first run." }
-          gh release create "v$env:VERSION" --target $env:GITHUB_SHA @assets --title "agterm-win $env:VERSION" --notes $notes
+          $notesPath = "$env:RUNNER_TEMP/release-notes.md"
+          ./agterm-windows/scripts/release-notes.ps1 -Version $env:VERSION -OutFile $notesPath
+          Add-Content $notesPath @"
+
+          ---
+
+          Windows 10 1809 or later, x64 or arm64, installs per user without admin.
+          "@
+          if ($signed) {
+            Add-Content $notesPath "`nFree code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)."
+          } else {
+            Add-Content $notesPath "`nUnsigned: SmartScreen warns on first run."
+          }
+          gh release create "v$env:VERSION" --target $env:GITHUB_SHA @assets --title "agterm-win $env:VERSION" --notes-file $notesPath
 
   winget:
     needs: [version, publish]

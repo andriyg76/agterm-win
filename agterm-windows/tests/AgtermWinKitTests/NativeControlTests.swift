@@ -202,6 +202,10 @@ private final class FakeHost: NativeControlHost {
     var sidebarWidthPoints: Double = AppStore.sidebarWidthDefault
     func setSidebarWidth(points: Double) { sidebarWidthPoints = AppStore.clampSidebarWidth(points) }
 
+    var noticeBar = NoticeBar.State()
+    func setNoticePosition(_ position: NoticeBar.Position) { noticeBar.position = position }
+    func dismissNotice() -> Bool { noticeBar.dismissShown() }
+
     func exitOverlay(_ id: UUID, code: Int) {
         editLocal(id) {
             $0.overlay = nil
@@ -238,6 +242,21 @@ struct NativeControlTests {
         #expect(await handle(ControlRequest(cmd: .wslLaunch, args: ControlArgs(name: "Ubuntu")), host).error == "wsl.launch requires on or off")
         host.startRefusal = "asking"
         #expect(await handle(ControlRequest(cmd: .wslStart, args: ControlArgs(name: "Ubuntu")), host).error == "asking")
+    }
+
+    @Test func noticeCommandsMoveAndDismissAndAnswerWithTheBar() async {
+        let host = FakeHost()
+        host.noticeBar.update([NoticeBar.Message(source: "Ubuntu", text: "WSL Ubuntu: install failed", severity: .error, actions: [.retry, .openLog])])
+        let moved = await handle(ControlRequest(cmd: .noticePosition, args: ControlArgs(mode: "bottom")), host)
+        #expect(moved.result?.noticeBar?.position == "bottom" && host.noticeBar.position == .bottom)
+        #expect(await handle(ControlRequest(cmd: .noticePosition, args: ControlArgs(mode: "left")), host).error
+            == "notice.position requires top or bottom")
+        let dismissed = await handle(ControlRequest(cmd: .noticeDismiss), host)
+        #expect(dismissed.result?.noticeBar?.notices == [ControlNotice(text: "WSL Ubuntu: install failed", severity: "error",
+                                                                     actions: ["retry", "openLog"], dismissed: true)])
+        #expect(await handle(ControlRequest(cmd: .noticeDismiss), host).error == "no notice shown")
+        #expect(await handle(ControlRequest(cmd: .tree), host).result?.tree?.noticeBar == host.noticeBar.control)
+        #expect(await handle(ControlRequest(cmd: .noticeList), host).result?.noticeBar == host.noticeBar.control)
     }
     #endif
 

@@ -57,7 +57,7 @@ struct PaletteTests {
         #expect(titles.contains("New Session › Windows PowerShell") && titles.contains("Default Profile › Windows PowerShell"))
         #expect(titles.contains("Go to Session…") && !titles.contains("Command Palette…"))
         #expect(rows.first { $0.title == "Close Session" }?.enabled == false)
-        #expect(rows.first { $0.title == "Find…" }?.detail == "Ctrl+Shift+F")
+        #expect(rows.first { $0.title == "Find…" }?.detail == "Ctrl+F")
         #expect(rows.first { $0.title == "Quit" }?.target == .pick(.command(.quit)))
     }
 

@@ -19,7 +19,7 @@ struct NativeMenuTests {
         #expect(newSession.title == "New Session")
         #expect(newSession.children.map(\.title) == ["Windows PowerShell", "WSL Ubuntu"])
         #expect(newSession.children.map(\.pick) == [.profile(0), .profile(1)])
-        #expect(newSession.children.map(\.shortcut) == ["Ctrl+Shift+T", ""])
+        #expect(newSession.children.map(\.shortcut) == ["Ctrl+N", ""])
         #expect(menu.first { $0.pick == .command(.closeSession) }?.enabled == false)
         #expect(menu.first { $0.pick == .command(.nextSession) }?.enabled == false)
         #expect(menu.last?.pick == .command(.quit))
@@ -41,15 +41,41 @@ struct NativeMenuTests {
     }
 
     @Test func picksRoundTripThroughMenuIDs() {
-        for pick in NativeMenu.Command.allCases.map(NativeMenu.Pick.command) + [.profile(0), .profile(7), .defaultProfile(2), .startServer(0), .startServer(5), .serverSession(0), .serverSession(3)] {
+        for pick in NativeMenu.Command.allCases.map(NativeMenu.Pick.command) + [.profile(0), .profile(7), .defaultProfile(2), .startServer(0), .startServer(5), .serverSession(0), .serverSession(3), .sidebarSession] {
             #expect(NativeMenu.Pick(id: pick.id) == pick)
         }
         #expect(NativeMenu.Pick(id: 0) == nil)
     }
 
+    @Test func localSidebarOffersLocalLaunchAndSettingsWithoutSessionActionsOnTheWorkspace() {
+        let menu = NativeMenu.sidebar(profiles: profiles, defaultProfile: 1, servers: [], destination: nil,
+                                       canLaunch: true, canRename: nil, canRestart: false, canClose: false)
+        #expect(menu.map(\.title) == ["New Local Session", "Local Profiles", "Default Local Profile", "Settings…"])
+        #expect(menu.first?.pick == .sidebarSession && menu.first?.enabled == true)
+        #expect(menu[1].children.map(\.pick) == [.profile(0), .profile(1)])
+        #expect(menu[2].children.map(\.checked) == [false, true])
+    }
+
+    @Test func serverSidebarKeepsLocalProfilesInElsewhereAndDisablesDisconnectedLaunch() {
+        let servers = [NativeMenu.Server(label: "WSL Ubuntu", started: true, connected: true),
+                       NativeMenu.Server(label: "WSL Debian", started: true), NativeMenu.Server(label: "WSL Arch")]
+        let menu = NativeMenu.sidebar(profiles: profiles, defaultProfile: 0, servers: servers, destination: "WSL Debian / API",
+                                       canLaunch: false, canRename: false, canRestart: false, canClose: false)
+        #expect(menu.first?.title == "New Session in WSL Debian / API")
+        #expect(menu.first?.pick == .sidebarSession && menu.first?.enabled == false)
+        #expect(!menu.contains { $0.title == "Local Profiles" })
+        let elsewhere = menu.first { $0.title == "New Session Elsewhere" }?.children ?? []
+        #expect(elsewhere.first?.children.map(\.pick) == [.profile(0), .profile(1)])
+        #expect(elsewhere.first { $0.pick == .serverSession(0) }?.enabled == true)
+        #expect(elsewhere.first { $0.pick == .serverSession(1) }?.enabled == false)
+        #expect(elsewhere.last?.children.last?.pick == .startServer(2))
+        #expect(menu.last?.pick == .command(.closeSession) && menu.last?.enabled == false)
+    }
+
     @Test func everyCommandNamesItsShortcut() {
         #expect(NativeMenu.Command.allCases.allSatisfy { !$0.title.isEmpty })
-        #expect(NativeMenu.Command.allCases.filter { $0.shortcut.isEmpty } == [.editKeymap, .reloadKeymap, .closeSplit, .swapPanes])
+        #expect(NativeMenu.Command.allCases.filter { $0.shortcut.isEmpty } == [.clearScrollback, .newServerSession, .renameSession, .restartSession, .editKeymap, .reloadKeymap,
+                                                                                      .toggleHorizontalSplit, .closeSplit, .swapPanes, .toggleScratch])
     }
 
     @Test func viewHoldsThePanesScratchQuickTerminalAndDashboard() {
@@ -57,7 +83,7 @@ struct NativeMenuTests {
                                        view: .init(canSplit: true, hasSplit: false, scratchShown: true, canDashboard: true))
         let view = window.first { $0.title == "View" }?.children ?? []
         #expect(view.first { $0.pick == .command(.toggleSplit) }?.enabled == true)
-        #expect(view.first { $0.pick == .command(.toggleSplit) }?.shortcut == "Alt+Shift+=")
+        #expect(view.first { $0.pick == .command(.toggleSplit) }?.shortcut == "Ctrl+Shift+D")
         #expect(view.first { $0.pick == .command(.swapPanes) }?.enabled == false)
         #expect(view.first { $0.pick == .command(.toggleScratch) }?.checked == true)
         #expect(view.first { $0.pick == .command(.dashboard) }?.enabled == true)
@@ -88,7 +114,7 @@ struct NativeMenuTests {
         #expect(sessions.map(\.title) == ["WSL Ubuntu (agterm-server)", "WSL Debian (agterm-server)"])
         #expect(sessions.map(\.pick) == [.serverSession(0), .serverSession(1)])
         #expect(sessions.map(\.enabled) == [true, false])
-        #expect(sessions.map(\.shortcut) == ["Ctrl+Shift+N", ""])
+        #expect(sessions.map(\.shortcut) == ["", ""])
         #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: false, sessionCount: 1)[0].children.count == profiles.count)
     }
 
@@ -114,7 +140,7 @@ struct NativeMenuTests {
 
     @Test func theDefaultProfileCarriesTheShortcutAndTheCheck() {
         let menu = NativeMenu.sessions(profiles: profiles, defaultProfile: 1, canCloseSession: false, sessionCount: 1)
-        #expect(menu[0].children.map(\.shortcut) == profiles.indices.map { $0 == 1 ? "Ctrl+Shift+T" : "" })
+        #expect(menu[0].children.map(\.shortcut) == profiles.indices.map { $0 == 1 ? "Ctrl+N" : "" })
         #expect(menu[1].title == "Default Profile")
         #expect(menu[1].children.map(\.checked) == profiles.indices.map { $0 == 1 })
         #expect(menu[1].children[1].pick == .defaultProfile(1))
@@ -133,6 +159,6 @@ struct NativeMenuTests {
                               canPaste: false).first { $0.pick == .command(.restartSession) }
         }
         #expect(menu(false)?.enabled == false)
-        #expect(menu(true)?.enabled == true && menu(true)?.shortcut == "Ctrl+Shift+R")
+        #expect(menu(true)?.enabled == true && menu(true)?.shortcut == "")
     }
 }

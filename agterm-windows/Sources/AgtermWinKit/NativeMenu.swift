@@ -1,10 +1,12 @@
+import agtermCore
+
 /// NativeMenu is what the native window's menus hold: the terminal's context menu, the title-bar menus, and the
-/// commands those add. Every command is also a shortcut, so a menu never holds the only way to do something.
+/// commands those add. Commands without a standard shortcut remain available from the menus.
 public enum NativeMenu {
     public enum Command: Int, CaseIterable, Sendable {
         case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, newServerSession, renameSession, restartSession, closeSession, nextSession, previousSession, find, quit,
              editKeymap, reloadKeymap, settings, sessionPalette, commandPalette, toggleSplit, toggleHorizontalSplit, closeSplit, swapPanes,
-             focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard
+             focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard, toggleOverlay
 
         public var title: String {
             switch self {
@@ -36,6 +38,7 @@ public enum NativeMenu {
             case .focusLeftPane: "Focus Left or Top Pane"
             case .focusRightPane: "Focus Right or Bottom Pane"
             case .toggleScratch: "Scratch"
+            case .toggleOverlay: "Overlay"
             case .quickTerminal: "Quick Terminal"
             case .dashboard: "Dashboard"
             }
@@ -43,34 +46,16 @@ public enum NativeMenu {
 
         /// shortcut is the shipped chord's label; the keymap's own come in as `Shortcuts`.
         public var shortcut: String {
+            if let action = WindowsKeymap.actions.first(where: { $0.command == self })?.action {
+                return action.windowsDefaultChord.map(WindowsKeymap.label) ?? ""
+            }
             switch self {
-            case .copy: "Ctrl+Shift+C"
-            case .paste: "Ctrl+Shift+V"
-            case .selectAll: "Ctrl+Shift+A"
-            case .clearScrollback: "Ctrl+Shift+K"
-            case .fontBigger: "Ctrl+="
-            case .fontSmaller: "Ctrl+-"
-            case .fontReset: "Ctrl+0"
-            case .newSession: "Ctrl+Shift+T"
-            case .newServerSession: "Ctrl+Shift+N"
-            case .renameSession: "F2"
-            case .restartSession: "Ctrl+Shift+R"
-            case .closeSession: "Ctrl+Shift+W"
-            case .nextSession: "Ctrl+Tab"
-            case .previousSession: "Ctrl+Shift+Tab"
-            case .find: "Ctrl+Shift+F"
-            case .quit: "Alt+F4"
-            case .settings: "Ctrl+,"
-            case .sessionPalette: "Ctrl+P"
-            case .commandPalette: "Ctrl+Shift+P"
-            case .toggleSplit: "Alt+Shift+="
-            case .toggleHorizontalSplit: "Alt+Shift+-"
-            case .focusLeftPane: "Alt+Left"
-            case .focusRightPane: "Alt+Right"
-            case .toggleScratch: "Ctrl+Shift+J"
-            case .quickTerminal: "Ctrl+`"
-            case .dashboard: "Ctrl+Shift+G"
-            case .editKeymap, .reloadKeymap, .closeSplit, .swapPanes: ""
+            case .copy: return "Ctrl+Shift+C / Ctrl+Insert"
+            case .paste: return "Ctrl+Shift+V / Shift+Insert / Ctrl+Shift+I"
+            case .selectAll: return "Ctrl+Shift+A"
+            case .settings: return "Ctrl+, / Ctrl+Alt+S"
+            case .quit: return "Alt+F4"
+            default: return ""
             }
         }
     }
@@ -83,7 +68,9 @@ public enum NativeMenu {
         case defaultProfile(Int)
         case startServer(Int)
         case serverSession(Int)
+        case sidebarSession
 
+        static let sidebarSessionID = 999
         static let profileBase = 1000
         static let defaultProfileBase = 2000
         static let startServerBase = 3000
@@ -97,11 +84,14 @@ public enum NativeMenu {
             case .defaultProfile(let index): Self.defaultProfileBase + index
             case .startServer(let index): Self.startServerBase + index
             case .serverSession(let index): Self.serverSessionBase + index
+            case .sidebarSession: Self.sidebarSessionID
             }
         }
 
         public init?(id: Int) {
-            if id >= Self.serverSessionBase {
+            if id == Self.sidebarSessionID {
+                self = .sidebarSession
+            } else if id >= Self.serverSessionBase {
                 self = .serverSession(id - Self.serverSessionBase)
             } else if id >= Self.startServerBase {
                 self = .startServer(id - Self.startServerBase)
@@ -166,15 +156,60 @@ public enum NativeMenu {
         }
     }
 
-    /// sessions is the sidebar's menu: New Session lists the profiles, the default one on New Session's shortcut, then
+    public static func sidebar(profiles: [LaunchProfile], defaultProfile: Int, servers: [Server], destination: String?,
+                               canLaunch: Bool, canRename: Bool?, canRestart: Bool, canClose: Bool,
+                               shortcuts: Shortcuts = [:]) -> [Entry] {
+        let local = profiles.enumerated().map { index, profile in
+            Entry(title: profile.name, shortcut: "", pick: .profile(index), enabled: true, children: [])
+        }
+        let defaults = profiles.enumerated().map { index, profile in
+            Entry(title: profile.name, shortcut: "", pick: .defaultProfile(index), enabled: true,
+                  children: [], checked: index == defaultProfile)
+        }
+        let serverSessions = servers.enumerated().filter { $0.element.started }.map { index, server in
+            Entry(title: server.label, shortcut: "", pick: .serverSession(index), enabled: server.connected, children: [])
+        }
+        let starts = servers.enumerated().map { index, server in
+            Entry(title: server.label, shortcut: "", pick: .startServer(index), enabled: !server.started, children: [])
+        }
+        let localProfiles = Entry(title: "Local Profiles", shortcut: "", pick: nil, enabled: !local.isEmpty, children: local)
+        var menu = [Entry(title: destination.map { "New Session in \($0)" } ?? "New Local Session", shortcut: "",
+                          pick: .sidebarSession, enabled: canLaunch, children: [])]
+        var elsewhere: [Entry] = []
+        if destination == nil {
+            menu += [localProfiles, Entry(title: "Default Local Profile", shortcut: "", pick: nil, enabled: !defaults.isEmpty,
+                                          children: defaults), .command(.settings, shortcuts)]
+        } else if !local.isEmpty {
+            elsewhere.append(localProfiles)
+        }
+        if !serverSessions.isEmpty {
+            if !elsewhere.isEmpty { elsewhere.append(.separator) }
+            elsewhere += serverSessions
+        }
+        if !starts.isEmpty {
+            if !elsewhere.isEmpty { elsewhere.append(.separator) }
+            elsewhere.append(Entry(title: "Start WSL Server", shortcut: "", pick: nil, enabled: starts.contains(where: \.enabled),
+                                   children: starts))
+        }
+        if !elsewhere.isEmpty {
+            menu.append(Entry(title: "New Session Elsewhere", shortcut: "", pick: nil, enabled: true, children: elsewhere))
+        }
+        if let canRename {
+            menu += [.separator, .command(.renameSession, enabled: canRename, shortcuts),
+                     .command(.restartSession, enabled: canRestart, shortcuts), .command(.closeSession, enabled: canClose, shortcuts)]
+        }
+        return menu
+    }
+
+    /// sessions is the File menu's session section: New Session lists the profiles, the default one on New Session's shortcut, then
     /// a session on each started server, enabled while it is connected, and Start agterm-server in, which lists every
     /// server, enabled until it is started; Default Profile picks that default.
     public static func sessions(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
                                 sessionCount: Int, canRenameSession: Bool = false, canRestartSession: Bool = false,
-                                shortcuts: Shortcuts = [:]) -> [Entry] {
+                                localDefaultShortcut: Bool = true, shortcuts: Shortcuts = [:]) -> [Entry] {
         let newSessionShortcut = shortcuts[.newSession] ?? Command.newSession.shortcut
         var launches = profiles.enumerated().map { index, profile in
-            Entry(title: profile.name, shortcut: index == defaultProfile ? newSessionShortcut : "", pick: .profile(index),
+            Entry(title: profile.name, shortcut: localDefaultShortcut && index == defaultProfile ? newSessionShortcut : "", pick: .profile(index),
                   enabled: true, children: [])
         }
         let defaults = profiles.enumerated().map { index, profile in
@@ -208,15 +243,19 @@ public enum NativeMenu {
         public var quickShown = false
         public var canDashboard = false
         public var dashboardOpen = false
+        public var canToggleOverlay = false
+        public var overlayShown = false
 
         public init(canSplit: Bool = false, hasSplit: Bool = false, scratchShown: Bool = false, quickShown: Bool = false,
-                    canDashboard: Bool = false, dashboardOpen: Bool = false) {
+                    canDashboard: Bool = false, dashboardOpen: Bool = false, canToggleOverlay: Bool = false, overlayShown: Bool = false) {
             self.canSplit = canSplit
             self.hasSplit = hasSplit
             self.scratchShown = scratchShown
             self.quickShown = quickShown
             self.canDashboard = canDashboard
             self.dashboardOpen = dashboardOpen
+            self.canToggleOverlay = canToggleOverlay
+            self.overlayShown = overlayShown
         }
     }
 
@@ -224,21 +263,24 @@ public enum NativeMenu {
     public static func view(_ view: View, shortcuts: Shortcuts = [:]) -> [Entry] {
         var scratch = Entry.command(.toggleScratch, enabled: view.canSplit, shortcuts)
         scratch.checked = view.scratchShown
+        var overlay = Entry.command(.toggleOverlay, enabled: view.canToggleOverlay, shortcuts)
+        overlay.checked = view.overlayShown
         var quick = Entry.command(.quickTerminal, shortcuts)
         quick.checked = view.quickShown
         var dashboard = Entry.command(.dashboard, enabled: view.canDashboard || view.dashboardOpen, shortcuts)
         dashboard.checked = view.dashboardOpen
         return [.command(.toggleSplit, enabled: view.canSplit, shortcuts), .command(.toggleHorizontalSplit, enabled: view.canSplit, shortcuts),
                 .command(.focusLeftPane, enabled: view.hasSplit, shortcuts), .command(.focusRightPane, enabled: view.hasSplit, shortcuts),
-                .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), .separator, scratch, quick, dashboard]
+                .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), .separator, scratch, overlay, quick, dashboard]
     }
 
     /// file is the File menu: sessions and the terminal's edit commands.
     public static func file(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
                             sessionCount: Int, canRenameSession: Bool = false, canRestartSession: Bool = false, hasSelection: Bool,
-                            canPaste: Bool, shortcuts: Shortcuts = [:]) -> [Entry] {
+                            canPaste: Bool, localDefaultShortcut: Bool = true, shortcuts: Shortcuts = [:]) -> [Entry] {
         sessions(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession,
-                 sessionCount: sessionCount, canRenameSession: canRenameSession, canRestartSession: canRestartSession, shortcuts: shortcuts)
+                 sessionCount: sessionCount, canRenameSession: canRenameSession, canRestartSession: canRestartSession,
+                 localDefaultShortcut: localDefaultShortcut, shortcuts: shortcuts)
             + [.separator] + terminal(hasSelection: hasSelection, canPaste: canPaste, shortcuts: shortcuts)
     }
 
@@ -255,10 +297,11 @@ public enum NativeMenu {
     /// window is every menu tab flattened, which the command palette lists.
     public static func window(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
                               sessionCount: Int, canRenameSession: Bool = false, canRestartSession: Bool = false, hasSelection: Bool,
-                              canPaste: Bool, view: View = View(), shortcuts: Shortcuts = [:]) -> [Entry] {
+                              canPaste: Bool, view: View = View(), localDefaultShortcut: Bool = true,
+                              shortcuts: Shortcuts = [:]) -> [Entry] {
         file(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession, sessionCount: sessionCount,
              canRenameSession: canRenameSession, canRestartSession: canRestartSession, hasSelection: hasSelection, canPaste: canPaste,
-             shortcuts: shortcuts)
+             localDefaultShortcut: localDefaultShortcut, shortcuts: shortcuts)
             + [.separator] + navigate(shortcuts: shortcuts)
             + [Entry(title: "View", shortcut: "", pick: nil, enabled: true, children: Self.view(view, shortcuts: shortcuts))]
             + [.separator] + help(shortcuts: shortcuts)
