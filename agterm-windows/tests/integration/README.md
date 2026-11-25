@@ -18,7 +18,8 @@ powershell -ExecutionPolicy Bypass -File tests\integration\run.ps1 -App $env:TEM
 ```
 
 `-Case overlay*` runs only the cases whose names match, and `-StepSeconds 2` pauses after every step that changes
-the window, to watch a case run.
+the window, to watch a case run. (`run.ps1` keeps the filter in `$casePatterns`; do not name a loop variable `$case`
+while `-Case` is set — PowerShell treats `$Case` and `$case` as the same variable.)
 
 CI runs the same cases on the runner desktop (`.github/workflows/windows.yml`).
 Or in Windows Sandbox, which keeps the host desktop free and starts from a clean machine with no network or WSL:

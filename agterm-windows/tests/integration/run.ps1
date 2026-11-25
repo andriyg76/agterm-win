@@ -12,6 +12,9 @@ param(
     [ValidateRange(0, 30)][double]$StepSeconds = 0
 )
 $ErrorActionPreference = "Stop"
+# `-Case` and loop locals must not share a name: PowerShell treats `$Case` and `$case` as one variable.
+$casePatterns = @($Case)
+if (-not $casePatterns.Count) { $casePatterns = @("*") }
 $exe = Join-Path (Resolve-Path $App) "agterm-win.exe"
 if (-not (Test-Path $exe)) { throw "no agterm-win.exe in $App" }
 New-Item -ItemType Directory -Force $Results | Out-Null
@@ -45,12 +48,9 @@ function Invoke-Case([string]$Name, [string]$Arguments) {
     $screen = Join-Path $dir "screen.txt"
     $env:AGTERM_WIN_STATE_DIR = Join-Path $dir "state"
     $env:AGTERM_WIN_TEST_SCREEN = $screen
-    try {
-        $process = Start-Process -FilePath $exe -ArgumentList $Arguments -PassThru
-    } finally {
-        Remove-Item Env:AGTERM_WIN_STATE_DIR, Env:AGTERM_WIN_TEST_SCREEN
-    }
+    $process = Start-Process -FilePath $exe -ArgumentList $Arguments -PassThru
     $timedOut = -not $process.WaitForExit($CaseTimeoutSeconds * 1000)
+    Remove-Item Env:AGTERM_WIN_STATE_DIR, Env:AGTERM_WIN_TEST_SCREEN -ErrorAction SilentlyContinue
     if ($timedOut) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
     [pscustomobject]@{
         Dir = $dir
@@ -72,18 +72,18 @@ $cases = @(
                   "[process exited with code 0]") }
 )
 
-function Test-Selected([string]$Name) { [bool]($Case | ? { $Name -like $_ }) }
+function Test-Selected([string]$Name) { [bool]($casePatterns | ? { $Name -like $_ }) }
 
-$outcomes = foreach ($case in $cases | ? { Test-Selected $_.Name }) {
-    $run = Invoke-Case $case.Name $case.Arguments
+$outcomes = foreach ($item in $cases | ? { Test-Selected $_.Name }) {
+    $run = Invoke-Case $item.Name $item.Arguments
     $failures = @()
     if ($run.TimedOut) { $failures += "window did not close within $CaseTimeoutSeconds s" }
-    if (-not $run.Log.Contains($case.Ready)) { $failures += "log lacks '$($case.Ready)'" }
+    if (-not $run.Log.Contains($item.Ready)) { $failures += "log lacks '$($item.Ready)'" }
     if ($null -eq $run.Screen) { $failures += "no screen.txt" }
-    else { foreach ($text in $case.Expect) { if (-not $run.Screen.Contains($text)) { $failures += "screen lacks '$text'" } } }
+    else { foreach ($text in $item.Expect) { if (-not $run.Screen.Contains($text)) { $failures += "screen lacks '$text'" } } }
     $crash = Join-Path $run.Dir "state\crash.log"
     if (Test-Path $crash) { $failures += "crash: " + (Get-Content $crash -Raw).Trim() }
-    Write-Verdict $case.Name $failures
+    Write-Verdict $item.Name $failures
 }
 $outcomes = @($outcomes) + @(foreach ($name in @($shellCases.Keys) | ? { Test-Selected $_ }) {
     if ($skip = ShellCaseSkipReason $name) { Write-Skip $name $skip }
