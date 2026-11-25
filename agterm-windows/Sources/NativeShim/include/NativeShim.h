@@ -184,7 +184,8 @@ void nt_tooltip_set(void *tip, void *parent, uintptr_t id, int32_t left, int32_t
                     const uint16_t *text);
 
 // Page overlays (WebView2) in a child HWND. `state` is 0 loading, 1 loaded, 2 failed.
-void *nt_page_create(void *parent);
+// `data_folder` is the WebView2 user data folder; null keeps WebView2's default beside the executable.
+void *nt_page_create(void *parent, const uint16_t *data_folder);
 void nt_page_destroy(void *page);
 void nt_page_move(void *page, int32_t x, int32_t y, int32_t width, int32_t height);
 void nt_page_navigate_file(void *page, const uint16_t *path);
@@ -194,6 +195,8 @@ void nt_page_navigate_html(void *page, const uint16_t *html);
 int32_t nt_page_state(void *page);
 /// nt_page_title returns the UTF-16 length of the document title; writes it when `capacity` holds it all.
 int32_t nt_page_title(void *page, uint16_t *out, int32_t capacity);
+/// nt_page_error is nt_page_title for the reason a failed page gives.
+int32_t nt_page_error(void *page, uint16_t *out, int32_t capacity);
 
 #ifdef __cplusplus
 }

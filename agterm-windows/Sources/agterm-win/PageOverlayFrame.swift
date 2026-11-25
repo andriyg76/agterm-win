@@ -20,7 +20,7 @@ final class PageOverlayFrame {
         return wide
     }
 
-    init(parent: HWND?) {
+    init(parent: HWND?, dataFolder: URL) {
         let instance = GetModuleHandleW(nil)
         let className = Self.nullTerminatedUTF16("agterm-page-overlay")
         className.withUnsafeBufferPointer { name in
@@ -35,7 +35,11 @@ final class PageOverlayFrame {
         let host = CreateWindowExW(0, className, nil, DWORD(WS_CHILD) | DWORD(WS_CLIPCHILDREN) | DWORD(WS_CLIPSIBLINGS),
                                    0, 0, 1, 1, parent, nil, instance, nil)
         window = host
-        if let host { page = nt_page_create(UnsafeMutableRawPointer(host)) }
+        if let host {
+            page = Self.nullTerminatedUTF16(dataFolder.path).withUnsafeBufferPointer {
+                nt_page_create(UnsafeMutableRawPointer(host), $0.baseAddress)
+            }
+        }
     }
 
     func place(_ rect: NativeOverlay.Rect, border: Int32, shown: Bool) {
@@ -79,8 +83,19 @@ final class PageOverlayFrame {
 
     func documentTitle() -> String? {
         guard let page, nt_page_state(page) == 1 else { return nil }
-        var buffer = [UInt16](repeating: 0, count: 256)
-        let length = nt_page_title(page, &buffer, Int32(buffer.count))
+        return Self.text(page, nt_page_title)
+    }
+
+    func loadError() -> String? {
+        guard let page else { return "the page view could not be created" }
+        guard nt_page_state(page) == 2 else { return nil }
+        return Self.text(page, nt_page_error)
+    }
+
+    private static func text(_ page: UnsafeMutableRawPointer,
+                             _ read: (UnsafeMutableRawPointer?, UnsafeMutablePointer<UInt16>?, Int32) -> Int32) -> String? {
+        var buffer = [UInt16](repeating: 0, count: 512)
+        let length = read(page, &buffer, Int32(buffer.count))
         guard length > 0, length < buffer.count else { return nil }
         return String(decoding: buffer.prefix(Int(length)), as: UTF16.self)
     }

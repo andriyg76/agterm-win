@@ -1441,7 +1441,7 @@ final class NativeShell {
                 return "the origin cannot be reached for this page"
             }
         }
-        let frame = PageOverlayFrame(parent: window)
+        let frame = PageOverlayFrame(parent: window, dataFolder: stateDirectory.appendingPathComponent("WebView2"))
         var overlay = slot.page
         overlay.loadState = .loading
         serverPageOverlays[sessionID] = ServerPageOverlay(page: overlay, sizePercent: page.sizePercent, hidden: false,
@@ -1507,6 +1507,7 @@ final class NativeShell {
         guard var slot = serverPageOverlays[sessionID], let server = server(of: sessionID) else { return }
         var page = slot.page
         page.loadState = slot.frame.loadState()
+        if let error = slot.frame.loadError() { page.loadError = error }
         if page.loadState == .loaded, let title = slot.frame.documentTitle() {
             page.current = HtmlPageInfo(page: title, title: title, canGoBack: false, canGoForward: false)
         }
@@ -2624,6 +2625,7 @@ extension NativeShell: NativeControlHost {
         var page = slot.page
         let state = slot.frame.loadState()
         page.loadState = state
+        if let error = slot.frame.loadError() { page.loadError = error }
         if state == .loaded, let title = slot.frame.documentTitle() {
             page.current = HtmlPageInfo(page: title, title: title, canGoBack: false, canGoForward: false)
         }
@@ -2640,7 +2642,7 @@ extension NativeShell: NativeControlHost {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         guard locals[index].overlay == nil else { return }
         if selected != id { select(id) }
-        let frame = PageOverlayFrame(parent: window)
+        let frame = PageOverlayFrame(parent: window, dataFolder: stateDirectory.appendingPathComponent("WebView2"))
         var page = overlay
         page.loadState = .loading
         switch page.source {
