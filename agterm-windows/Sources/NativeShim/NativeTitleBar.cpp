@@ -1,4 +1,5 @@
 #include "NativeShim.h"
+#include "NativeChrome.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -6,16 +7,6 @@
 #include <uxtheme.h>
 
 namespace {
-
-constexpr COLORREF background = RGB(0x25, 0x25, 0x26);
-constexpr COLORREF hover = RGB(0x3D, 0x3D, 0x3E);
-constexpr COLORREF pressed = RGB(0x4A, 0x4A, 0x4B);
-constexpr COLORREF closeHover = RGB(0xC4, 0x2B, 0x1C);
-constexpr COLORREF closePressed = RGB(0x9F, 0x22, 0x16);
-constexpr COLORREF glyph = RGB(0xCC, 0xCC, 0xCC);
-constexpr COLORREF title = RGB(0xE0, 0xE0, 0xE0);
-constexpr COLORREF inactive = RGB(0x80, 0x80, 0x80);
-constexpr COLORREF disabled = RGB(0x6E, 0x6E, 0x6E);
 
 struct Fonts {
     uint32_t dpi = 0;
@@ -39,22 +30,24 @@ void loadFonts(uint32_t dpi) {
 
 COLORREF fill(const nt_title_button &button) {
     bool close = button.kind == 2;
-    if (button.state == 2) return close ? closePressed : pressed;
-    if (button.state == 1) return close ? closeHover : hover;
-    return background;
+    if (button.state == 2) return nt_chrome_title_pressed(close);
+    if (button.state == 1) return nt_chrome_title_hover(close);
+    return nt_chrome_title_bg();
 }
 
 }  // namespace
 
 extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, const uint16_t *text, int32_t title_left,
-                                   int32_t title_right, const nt_title_button *buttons, int32_t count, int32_t active) {
+                                   int32_t title_right, const nt_title_button *buttons, int32_t count, int32_t active,
+                                   const nt_menu_tab *tabs, int32_t tab_count) {
     auto hwnd = static_cast<HWND>(window);
     PAINTSTRUCT paint;
     HDC dc = BeginPaint(hwnd, &paint);
     RECT client;
     GetClientRect(hwnd, &client);
     RECT bar{0, 0, client.right, height};
-    HBRUSH backgroundBrush = CreateSolidBrush(background);
+    const COLORREF barBg = nt_chrome_title_bg();
+    HBRUSH backgroundBrush = CreateSolidBrush(barBg);
 
     int saved = SaveDC(dc);
     ExcludeClipRect(dc, bar.left, bar.top, bar.right, bar.bottom);
@@ -80,14 +73,31 @@ extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, c
             }
             SelectObject(memory, button.kind == 0 ? fonts.icons : fonts.caption);
             bool lit = button.kind == 2 && button.state != 0;
-            SetTextColor(memory, lit ? RGB(0xFF, 0xFF, 0xFF) : button.state == 3 ? disabled : active ? glyph : inactive);
+            SetTextColor(memory, lit ? RGB(0xFF, 0xFF, 0xFF)
+                                     : button.state == 3 ? nt_chrome_title_glyph(1, 1)
+                                                       : nt_chrome_title_glyph(active, 0));
             wchar_t character = static_cast<wchar_t>(button.glyph);
             DrawTextW(memory, &character, 1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        }
+        for (int32_t i = 0; i < tab_count; ++i) {
+            const nt_menu_tab &tab = tabs[i];
+            if (tab.right <= tab.left) continue;
+            RECT rect{tab.left, 0, tab.right, height};
+            if (tab.lit) {
+                HBRUSH brush = CreateSolidBrush(nt_chrome_title_hover(0));
+                FillRect(memory, &rect, brush);
+                DeleteObject(brush);
+            }
+            SelectObject(memory, fonts.text);
+            SetTextColor(memory, tab.lit ? nt_chrome_title_text() : nt_chrome_title_glyph(active, 0));
+            if (tab.label)
+                DrawTextW(memory, reinterpret_cast<const wchar_t *>(tab.label), -1, &rect,
+                          DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
         }
         if (title_right > title_left && text) {
             RECT rect{title_left, 0, title_right, height};
             SelectObject(memory, fonts.text);
-            SetTextColor(memory, active ? title : inactive);
+            SetTextColor(memory, active ? nt_chrome_title_text() : nt_chrome_title_glyph(0, 0));
             DrawTextW(memory, reinterpret_cast<const wchar_t *>(text), -1, &rect,
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
         }

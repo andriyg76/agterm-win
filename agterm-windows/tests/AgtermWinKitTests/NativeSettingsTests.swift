@@ -8,6 +8,8 @@ struct NativeSettingsTests {
     @Test func savedSettingsLoadBack() throws {
         var settings = NativeSettings()
         settings.fontPoints = 14
+        settings.sidebarWidthPoints = 280
+        settings.sidebarTint = 12
         settings.frame = .init(left: 10, top: 20, right: 1210, bottom: 820)
         settings.maximized = true
         settings.localSessions = [.init(title: "build", customName: "api", commandLine: "cmd.exe", directory: #"C:\dev"#), .init(title: "WSL Ubuntu", commandLine: "wsl.exe -d Ubuntu --cd ~")]

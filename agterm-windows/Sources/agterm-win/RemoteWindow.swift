@@ -29,6 +29,10 @@ final class RemoteWindow: RemoteCatalogEffects {
     var onReplicaPickDismiss: (@MainActor (UUID, PresentationPickRef) -> Void)?
     /// onReplicaHud shows, updates, or clears the HUD the origin mirrors on a catalog session row.
     var onReplicaHud: (@MainActor (UUID, PresentationHud?) -> Void)?
+    /// onReplicaPage shows a page the origin handed over; nil when shown, otherwise the refusal sent upstream.
+    var onReplicaPage: (@MainActor (UUID, PresentationPage) -> String?)?
+    var onReplicaPageClose: (@MainActor (UUID, PresentationPageChange) -> Void)?
+    var onReplicaPageCommand: (@MainActor (UUID, PresentationPageCommand) -> Void)?
     /// onPresentationStopped runs when a session's `zmx present` stream is torn down.
     var onPresentationStopped: (UUID) -> Void = { _ in }
     // a presentation stream per server session, as a Mac's remote window keeps them
@@ -144,6 +148,16 @@ final class RemoteWindow: RemoteCatalogEffects {
             },
             overlayResize: { [weak self] change in
                 self?.onReplicaOverlayResize?(id, change)
+            },
+            pageRequest: { [weak self] page in
+                guard let self else { return RemotePresentationClient.pagesUnsupported }
+                return self.onReplicaPage?(id, page) ?? RemotePresentationClient.pagesUnsupported
+            },
+            pageClose: { [weak self] change in
+                self?.onReplicaPageClose?(id, change)
+            },
+            pageCommand: { [weak self] command in
+                self?.onReplicaPageCommand?(id, command)
             },
             warn: { log("presentation for \(id): \($0)") })
         let client = RemotePresentationClient(argv: argv, presentationVersion: binding.presentationVersion, transport: transport,

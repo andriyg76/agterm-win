@@ -124,9 +124,9 @@ public final class AppStore {
     public var sidebarWidth: Double = AppStore.sidebarWidthDefault
 
     /// Bounds shared by drag, `sidebar.width`, and `restore()` through `clampSidebarWidth`.
-    public static let sidebarWidthDefault: Double = 220
-    public static let sidebarWidthMin: Double = 160
-    public static let sidebarWidthMax: Double = 560
+    public static let sidebarWidthDefault: Double = SidebarWidthLimits.defaultPoints
+    public static let sidebarWidthMin: Double = SidebarWidthLimits.minPoints
+    public static let sidebarWidthMax: Double = SidebarWidthLimits.maxPoints
 
     /// The persisted split-divider primary-pane fraction bounds: live capture skips degenerate extremes outside
     /// this range and `restore()` clamps to it, so the on-disk ratio is always within bounds.

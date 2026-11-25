@@ -12,8 +12,10 @@ public protocol NativeControlHost: AnyObject {
     func isServerSession(_ id: UUID) -> Bool
     /// isConnectedServerSession is whether `id` names a catalog row on a connected agterm-server.
     func isConnectedServerSession(_ id: UUID) -> Bool
-    /// serverOverlayState is the program overlay on a catalog session, when `id` names one.
+    /// serverOverlayState is the overlay on a catalog session, when `id` names one.
     func serverOverlayState(for id: UUID) -> (overlay: NativeOverlay?, exitCode: Int?)?
+    /// serverPageOverlay is the page the shell draws over a catalog session, nil for a program overlay or none.
+    func serverPageOverlay(for id: UUID) -> (page: HtmlOverlay, hidden: Bool)?
     /// newLocalSession starts in `cwd` when given, else in the user's home, as a Mac's `session.new` does.
     func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> UUID?
     func newServerSession() async -> ControlResponse
@@ -49,6 +51,8 @@ public protocol NativeControlHost: AnyObject {
     func openSettings(tab: SettingsTab)
     /// openOverlay starts a program overlay over a local session whose slot NativeControl found empty.
     func openOverlay(_ id: UUID, _ open: NativeOverlay.Open)
+    /// openPageOverlay shows a local HTML or URL page in the session-wide overlay slot.
+    func openPageOverlay(_ id: UUID, _ overlay: HtmlOverlay, sizePercent: Int?)
     /// closeOverlay ends a local session's overlay and its program, which then leaves no exit code.
     func closeOverlay(_ id: UUID)
     func resizeOverlay(_ id: UUID, sizePercent: Int?)
@@ -74,6 +78,9 @@ public protocol NativeControlHost: AnyObject {
     var dashboard: NativeControl.Dashboard? { get }
     /// recentSessions are the window's sessions, most recently selected first.
     var recentSessions: [UUID] { get }
+    /// sidebarWidthPoints is the stored divider position echoed by `sidebar.width`.
+    var sidebarWidthPoints: Double { get }
+    func setSidebarWidth(points: Double)
     func openDashboard(_ members: [DashboardMember], fontMode: DashboardFontMode)
     func closeDashboard()
 }
@@ -95,6 +102,12 @@ public enum NativeControl {
         public var overlay: NativeOverlay?
         /// overlayExitCode is how the last overlay's program exited, until another opens.
         public var overlayExitCode: Int?
+        /// htmlOverlay is a page in the session-wide slot, nil while a program overlay is shown or the slot is empty.
+        public var htmlOverlay: HtmlOverlay?
+        /// pageOverlayHidden keeps a page running with the session in view.
+        public var pageOverlayHidden = false
+        /// pageOverlaySizePercent is the floating page panel's share, when a page overlay is open.
+        public var pageOverlaySizePercent: Int?
         /// split is the session's second pane, nil without one.
         public var split: NativeSplit?
         public var splitCwd: String?
@@ -104,7 +117,7 @@ public enum NativeControl {
         public var scratchCwd: String?
 
         public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, unseen: Int = 0, cwd: String = "",
-                    title: String? = nil, overlay: NativeOverlay? = nil, overlayExitCode: Int? = nil) {
+                    title: String? = nil, overlay: NativeOverlay? = nil, overlayExitCode: Int? = nil, htmlOverlay: HtmlOverlay? = nil) {
             self.id = id
             self.name = name
             self.commandLine = commandLine
@@ -115,6 +128,7 @@ public enum NativeControl {
             self.title = title
             self.overlay = overlay
             self.overlayExitCode = overlayExitCode
+            self.htmlOverlay = htmlOverlay
         }
     }
 
@@ -222,6 +236,12 @@ public enum NativeControl {
             return quick(request, host: host)
         case .dashboard:
             return dashboard(request, host: host)
+        case .sidebarWidth:
+            guard let points = request.args?.sidebarWidth, points.isFinite else {
+                return failure("sidebar.width requires a width in points")
+            }
+            host.setSidebarWidth(points: points)
+            return ControlResponse(ok: true, result: ControlResult(sidebarWidth: host.sidebarWidthPoints))
         default:
             return failure("\(request.cmd.rawValue) is not supported on Windows")
         }
@@ -345,18 +365,21 @@ public enum NativeControl {
             ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: local.id == selected,
                                split: local.split?.shown == true, hasSplit: local.split != nil, backedByZmx: nil,
                                splitAxis: local.split?.axisName, splitRatio: local.split?.ratio, splitFocused: local.split?.focused,
-                               overlay: local.overlay != nil, overlaySizePercent: local.overlay?.sizePercent, scratch: local.scratch,
-                               ended: local.exited ? true : nil, restoreCommand: local.commandLine,
+                               overlay: local.overlay != nil || local.htmlOverlay != nil,
+                               overlaySizePercent: local.overlay?.sizePercent ?? local.pageOverlaySizePercent,
+                               scratch: local.scratch, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
                                unseen: local.unseen > 0 ? local.unseen : local.attention ? 1 : nil, fontSize: Double(host.fontPoints),
                                splitCwd: local.split == nil ? nil : local.splitCwd, scratchCwd: local.scratchRunning ? local.scratchCwd : nil,
-                               hiddenOverlays: local.overlay?.hidden == true ? ["session"] : nil)
+                               htmlOverlays: local.htmlOverlay.map { [$0.controlNode(hidden: local.pageOverlayHidden)] },
+                               hiddenOverlays: local.pageOverlayHidden || local.overlay?.hidden == true ? ["session"] : nil)
         }
         let local = locals.isEmpty ? [] : [ControlWorkspaceNode(id: localWorkspace.uuidString, name: "Local",
                                                                 active: locals.contains { $0.active }, sessions: locals)]
         let dashboard = host.dashboard
-        var tree = ControlTree(workspaces: local + host.serverWorkspaces, quickVisible: host.quickShown,
-                               dashboardMembers: dashboard?.members.map(\.controlRef), dashboardHighlighted: dashboard?.highlighted?.controlRef,
-                               dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
+        var tree = ControlTree(workspaces: local + host.serverWorkspaces, sidebarWidth: host.sidebarWidthPoints,
+                               quickVisible: host.quickShown, dashboardMembers: dashboard?.members.map(\.controlRef),
+                               dashboardHighlighted: dashboard?.highlighted?.controlRef, dashboardFontSize: dashboard?.fontSize,
+                               dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
         tree.wslServers = host.wslServers
         return tree
     }

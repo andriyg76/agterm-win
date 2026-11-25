@@ -32,6 +32,7 @@ final class NativeShell {
         var unseen = 0
         var overlay: Overlay?
         var overlayExitCode: Int?
+        var pageOverlay: (page: HtmlOverlay, sizePercent: Int?, hidden: Bool, frame: PageOverlayFrame)?
         /// split and its terminal are the second pane, both nil without one; a hidden split keeps its shell.
         var split: NativeSplit?
         var splitTerminal: NativeTerminal?
@@ -85,6 +86,16 @@ final class NativeShell {
         var terminal: NativeTerminal { frame.terminal }
     }
 
+    private struct ServerPageOverlay {
+        var page: HtmlOverlay
+        var sizePercent: Int?
+        var hidden: Bool
+        let frame: PageOverlayFrame
+        var channel: ReplicaPageServeClient?
+        var offer: Int?
+        var appliedSeq = 0
+    }
+
     /// Server is an agterm-server started this launch, under its sidebar group.
     @MainActor
     private final class Server {
@@ -109,12 +120,12 @@ final class NativeShell {
     private let settingsURL: URL
     var settings: NativeSettings
     var window: HWND?
-    private var tree: UnsafeMutableRawPointer?
+    var tree: UnsafeMutableRawPointer?
     private var notice: HWND?
     private var findBar: HWND?
     private var findFailed = false
     private var tooltip: UnsafeMutableRawPointer?
-    private var palette: UnsafeMutableRawPointer?
+    var palette: UnsafeMutableRawPointer?
     // the open palette, what it lists, and the rows its query leaves, which Enter's index refers to
     private var paletteMode: Palette.Mode?
     private var paletteRows: [Palette.Row] = []
@@ -122,12 +133,14 @@ final class NativeShell {
     // the title bar's button under the mouse, and the one a press started on, which acts if the release is on it too
     private var hovered: TitleBar.Button?
     private var pressed: TitleBar.Button?
+    private var pressedMenuTab: Int?
     private var windowActive = true
     private var shownTitle = "agterm"
     var remoteTerminal: NativeTerminal!
     var locals: [LocalSession] = []
     /// serverOverlays holds a program overlay per catalog session the presentation stream opened.
     private var serverOverlays: [Foundation.UUID: ServerOverlay] = [:]
+    private var serverPageOverlays: [Foundation.UUID: ServerPageOverlay] = [:]
     /// ServerHud is a mirrored passive panel over a catalog session; it does not take the keyboard from the terminal.
     private struct ServerHud {
         let panel: HWND
@@ -148,7 +161,7 @@ final class NativeShell {
     private var tagged: [Foundation.UUID] = []
     private var dimmed: [UInt8] = []
     private var items: [Foundation.UUID: UnsafeMutableRawPointer] = [:]
-    private let darkBrush = CreateSolidBrush(0x262525)
+    var darkBrush = CreateSolidBrush(0x262525)
     var dpi: UInt32 = 96
     private var control: ControlSocket?
     private let version: String
@@ -161,7 +174,10 @@ final class NativeShell {
     var recentSessions: [Foundation.UUID] = []
     /// dragging is the session whose divider the mouse is moving, and the area its panes share.
     var dragging: (id: Foundation.UUID, area: NativeOverlay.Rect)?
-    let highlightBrush = CreateSolidBrush(0x784F26)
+    /// sidebarDragging moves the sidebar divider in client pixels.
+    var sidebarDragging = false
+    var menuBarHighlight: Int?
+    var highlightBrush = CreateSolidBrush(0x784F26)
     /// closeSessionCoalesced swallows a second Close Session chord right after one dismissed an overlay; arm64 can deliver two.
     private var closeSessionCoalesced: Date?
 
@@ -180,6 +196,7 @@ final class NativeShell {
         settings = NativeSettings.load(from: settingsURL)
         TerminalAppearance.use(settings.appearance)
         applyGeneral()
+        applyChrome()
     }
 
     private func create(starting requested: [String], server requestedServer: String?, installServer: Bool) {
@@ -307,6 +324,7 @@ final class NativeShell {
         }
         started.remote.onPresentationStopped = { [weak self] id in
             self?.clearServerReplicaOverlay(id, notifyOrigin: false)
+            self?.clearServerPageOverlay(id, notifyOrigin: false)
             self?.dismissReplicaAsk(ifShownFor: id)
             self?.clearServerHud(id)
             SessionPickBook.shared.dropReplicas(forSession: id)
@@ -330,6 +348,29 @@ final class NativeShell {
         started.remote.onReplicaAskDismiss = { [weak self, weak started] id, ref in
             guard let self, let started else { return }
             self.dismissReplicaAsk(on: started, sessionID: id, ref: ref)
+        }
+        started.remote.onReplicaPage = { [weak self, weak started] id, page in
+            guard let self, let started else { return RemotePresentationClient.pagesUnsupported }
+            return self.showReplicaPage(on: started, sessionID: id, page: page)
+        }
+        started.remote.onReplicaPageClose = { [weak self] id, change in
+            self?.closeReplicaPage(sessionID: id, change: change)
+        }
+        started.remote.onReplicaPageCommand = { [weak self, weak started] id, command in
+            guard let self, let started else { return }
+            self.applyReplicaPageCommand(on: started, sessionID: id, command: command)
+        }
+        started.remote.store.onReplicaPageChanged = { [weak self] pageID in
+            guard let self else { return }
+            for (sessionID, slot) in self.serverPageOverlays where slot.page.id == pageID {
+                self.reportReplicaPageState(sessionID: sessionID, local: pageID)
+                return
+            }
+        }
+        if HtmlOverlayReleases.shared.onReplicaRelease == nil {
+            HtmlOverlayReleases.shared.onReplicaRelease = { [weak self] local, origin in
+                self?.replicaPageReleased(local: local, origin: origin)
+            }
         }
         servers.append(started)
         log("native shell: starting agterm-server in \(started.label)")
@@ -458,6 +499,7 @@ final class NativeShell {
     /// applyAppearance draws every terminal with `values`, without saving them.
     private func applyAppearance(_ values: SettingsWindow.Values) {
         let refit = TerminalAppearance.use(values.appearance)
+        applyChrome()
         for terminal in allTerminals {
             terminal.applyTheme()
             if refit { terminal.applyFontFamily() }
@@ -472,7 +514,7 @@ final class NativeShell {
                                                          notifications: settings.notifications, general: settings.general,
                                                          serverAtLaunch: Set(ServerLaunch.atLaunch(settings.serverLaunch))),
                             themes: TerminalAppearance.themes.catalog.names, fonts: TerminalAppearance.monospaceFonts,
-                            distributions: listed,
+                            distributions: listed, chrome: chromePalette,
                             preview: { [unowned self] in applyAppearance($0) },
                             finish: { [unowned self] kept in
                                 guard let kept else { return }
@@ -581,8 +623,9 @@ final class NativeShell {
     }
 
     fileprivate func editColors(_ context: HDC?) -> LRESULT {
-        SetTextColor(context, findFailed ? 0x6B6BF0 : 0xE0E0E0)
-        SetBkColor(context, 0x262525)
+        let palette = chromePalette
+        SetTextColor(context, findFailed ? palette.chromeAccent : palette.chromeText)
+        SetBkColor(context, palette.palBg)
         return LRESULT(Int(bitPattern: darkBrush))
     }
 
@@ -951,6 +994,7 @@ final class NativeShell {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         let closing = locals.remove(at: index)
         closing.overlay?.frame.destroy()
+        closing.pageOverlay?.frame.destroy()
         closing.terminals.forEach { DestroyWindow($0.window) }
         recentSessions.removeAll { $0 == id }
         if dashboard?.members.contains(where: { $0.session == id }) == true { dashboardSessionsChanged() }
@@ -1018,7 +1062,16 @@ final class NativeShell {
         GetClientRect(window, &client)
         let top = titleBar.height
         let area = NativeOverlay.Rect(x: sidebarWidth, y: top, width: max(client.right - sidebarWidth, 1), height: max(client.bottom - top, 1))
+        var remoteEnabled = true
         for session in locals {
+            refreshPageOverlayState(session)
+            if let page = session.pageOverlay {
+                let shown = session.id == selected && !page.hidden && dashboard == nil
+                let floating = (page.sizePercent ?? 100) < 100
+                page.frame.place(NativeOverlay.panel(in: area, sizePercent: page.sizePercent), border: floating ? scaled(1) : 0, shown: shown)
+                session.terminals.forEach { EnableWindow($0.window, !shown && dashboard == nil) }
+                continue
+            }
             guard let overlay = session.overlay else {
                 session.terminals.forEach { EnableWindow($0.window, dashboard == nil) }
                 continue
@@ -1033,6 +1086,13 @@ final class NativeShell {
             let floating = (overlay.state.sizePercent ?? 100) < 100
             overlay.frame.place(NativeOverlay.panel(in: area, sizePercent: overlay.state.sizePercent), border: floating ? scaled(1) : 0, shown: shown)
         }
+        for (sessionID, page) in serverPageOverlays {
+            refreshServerPageOverlayState(sessionID)
+            let shown = sessionID == selected && running == sessionID && !page.hidden
+            let floating = (page.sizePercent ?? 100) < 100
+            page.frame.place(NativeOverlay.panel(in: area, sizePercent: page.sizePercent), border: floating ? scaled(1) : 0, shown: shown)
+            if shown { remoteEnabled = false }
+        }
         for (sessionID, hud) in serverHuds {
             guard let server = server(of: sessionID), let session = server.remote.session(sessionID) else { continue }
             let shown = sessionID == selected && running == sessionID
@@ -1044,7 +1104,6 @@ final class NativeShell {
             MoveWindow(hud.panel, x, y, width, height, true)
             ShowWindow(hud.panel, shown ? SW_SHOW : SW_HIDE)
         }
-        var remoteEnabled = true
         if let running, let overlay = serverOverlays[running], selected == running, !overlay.state.hidden { remoteEnabled = false }
         EnableWindow(remoteTerminal.window, remoteEnabled)
         // the find bar and the palette stay above an overlay placed after them
@@ -1280,7 +1339,7 @@ final class NativeShell {
 
     private func showReplicaOverlay(on server: Server, sessionID: Foundation.UUID, overlay: PresentationOverlay) -> Bool {
         guard overlay.pane == nil, overlay.width == nil, overlay.height == nil else { return false }
-        guard serverOverlays[sessionID] == nil else { return false }
+        guard serverOverlays[sessionID] == nil, serverPageOverlays[sessionID] == nil else { return false }
         let remoteLine: String
         do {
             guard let line = try RemoteSession.runJobCommand(host: "wsl", job: overlay.job, token: overlay.token).last else { return false }
@@ -1364,6 +1423,173 @@ final class NativeShell {
         rebuild()
     }
 
+    // MARK: replica pages (catalog sessions)
+
+    private func showReplicaPage(on server: Server, sessionID: Foundation.UUID, page: PresentationPage) -> String? {
+        guard page.pane == nil, page.width == nil, page.height == nil else { return PaneOverlayError.paneNotVisible }
+        guard serverPageOverlays[sessionID] == nil, serverOverlays[sessionID] == nil else { return "overlay already open" }
+        if case .forwarded = page.source { return "no free local port for the page's forward" }
+        if let reason = server.remote.store.presentReplicaPage(page, forSession: sessionID) { return reason }
+        guard let slot = server.remote.store.replicaPage(page.page, forSession: sessionID),
+              slot.page.replicaOf != nil else { return "page not shown" }
+        var channel: ReplicaPageServeClient?
+        if page.source.usesChannel {
+            do {
+                channel = try ReplicaPageServeClient.start(host: server.remote.host, token: page.token)
+            } catch {
+                server.remote.store.closeReplicaPage(page.page, forSession: sessionID)
+                return "the origin cannot be reached for this page"
+            }
+        }
+        let frame = PageOverlayFrame(parent: window, dataFolder: stateDirectory.appendingPathComponent("WebView2"))
+        var overlay = slot.page
+        overlay.loadState = .loading
+        serverPageOverlays[sessionID] = ServerPageOverlay(page: overlay, sizePercent: page.sizePercent, hidden: false,
+                                                          frame: frame, channel: channel, offer: page.offer)
+        loadServerPageContent(on: server, sessionID: sessionID, presentation: page, frame: frame, channel: channel)
+        if page.follow { select(sessionID) }
+        placeOverlays()
+        rebuild()
+        log("native shell: replica page over server session [\(sessionID)]: \(page.page)")
+        return nil
+    }
+
+    private func loadServerPageContent(on server: Server, sessionID: Foundation.UUID, presentation: PresentationPage,
+                                       frame: PageOverlayFrame, channel: ReplicaPageServeClient?) {
+        guard let slot = serverPageOverlays[sessionID] else { return }
+        let pageID = slot.page.id
+        Task { @MainActor in
+            defer { channel?.close() }
+            do {
+                switch presentation.source {
+                case .url(let text):
+                    guard let url = HtmlSource.webURL(text) else {
+                        throw PageLoadFailure.invalidURL
+                    }
+                    frame.load(url: url)
+                case .file(let path, _):
+                    guard let channel else { throw PageLoadFailure.noChannel }
+                    let fetched = try channel.fetch(path: path)
+                    guard let html = String(data: fetched.data, encoding: .utf8) else {
+                        throw PageLoadFailure.unreadable
+                    }
+                    frame.load(html: html)
+                case .image(let path, _, _):
+                    guard let channel else { throw PageLoadFailure.noChannel }
+                    let fetched = try channel.fetch(path: path)
+                    let file = try Self.writeTempPageData(fetched.data, path: path)
+                    frame.load(file: file)
+                case .markdown, .text, .document:
+                    server.remote.store.failHtmlOverlay(pageID, error: NativeOverlay.pageRefusal)
+                    return
+                case .forwarded:
+                    return
+                }
+            } catch {
+                server.remote.store.failHtmlOverlay(pageID, error: String(describing: error))
+            }
+        }
+    }
+
+    private enum PageLoadFailure: Error {
+        case invalidURL, noChannel, unreadable
+    }
+
+    private static func writeTempPageData(_ data: Data, path: String) throws -> String {
+        let ext = (path as NSString).pathExtension
+        let suffix = ext.isEmpty ? ".bin" : ".\(ext)"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + suffix)
+        try data.write(to: url, options: .atomic)
+        return url.path
+    }
+
+    private func refreshServerPageOverlayState(_ sessionID: Foundation.UUID) {
+        guard var slot = serverPageOverlays[sessionID], let server = server(of: sessionID) else { return }
+        var page = slot.page
+        page.loadState = slot.frame.loadState()
+        if let error = slot.frame.loadError() { page.loadError = error }
+        if page.loadState == .loaded, let title = slot.frame.documentTitle() {
+            page.current = HtmlPageInfo(page: title, title: title, canGoBack: false, canGoForward: false)
+        }
+        let prior = slot.page.loadState
+        slot.page = page
+        serverPageOverlays[sessionID] = slot
+        guard page.replicaOf != nil else { return }
+        server.remote.store.setHtmlLoadState(page.id, state: page.loadState, error: page.loadError)
+        if let current = page.current { server.remote.store.setHtmlPage(page.id, current) }
+        if page.loadState != prior || page.current != nil {
+            reportReplicaPageState(sessionID: sessionID, local: page.id)
+        }
+    }
+
+    private func reportReplicaPageState(sessionID: Foundation.UUID, local: Foundation.UUID) {
+        guard let server = server(of: sessionID), let slot = serverPageOverlays[sessionID],
+              var state = server.remote.store.replicaPageState(local, appliedSeq: slot.appliedSeq) else { return }
+        state.offer = slot.offer
+        server.remote.answerPresentation(sessionID, .pageState(state))
+    }
+
+    private func closeReplicaPage(sessionID: Foundation.UUID, change: PresentationPageChange) {
+        if change.reason == PresentationPageChange.channelLost,
+           let slot = serverPageOverlays[sessionID], slot.page.replicaOf?.uuidString == change.page {
+            serverPageOverlays[sessionID]?.channel?.close()
+        }
+        server(of: sessionID)?.remote.store.closeReplicaPage(change.page, forSession: sessionID)
+        rebuild()
+    }
+
+    private func applyReplicaPageCommand(on server: Server, sessionID: Foundation.UUID, command: PresentationPageCommand) {
+        guard server.remote.store.replicaPage(command.page, forSession: sessionID) != nil else { return }
+        switch command.action {
+        case .hide, .show:
+            server.remote.store.setReplicaPageHidden(command.page, forSession: sessionID, hidden: command.action == .hide)
+            if var slot = serverPageOverlays[sessionID] {
+                slot.hidden = server.remote.session(sessionID)?.overlayHidden ?? false
+                serverPageOverlays[sessionID] = slot
+                placeOverlays()
+                rebuild()
+            }
+        case .resize:
+            server.remote.store.resizeReplicaPage(command.page, forSession: sessionID, sizePercent: command.sizePercent,
+                                                  points: command.points, merge: command.merge == true)
+            if var slot = serverPageOverlays[sessionID] {
+                slot.sizePercent = server.remote.session(sessionID)?.overlaySizePercent
+                serverPageOverlays[sessionID] = slot
+                placeOverlays()
+                rebuild()
+            }
+        default:
+            break
+        }
+        guard var slot = serverPageOverlays[sessionID] else { return }
+        slot.appliedSeq = max(slot.appliedSeq, command.seq)
+        serverPageOverlays[sessionID] = slot
+        reportReplicaPageState(sessionID: sessionID, local: slot.page.id)
+    }
+
+    private func replicaPageReleased(local: Foundation.UUID, origin: Foundation.UUID) {
+        guard let (sessionID, slot) = serverPageOverlays.first(where: { $0.value.page.id == local }) else { return }
+        serverPageOverlays.removeValue(forKey: sessionID)
+        slot.channel?.close()
+        slot.frame.destroy()
+        placeOverlays()
+        rebuild()
+        server(of: sessionID)?.remote.answerPresentation(sessionID, .pageClosed(PresentationPageChange(
+            page: origin.uuidString, offer: slot.offer)))
+    }
+
+    private func clearServerPageOverlay(_ id: Foundation.UUID, notifyOrigin _: Bool) {
+        if let slot = serverPageOverlays.removeValue(forKey: id) {
+            slot.channel?.close()
+            slot.frame.destroy()
+        }
+        if let session = server(of: id)?.remote.session(id) {
+            server(of: id)?.remote.store.closeReplicaPages(of: session)
+        }
+        placeOverlays()
+        rebuild()
+    }
+
     private func removeServerOverlay(_ id: Foundation.UUID, frame: OverlayFrame, notifyOrigin: Bool) {
         guard let slot = serverOverlays[id], slot.frame === frame else { return }
         let focused = hasFocus(id)
@@ -1390,7 +1616,6 @@ final class NativeShell {
 
     // MARK: sidebar
 
-    var sidebarWidth: Int32 { scaled(240) }
     func scaled(_ value: Int32) -> Int32 { MulDiv(value, Int32(dpi), 96) }
 
     var terminalsShown: [NativeTerminal] { [remoteTerminal] + locals.flatMap(\.terminals) }
@@ -1410,7 +1635,7 @@ final class NativeShell {
         return overlay.terminal
     }
 
-    private func layout() {
+    func layout() {
         guard let window else { return }
         var client = RECT()
         GetClientRect(window, &client)
@@ -1560,11 +1785,34 @@ final class NativeShell {
     /// focus gives the keyboard to what is in view: the dashboard's grid takes it in the window itself.
     func focus() { SetFocus(dashboard != nil ? window : visibleTerminal.window) }
 
-    /// windowMenu is the ☰ menu: new sessions from the launch profiles, the terminal's commands and the window's own.
-    private func windowMenu() {
-        var corner = POINT(x: titleBar.span(of: .menu).left, y: titleBar.height)
+    private var menuShortcuts: NativeMenu.Shortcuts { Keys.keymap.shortcuts }
+
+    /// menuBarEntries is one title-bar menu tab's popup, in the order MenuBarLayout lays them out.
+    private func menuBarEntries(tab: Int) -> [NativeMenu.Entry] {
+        let shortcuts = menuShortcuts
+        switch tab {
+        case 0:
+            return NativeMenu.file(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries, canCloseSession: canCloseSelected,
+                                   sessionCount: tagged.count, canRenameSession: canRename(selected),
+                                   canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
+                                   canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), shortcuts: shortcuts)
+        case 1: return NativeMenu.view(viewState, shortcuts: shortcuts)
+        case 2: return NativeMenu.navigate(shortcuts: shortcuts)
+        case 3: return NativeMenu.help(shortcuts: shortcuts)
+        default: return []
+        }
+    }
+
+    /// openMenuTab shows a title-bar menu tab under the label the user clicked.
+    private func openMenuTab(_ index: Int) {
+        let bar = titleBar
+        let gap = bar.actionWidth / 4
+        let limit = bar.span(of: .quick).left - gap
+        let start = bar.span(of: .newSession).right + gap
+        guard let span = MenuBarLayout.menuSpans(origin: start, limit: limit, dpi: dpi).first(where: { $0.index == index })?.span else { return }
+        var corner = POINT(x: span.left, y: bar.height)
         ClientToScreen(window, &corner)
-        run(showMenu(windowEntries, owner: window, at: corner))
+        run(showMenu(menuBarEntries(tab: index), owner: window, at: corner))
     }
 
     /// windowEntries is the ☰ menu as it stands now, which the command palette lists too.
@@ -1782,6 +2030,7 @@ final class NativeShell {
         case .top: return hitTop
         case .caption: return hitCaption
         case .button(let button): return button.hitCode ?? hitClient
+        case .menuTab: return hitClient
         case .outside: return hitClient
         }
     }
@@ -1810,13 +2059,42 @@ final class NativeShell {
         invalidateTitleBar()
     }
 
+    private func titlePoint(_ lParam: LPARAM) -> (x: Int32, y: Int32) {
+        (Int32(Int16(truncatingIfNeeded: lParam)), Int32(Int16(truncatingIfNeeded: lParam >> 16)))
+    }
+
+    private func menuTab(at x: Int32, y: Int32) -> Int? {
+        let bar = titleBar
+        guard y >= 0, y < bar.height else { return nil }
+        let gap = bar.actionWidth / 4
+        let limit = bar.span(of: .quick).left - gap
+        return bar.menuTab(x: x, y: y, dpi: dpi, limit: limit)
+    }
+
+    private func refreshMenuBarHighlight(x: Int32, y: Int32) {
+        let tab = menuTab(at: x, y: y)
+        guard tab != menuBarHighlight else { return }
+        menuBarHighlight = tab
+        invalidateTitleBar()
+    }
+
     fileprivate func mouseMoved(_ lParam: LPARAM) {
         if dragDivider(lParam) { return }
+        let (x, y) = titlePoint(lParam)
+        refreshMenuBarHighlight(x: x, y: y)
         hover(clientButton(lParam), frame: false)
     }
 
     fileprivate func mouseDown(_ lParam: LPARAM, double: Bool = false) {
         if bodyMouseDown(lParam, double: double) { return }
+        let (x, y) = titlePoint(lParam)
+        if y < titleBar.height, let tab = menuTab(at: x, y: y) {
+            pressedMenuTab = tab
+            menuBarHighlight = tab
+            SetCapture(window)
+            invalidateTitleBar()
+            return
+        }
         guard let button = clientButton(lParam) else { return }
         pressed = button
         SetCapture(window)
@@ -1825,6 +2103,14 @@ final class NativeShell {
 
     fileprivate func mouseUp(_ lParam: LPARAM) {
         if endDividerDrag() { return }
+        if let tab = pressedMenuTab {
+            pressedMenuTab = nil
+            ReleaseCapture()
+            let (x, y) = titlePoint(lParam)
+            if menuTab(at: x, y: y) == tab { openMenuTab(tab) }
+            invalidateTitleBar()
+            return
+        }
         guard let button = pressed, !button.isCaption else { return }
         pressed = nil
         ReleaseCapture()
@@ -1856,7 +2142,6 @@ final class NativeShell {
 
     fileprivate func act(_ button: TitleBar.Button) {
         switch button {
-        case .menu: windowMenu()
         case .minimize: ShowWindow(window, SW_MINIMIZE)
         case .maximize: ShowWindow(window, IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE)
         case .close: PostMessageW(window, UINT(WM_CLOSE), 0, 0)
@@ -1916,10 +2201,38 @@ final class NativeShell {
             return nt_title_button(left: span.left, right: span.right, glyph: button.glyph(maximized: maximized),
                                    kind: button == .close ? 2 : button.isCaption ? 1 : 0, state: state)
         }
-        buttons.withUnsafeBufferPointer { buttons in
-            nt_title_bar_paint(UnsafeMutableRawPointer(window), dpi, bar.height, Array(shownTitle.utf16) + [0], bar.title.left,
-                               bar.title.right, buttons.baseAddress, Int32(buttons.count), windowActive ? 1 : 0)
+        let gap = bar.actionWidth / 4
+        let limit = bar.span(of: .quick).left - gap
+        let start = bar.span(of: .newSession).right + gap
+        let spans = MenuBarLayout.menuSpans(origin: start, limit: limit, dpi: dpi)
+        var labels = spans.map { Array(MenuBarLayout.titles[$0.index].utf16) + [0] }
+        var tabs = spans.enumerated().map { offset, entry in
+            nt_menu_tab(left: entry.span.left, right: entry.span.right, label: nil,
+                        lit: menuBarHighlight == entry.index || pressedMenuTab == entry.index ? 1 : 0)
         }
+        let tabCount = Int32(spans.count)
+        withMenuTabLabels(&labels, tabs: &tabs) { tabPtr in
+            buttons.withUnsafeBufferPointer { buttons in
+                let title = Array(shownTitle.utf16) + [0]
+                title.withUnsafeBufferPointer { title in
+                    nt_title_bar_paint(UnsafeMutableRawPointer(window), dpi, bar.height, title.baseAddress, bar.title.left,
+                                       bar.title.right, buttons.baseAddress, Int32(buttons.count), windowActive ? 1 : 0,
+                                       tabPtr, tabCount)
+                }
+            }
+        }
+    }
+
+    /// withMenuTabLabels lends label pointers into `labels` for the paint call only.
+    private func withMenuTabLabels(_ labels: inout [[UInt16]], tabs: inout [nt_menu_tab], _ body: (UnsafePointer<nt_menu_tab>?) -> Void) {
+        func lend(_ index: Int) {
+            guard index < labels.count else { return tabs.withUnsafeBufferPointer { body($0.baseAddress) } }
+            labels[index].withUnsafeBufferPointer { label in
+                tabs[index].label = label.baseAddress
+                lend(index + 1)
+            }
+        }
+        lend(0)
     }
 }
 
@@ -1952,7 +2265,6 @@ private extension TitleBar.Button {
 
     func glyph(maximized: Bool) -> UInt16 {
         switch self {
-        case .menu: 0xE700
         case .newSession: 0xE710
         case .find: 0xE721
         case .quick: 0xE756
@@ -2043,6 +2355,9 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
         case NativeShell.titleActionMessage:
             if let button = TitleBar.Button(rawValue: Int(wParam)) { shell.act(button) }
             return 0
+        case UINT(NT_PAGE_STATE):
+            shell.placeOverlays()
+            return 0
         case UINT(NT_PALETTE_QUERY):
             shell.paletteQueryChanged()
             return 0
@@ -2113,7 +2428,9 @@ extension NativeShell: NativeControlHost {
         locals.map {
             var local = NativeControl.Local(id: $0.id, name: $0.name, commandLine: $0.commandLine, exited: $0.exited, attention: $0.attention,
                                             unseen: $0.unseen, cwd: $0.directory ?? "", title: $0.programTitle, overlay: $0.overlay?.state,
-                                            overlayExitCode: $0.overlayExitCode)
+                                            overlayExitCode: $0.overlayExitCode, htmlOverlay: $0.pageOverlay?.page)
+            local.pageOverlayHidden = $0.pageOverlay?.hidden ?? false
+            local.pageOverlaySizePercent = $0.pageOverlay?.sizePercent
             local.split = $0.splitTerminal == nil ? nil : $0.split
             local.splitCwd = $0.splitDirectory
             local.scratch = $0.scratchShown && $0.scratch != nil
@@ -2133,8 +2450,18 @@ extension NativeShell: NativeControlHost {
 
     func isConnectedServerSession(_ id: Foundation.UUID) -> Bool { serverConnected(id) }
 
+    func serverPageOverlay(for id: Foundation.UUID) -> (page: HtmlOverlay, hidden: Bool)? {
+        guard let slot = serverPageOverlays[id] else { return nil }
+        return (slot.page, slot.hidden)
+    }
+
     func serverOverlayState(for id: Foundation.UUID) -> (overlay: NativeOverlay?, exitCode: Int?)? {
         guard serverSession(id) != nil else { return nil }
+        if let page = serverPageOverlays[id] {
+            var overlay = NativeOverlay(sizePercent: page.sizePercent, wait: false)
+            overlay.hidden = page.hidden
+            return (overlay, nil)
+        }
         if let slot = serverOverlays[id] { return (slot.state, slot.exitCode) }
         guard let session = server(of: id)?.remote.session(id), session.overlayActive else { return (nil, nil) }
         var overlay = NativeOverlay(sizePercent: session.overlaySizePercent, wait: session.overlayWait)
@@ -2267,6 +2594,7 @@ extension NativeShell: NativeControlHost {
             return
         }
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
+        guard locals[index].pageOverlay == nil else { return }
         if selected != id { select(id) }
         let focused = hasFocus(id)
         let frame = OverlayFrame(parent: window, points: settings.fontPoints, dpi: dpi)
@@ -2295,8 +2623,56 @@ extension NativeShell: NativeControlHost {
         if focused { focus() }
     }
 
+    private func refreshPageOverlayState(at index: Int) {
+        guard var slot = locals[index].pageOverlay else { return }
+        var page = slot.page
+        let state = slot.frame.loadState()
+        page.loadState = state
+        if let error = slot.frame.loadError() { page.loadError = error }
+        if state == .loaded, let title = slot.frame.documentTitle() {
+            page.current = HtmlPageInfo(page: title, title: title, canGoBack: false, canGoForward: false)
+        }
+        slot.page = page
+        locals[index].pageOverlay = slot
+    }
+
+    private func refreshPageOverlayState(_ session: LocalSession) {
+        guard let index = locals.firstIndex(where: { $0.id == session.id }) else { return }
+        refreshPageOverlayState(at: index)
+    }
+
+    func openPageOverlay(_ id: Foundation.UUID, _ overlay: HtmlOverlay, sizePercent: Int?) {
+        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
+        guard locals[index].overlay == nil else { return }
+        if selected != id { select(id) }
+        let frame = PageOverlayFrame(parent: window, dataFolder: stateDirectory.appendingPathComponent("WebView2"))
+        var page = overlay
+        page.loadState = .loading
+        switch page.source {
+        case .file(let path, _): frame.load(file: path)
+        case .url(let address): frame.load(url: address)
+        case .image(let path): frame.load(file: path)
+        default: break
+        }
+        locals[index].pageOverlay = (page: page, sizePercent: sizePercent, hidden: false, frame: frame)
+        placeOverlays()
+        rebuild()
+        log("native shell: page overlay over \(locals[index].name) [\(id)]")
+    }
+
+    private func removePageOverlay(_ id: Foundation.UUID, frame: PageOverlayFrame) {
+        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay?.frame === frame else { return }
+        let focused = hasFocus(id)
+        locals[index].pageOverlay = nil
+        frame.destroy()
+        placeOverlays()
+        rebuild()
+        if focused { focus() }
+    }
+
     private func openServerCtlOverlay(_ id: Foundation.UUID, _ open: NativeOverlay.Open) {
-        guard serverConnected(id), serverOverlays[id] == nil, let server = server(of: id), let session = server.remote.session(id) else { return }
+        guard serverConnected(id), serverOverlays[id] == nil, serverPageOverlays[id] == nil,
+              let server = server(of: id), let session = server.remote.session(id) else { return }
         let launch = SessionSidebar.launch(for: session, hostLabel: server.label)
         guard case .command(let sessionCommand) = launch else { return }
         let started = NativeOverlay.launch(open.command, sessionCommandLine: sessionCommand, cwd: open.cwd, directory: session.effectiveCwd)
@@ -2311,6 +2687,14 @@ extension NativeShell: NativeControlHost {
             removeServerOverlay(id, frame: slot.frame, notifyOrigin: serverOverlayOriginNotify(id))
             return
         }
+        if let origin = serverPageOverlays[id]?.page.replicaOf?.uuidString {
+            server(of: id)?.remote.store.closeReplicaPage(origin, forSession: id)
+            return
+        }
+        if let page = locals.first(where: { $0.id == id })?.pageOverlay {
+            removePageOverlay(id, frame: page.frame)
+            return
+        }
         guard let frame = locals.first(where: { $0.id == id })?.overlay?.frame else { return }
         removeOverlay(id, frame: frame)
     }
@@ -2320,6 +2704,22 @@ extension NativeShell: NativeControlHost {
             slot.state.sizePercent = sizePercent
             serverOverlays[id] = slot
             server(of: id)?.remote.session(id)?.overlaySizePercent = sizePercent
+            placeOverlays()
+            rebuild()
+            return
+        }
+        if var slot = serverPageOverlays[id] {
+            slot.sizePercent = sizePercent
+            serverPageOverlays[id] = slot
+            if let origin = slot.page.replicaOf?.uuidString {
+                server(of: id)?.remote.store.resizeReplicaPage(origin, forSession: id, sizePercent: sizePercent)
+            }
+            placeOverlays()
+            rebuild()
+            return
+        }
+        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay != nil {
+            locals[index].pageOverlay?.sizePercent = sizePercent
             placeOverlays()
             rebuild()
             return
@@ -2338,6 +2738,26 @@ extension NativeShell: NativeControlHost {
             placeOverlays()
             if focused { focus() }
             rebuild()
+            return
+        }
+        if var slot = serverPageOverlays[id] {
+            let focused = hasFocus(id)
+            if let origin = slot.page.replicaOf?.uuidString {
+                server(of: id)?.remote.store.setReplicaPageHidden(origin, forSession: id, hidden: hidden)
+            }
+            slot.hidden = hidden
+            serverPageOverlays[id] = slot
+            placeOverlays()
+            rebuild()
+            if focused { focus() }
+            return
+        }
+        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay != nil {
+            let focused = hasFocus(id)
+            locals[index].pageOverlay?.hidden = hidden
+            placeOverlays()
+            rebuild()
+            if focused { focus() }
             return
         }
         guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay != nil else { return }
