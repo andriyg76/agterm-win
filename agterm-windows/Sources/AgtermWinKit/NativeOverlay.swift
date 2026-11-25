@@ -34,9 +34,10 @@ public struct NativeOverlay: Equatable, Sendable {
     }
 
     public static let serverDisconnectedRefusal = "no agterm-server is connected for this session"
+    public static let serverRefusal = "session.overlay.open: pages are not supported on catalog sessions"
     public static let paneRefusal = "--pane is not supported on Windows: its sessions have no split panes"
     public static let pointsRefusal = "--width/--height are not supported on Windows"
-    public static let pageRefusal = "session.overlay.open: pages (--html, --url, --image, --markdown, --text) are not supported on Windows"
+    public static let pageRefusal = "session.overlay.open: this page source is not supported on Windows"
 
     /// Launch is how the overlay's program starts: under cmd.exe for a Windows session, under the distribution's sh
     /// for a WSL one, so the command means what it would typed into that session.

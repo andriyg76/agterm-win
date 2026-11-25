@@ -35,6 +35,8 @@ private final class FakeHost: NativeControlHost {
         return (serverOverlays[id], serverOverlayExitCodes[id])
     }
 
+    func serverPageOverlay(for id: UUID) -> (page: HtmlOverlay, hidden: Bool)? { nil }
+
     var cwds: [String?] = []
     func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> UUID? {
         cwds.append(cwd)
@@ -113,6 +115,13 @@ private final class FakeHost: NativeControlHost {
     private func editLocal(_ id: UUID, _ edit: (inout NativeControl.Local) -> Void) {
         guard let index = localSessions.firstIndex(where: { $0.id == id }) else { return }
         edit(&localSessions[index])
+    }
+
+    var openedPages: [(UUID, HtmlOverlay)] = []
+
+    func openPageOverlay(_ id: UUID, _ overlay: HtmlOverlay, sizePercent: Int?) {
+        openedPages.append((id, overlay))
+        editLocal(id) { $0.htmlOverlay = overlay; $0.pageOverlaySizePercent = sizePercent }
     }
 
     func openOverlay(_ id: UUID, _ open: NativeOverlay.Open) {
@@ -412,9 +421,14 @@ struct NativeControlTests {
 
     @Test func openRefusesWhatWindowsCannotShowBeforeTouchingASession() async {
         let host = FakeHost()
-        host.selectedSession = host.add("a")
+        let a = host.add("a")
+        host.selectedSession = a
         #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "")).error == "session.overlay.open requires a command")
-        #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(html: "C:\\page.html")).error == NativeOverlay.pageRefusal)
+        #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(markdownFile: "C:\\x.md")).error == NativeOverlay.pageRefusal)
+        let html = await overlay(.sessionOverlayOpen, host, target: a.uuidString, ControlArgs(html: "C:\\page.html"))
+        #expect(html.ok)
+        #expect(host.openedPages.count == 1)
+        #expect(await overlay(.sessionOverlayOpen, host, target: a.uuidString, ControlArgs(html: "C:\\page2.html")).error == "overlay already open")
         #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "x", pane: "right")).error == NativeOverlay.paneRefusal)
         #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "x", sizePercent: 50, width: 400)).error == NativeOverlay.pointsRefusal)
         #expect(await overlay(.sessionOverlayOpen, host, ControlArgs(command: "x", sizePercent: 0)).error

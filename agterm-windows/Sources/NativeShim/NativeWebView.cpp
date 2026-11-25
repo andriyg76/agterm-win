@@ -5,6 +5,7 @@
 
 #include <shlwapi.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 using Microsoft::WRL::Callback;
@@ -25,8 +26,18 @@ struct PageView {
   wchar_t title[512]{};
   wchar_t pendingPath[MAX_PATH]{};
   wchar_t pendingUrl[2048]{};
+  wchar_t *pendingHtml = nullptr;
+  wchar_t dataFolder[MAX_PATH]{};
   bool pendingFile = false;
 };
+
+void changed(PageView *view) { PostMessageW(GetAncestor(view->host, GA_ROOT), NT_PAGE_STATE, 0, 0); }
+
+void fail(PageView *view, const wchar_t *what, HRESULT result) {
+  view->state = 2;
+  swprintf_s(view->error, L"%ls (0x%08lX)", what, static_cast<unsigned long>(result));
+  changed(view);
+}
 
 PageView *g_pages[kMaxPages]{};
 HWND g_pageHosts[kMaxPages]{};
@@ -74,21 +85,25 @@ LRESULT CALLBACK pageHostProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
   if (msg == kPageSetup) {
     PageView *view = pageOf(hwnd);
     if (!view) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    // WebView2 needs an STA UI thread, and nothing else in the app initializes COM
+    HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(com) && com != RPC_E_CHANGED_MODE) {
+      fail(view, L"COM initialization failed", com);
+      return 0;
+    }
     auto envHandler = Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
         [view](HRESULT result, ICoreWebView2Environment *env) -> HRESULT {
           if (FAILED(result) || !env) {
-            view->state = 2;
-            wcscpy_s(view->error, L"WebView2 environment failed");
-            return result;
+            fail(view, L"WebView2 environment failed", result);
+            return S_OK;
           }
           return env->CreateCoreWebView2Controller(
               view->host,
               Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                   [view](HRESULT result, ICoreWebView2Controller *controller) -> HRESULT {
                     if (FAILED(result) || !controller) {
-                      view->state = 2;
-                      wcscpy_s(view->error, L"WebView2 controller failed");
-                      return result;
+                      fail(view, L"WebView2 controller failed", result);
+                      return S_OK;
                     }
                     view->controller = controller;
                     ComPtr<ICoreWebView2> web;
@@ -116,9 +131,12 @@ LRESULT CALLBACK pageHostProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                                   CoTaskMemFree(title);
                                 }
                               } else {
+                                COREWEBVIEW2_WEB_ERROR_STATUS status = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
+                                args->get_WebErrorStatus(&status);
                                 view->state = 2;
-                                wcscpy_s(view->error, L"navigation failed");
+                                swprintf_s(view->error, L"navigation failed (web error %d)", static_cast<int>(status));
                               }
+                              changed(view);
                               return S_OK;
                             })
                             .Get(),
@@ -129,12 +147,19 @@ LRESULT CALLBACK pageHostProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                       view->web->Navigate(uri);
                     } else if (view->pendingUrl[0]) {
                       view->web->Navigate(view->pendingUrl);
+                    } else if (view->pendingHtml) {
+                      view->web->NavigateToString(view->pendingHtml);
                     }
+                    free(view->pendingHtml);
+                    view->pendingHtml = nullptr;
                     return S_OK;
                   })
                   .Get());
         });
-    CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr, envHandler.Get());
+    // a failure returned here never reaches the handler
+    HRESULT started = CreateCoreWebView2EnvironmentWithOptions(nullptr, view->dataFolder[0] ? view->dataFolder : nullptr,
+                                                               nullptr, envHandler.Get());
+    if (FAILED(started)) fail(view, L"WebView2 environment failed", started);
     return 0;
   }
   return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -155,16 +180,17 @@ void ensureHostClass() {
 
 } // namespace
 
-extern "C" void *nt_page_create(void *parent) {
+extern "C" void *nt_page_create(void *parent, const uint16_t *dataFolder) {
   ensureHostClass();
   HWND parentHwnd = static_cast<HWND>(parent);
   HWND host = CreateWindowExW(WS_EX_NOPARENTNOTIFY, L"agterm-page", nullptr,
-                              WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 1, 1, parentHwnd, nullptr,
+                              WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 1, 1, parentHwnd, nullptr,
                               GetModuleHandleW(nullptr), nullptr);
   if (!host) return nullptr;
   auto *view = new PageView();
   view->parent = parentHwnd;
   view->host = host;
+  if (dataFolder) wcscpy_s(view->dataFolder, reinterpret_cast<const wchar_t *>(dataFolder));
   if (!reservePage(host, view)) {
     delete view;
     DestroyWindow(host);
@@ -179,6 +205,7 @@ extern "C" void nt_page_destroy(void *page) {
   PageView *view = pageOf(host);
   if (view) {
     if (view->controller) view->controller->Close();
+    free(view->pendingHtml);
     delete view;
     releasePage(host);
   }
@@ -200,6 +227,8 @@ extern "C" void nt_page_navigate_file(void *page, const uint16_t *path) {
   PageView *view = pageOf(host);
   if (!view || !path) return;
   view->pendingFile = true;
+  free(view->pendingHtml);
+  view->pendingHtml = nullptr;
   wcscpy_s(view->pendingPath, reinterpret_cast<const wchar_t *>(path));
   view->pendingUrl[0] = 0;
   view->state = 0;
@@ -217,7 +246,12 @@ extern "C" void nt_page_navigate_html(void *page, const uint16_t *html) {
   view->state = 0;
   if (view->web) {
     view->web->NavigateToString(reinterpret_cast<const wchar_t *>(html));
+    return;
   }
+  view->pendingFile = false;
+  view->pendingUrl[0] = 0;
+  free(view->pendingHtml);
+  view->pendingHtml = _wcsdup(reinterpret_cast<const wchar_t *>(html));
 }
 
 extern "C" void nt_page_navigate_url(void *page, const uint16_t *url) {
@@ -225,6 +259,8 @@ extern "C" void nt_page_navigate_url(void *page, const uint16_t *url) {
   PageView *view = pageOf(host);
   if (!view || !url) return;
   view->pendingFile = false;
+  free(view->pendingHtml);
+  view->pendingHtml = nullptr;
   wcscpy_s(view->pendingUrl, reinterpret_cast<const wchar_t *>(url));
   view->state = 0;
   if (view->web) view->web->Navigate(view->pendingUrl);
@@ -242,6 +278,16 @@ extern "C" int32_t nt_page_title(void *page, uint16_t *out, int32_t capacity) {
   int32_t length = static_cast<int32_t>(wcslen(title));
   if (out && length < capacity) {
     memcpy(out, title, static_cast<size_t>(length + 1) * sizeof(wchar_t));
+  }
+  return length;
+}
+
+extern "C" int32_t nt_page_error(void *page, uint16_t *out, int32_t capacity) {
+  PageView *view = pageOf(static_cast<HWND>(page));
+  if (!view || capacity <= 0) return 0;
+  int32_t length = static_cast<int32_t>(wcslen(view->error));
+  if (out && length < capacity) {
+    memcpy(out, view->error, static_cast<size_t>(length + 1) * sizeof(wchar_t));
   }
   return length;
 }

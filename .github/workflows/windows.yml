@@ -4,7 +4,7 @@ on:
   push:
     branches: [windows-port, feature/agwinterm-chrome]
   pull_request:
-    branches: [windows-port, feature/agwinterm-chrome]
+    branches: [windows-port, feature/presentation-ui, feature/agwinterm-chrome]
     paths: ["agterm-windows/**", "agtermCore/**", ".github/workflows/windows.yml"]
   workflow_dispatch:
 

@@ -337,10 +337,21 @@ public struct HtmlOverlay: Equatable, Sendable {
     /// must sit strictly inside the grant by whole path components, so `/a/bc` is not inside `/a/b`. A grant naming the
     /// file itself is refused: WebKit widens a single-file grant to the file's whole folder. `/` and `home` are
     /// refused as overly broad grants.
+  /// isAbsolutePath is true for a POSIX path or a Windows drive or UNC path.
+  public static func isAbsolutePath(_ path: String) -> Bool {
+    if path.hasPrefix("/") { return true }
+    if path.hasPrefix("\\\\") { return true }
+    if path.count >= 2, path.first?.isLetter == true, path.dropFirst().first == ":" {
+      let rest = path.dropFirst(2)
+      return rest.isEmpty || rest.first == "\\" || rest.first == "/"
+    }
+    return false
+  }
+
     public static func grantError(file: String, grantRoot: String?, home: String = NSHomeDirectory()) -> String? {
-        guard file.hasPrefix("/") else { return "html file must be an absolute path" }
+        guard isAbsolutePath(file) else { return "html file must be an absolute path" }
         guard let grantRoot else { return nil }
-        guard grantRoot.hasPrefix("/") else { return "cwd must be an absolute path" }
+        guard isAbsolutePath(grantRoot) else { return "cwd must be an absolute path" }
         guard ![components("/"), components(home)].contains(components(grantRoot)) else {
             return "cwd must not be / or the home directory"
         }
