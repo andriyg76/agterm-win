@@ -79,7 +79,7 @@ $shellCases["split"] = {
     $failures
 }
 
-# the title bar's split button, the scratch's chord, and the dashboard's chord, Esc and a click on a cell
+# the title bar's split button, the scratch's control command, and the dashboard's chord, Esc and a click on a cell
 $shellCases["panes-ui"] = {
     param($Shell)
     [AgtermWin32]::SetThreadDpiAwarenessContext([IntPtr](-4)) | Out-Null
@@ -97,19 +97,30 @@ $shellCases["panes-ui"] = {
     if (-not (Wait-Until { @(Get-Panes $window).Count -eq 2 } 5)) { $failures += "the split button left $(@(Get-Panes $window).Count) terminal(s) visible" }
     Save-Snapshot $Shell "split-button"
 
-    Note "scratch chord"
     $terminal = Get-Panes $window | Select-Object -First 1
     [AgtermInput]::FocusOn($terminal)
-    [AgtermInput]::SendChord($terminal, 0x4A, $true)
-    if (-not (Wait-Until { (Get-Node $state $id).scratch } 5)) { $failures += "Ctrl+Shift+J did not show the scratch" }
+    [AgtermInput]::SendChord($terminal, 0x31, $false)
+    if ((Get-Node $state $id).splitFocused) { $failures += "Ctrl+1 did not focus the primary pane" }
+    [AgtermInput]::SendChord($terminal, 0x32, $false)
+    if (-not (Get-Node $state $id).splitFocused) { $failures += "Ctrl+2 did not focus the split pane" }
+    [AgtermInput]::SendChord($terminal, 0x44, $true)
+    if (-not (Wait-Until { -not (Get-Node $state $id).split } 5)) { $failures += "Ctrl+Shift+D did not hide the split" }
+    [AgtermInput]::SendChord($terminal, 0x44, $true)
+    if (-not (Wait-Until { (Get-Node $state $id).split } 5)) { $failures += "Ctrl+Shift+D did not restore the split" }
+
+    Note "scratch control command"
+    $terminal = Get-Panes $window | Select-Object -First 1
+    [AgtermInput]::FocusOn($terminal)
+    Invoke-Ctl $state @("session", "scratch", "on", "--target", $id) | Out-Null
+    if (-not (Wait-Until { (Get-Node $state $id).scratch } 5)) { $failures += "session scratch on did not show the scratch" }
     else {
         if (-not (Wait-Until { @(Get-Panes $window).Count -eq 1 } 5)) { $failures += "the scratch left $(@(Get-Panes $window).Count) terminals visible, not itself alone" }
         if (-not (Wait-Until { (Get-PaneText $state $id "scratch") -match ">" } 30)) { $failures += "the scratch's shell never showed a prompt" }
         Save-Snapshot $Shell "scratch"
         $scratch = Get-Panes $window | Select-Object -First 1
         [AgtermInput]::FocusOn($scratch)
-        [AgtermInput]::SendChord($scratch, 0x4A, $true)
-        if (-not (Wait-Until { -not (Get-Node $state $id).scratch } 5)) { $failures += "a second Ctrl+Shift+J did not hide the scratch" }
+        Invoke-Ctl $state @("session", "scratch", "off", "--target", $id) | Out-Null
+        if (-not (Wait-Until { -not (Get-Node $state $id).scratch } 5)) { $failures += "session scratch off did not hide the scratch" }
         if (-not (Get-Node $state $id).scratchCwd) { $failures += "a hidden scratch's shell did not keep running" }
     }
 

@@ -71,27 +71,71 @@ struct WindowsKeymapTests {
         #expect(WindowsKeymap.virtualKey("f5") == 0x74 && WindowsKeymap.virtualKey("=") == 0xBB && WindowsKeymap.virtualKey("nope") == nil)
     }
 
+    @Test func fixedEditingAliasesAndShellKeys() {
+        for chord in [Chord(mods: [.control, .shift], key: "c"), Chord(mods: [.control], key: "insert")] {
+            #expect(WindowsKeymap.fixedCommand(for: chord, hasSelection: false) == .copy)
+        }
+        for chord in [Chord(mods: [.control, .shift], key: "v"), Chord(mods: [.shift], key: "insert"),
+                      Chord(mods: [.control, .shift], key: "i")] {
+            #expect(WindowsKeymap.fixedCommand(for: chord, hasSelection: false) == .paste)
+        }
+        let copyOrInterrupt = Chord(mods: [.control], key: "c")
+        #expect(WindowsKeymap.fixedCommand(for: copyOrInterrupt, hasSelection: true) == .copy)
+        #expect(WindowsKeymap.fixedCommand(for: copyOrInterrupt, hasSelection: false) == nil)
+        for key in ["d", "j", "z", "a", "v"] {
+            #expect(WindowsKeymap.fixedCommand(for: Chord(mods: [.control], key: key), hasSelection: true) == nil)
+        }
+        for key in ["k", "r"] {
+            #expect(WindowsKeymap.fixedCommand(for: Chord(mods: [.control, .shift], key: key), hasSelection: false) == nil)
+        }
+        #expect(WindowsKeymap.fixedCommand(for: Chord(mods: [.control, .option], key: "s"), hasSelection: false) == .settings)
+        #expect(WindowsKeymap.chord(virtualKey: 0x2D, control: true, alt: false, shift: false, win: false)
+                == Chord(mods: [.control], key: "insert"))
+    }
+
     #if os(Windows)
     @Test func theDefaultsAreTheWindowsChords() {
         var keymap = WindowsKeymap(text: "")
-        #expect(press(&keymap, "t", control: true, shift: true) == .command(.newSession))
-        #expect(keymap.shortcuts[.nextSession] == "Ctrl+Tab" && keymap.shortcuts[.fontBigger] == "Ctrl+=")
-        #expect(keymap.shortcuts[.renameSession] == "F2" && keymap.diagnostics.isEmpty)
+        #expect(press(&keymap, "n", control: true) == .command(.newSession))
+        #expect(press(&keymap, "w", control: true) == .command(.closeSession))
+        #expect(press(&keymap, "f", control: true) == .command(.find))
+        #expect(keymap.shortcuts[.nextSession] == "Ctrl+Alt+Right" && keymap.shortcuts[.fontBigger] == "Ctrl+Shift+=")
+        #expect(keymap.shortcuts[.renameSession] == "" && keymap.diagnostics.isEmpty)
         #expect(press(&keymap, "p", control: true) == .command(.sessionPalette))
         #expect(press(&keymap, "p", control: true, shift: true) == .command(.commandPalette))
-        #expect(keymap.shortcuts[.sessionPalette] == "Ctrl+P" && keymap.shortcuts[.commandPalette] == "Ctrl+Shift+P")
         #expect(press(&keymap, "g", control: true, shift: true) == .command(.dashboard))
-        #expect(press(&keymap, "j", control: true, shift: true) == .command(.toggleScratch))
-        #expect(keymap.press(Chord(mods: [.option, .shift], key: "=")) == .command(.toggleSplit))
-        #expect(keymap.press(Chord(mods: [.option, .shift], key: "-")) == .command(.toggleHorizontalSplit))
-        #expect(keymap.press(Chord(mods: [.option], key: "left")) == .command(.focusLeftPane))
+        #expect(press(&keymap, "j", control: true, shift: true) == .command(.toggleOverlay))
+        #expect(press(&keymap, "d", control: true, shift: true) == .command(.toggleSplit))
+        #expect(press(&keymap, "1", control: true) == .command(.focusLeftPane))
+        #expect(press(&keymap, "2", control: true) == .command(.focusRightPane))
+        #expect(keymap.press(Chord(mods: [.control, .option], key: "left")) == .command(.previousSession))
         #expect(keymap.press(Chord(mods: [.control], key: "`")) == .command(.quickTerminal))
         for (command, _) in WindowsKeymap.actions { #expect(keymap.shortcuts[command] == command.shortcut) }
     }
 
+    @Test func retiredDefaultsAndShellKeysPassThrough() {
+        var keymap = WindowsKeymap(text: "")
+        for chord in [Chord(mods: [.control], key: "d"), Chord(mods: [.control], key: "j"), Chord(mods: [.control], key: "z"),
+                      Chord(mods: [.control, .shift], key: "t"), Chord(mods: [.control, .shift], key: "n"),
+                      Chord(mods: [.control, .shift], key: "w"), Chord(mods: [.control, .shift], key: "f"),
+                      Chord(mods: [.control], key: "="), Chord(mods: [.control], key: "tab"),
+                      Chord(mods: [.control, .shift], key: "tab"), Chord(mods: [], key: "f2"),
+                      Chord(mods: [.option], key: "left"), Chord(mods: [.option], key: "right"),
+                      Chord(mods: [.option, .shift], key: "="), Chord(mods: [.option, .shift], key: "-")] {
+            #expect(keymap.press(chord) == .pass)
+        }
+    }
+
+    @Test func existingExplicitBindingsKeepTheirChords() {
+        var keymap = WindowsKeymap(text: "map ctrl+n toggle_scratch")
+        #expect(keymap.diagnostics.isEmpty)
+        #expect(press(&keymap, "n", control: true) == .command(.toggleScratch))
+        #expect(keymap.shortcuts[.newSession] == "")
+    }
+
     @Test func movingAnActionFreesItsDefault() {
         var keymap = WindowsKeymap(text: "map ctrl+alt+w close_session")
-        #expect(press(&keymap, "w", control: true, shift: true) == .pass)
+        #expect(press(&keymap, "w", control: true) == .pass)
         #expect(press(&keymap, "w", control: true, alt: true) == .command(.closeSession))
     }
     #endif

@@ -54,7 +54,7 @@ passed and are recorded in `cases.json` under `skipped`.
 
 | Case | Where | Issue |
 |------|--------|--------|
-| `overlay-keys` | native **ARM64** (`windows-11-arm`) | After `SendChord` sends Ctrl+Shift+W to the overlay terminal, the session under the overlay is closed instead of dismissing the overlay only. The same case passes on x64. Suspect focus / duplicate Close Session delivery on the arm64 runner. Track in PR/overlay work; remove the skip when arm64 matches x64. |
+| `overlay-keys` | native **ARM64** (`windows-11-arm`) | After `SendChord` sends Ctrl+W to the overlay terminal, the session under the overlay is closed instead of dismissing the overlay only. The same case passes on x64. Suspect focus / duplicate Close Session delivery on the arm64 runner. Track in PR/overlay work; remove the skip when arm64 matches x64. |
 | `overlay-server-program` | — | CI runs the disconnected smoke (`$absent`, `no such session`, tree still answers). Set `AGTERM_WIN_GATE_WSL` to a live distribution with agterm-server for the full ctl overlay gate (see `docs/remote-linux-gate.md`). |
 | `presentation-surfaces` | — | Same disconnected smoke as `overlay-server-program`; live ask/pick/HUD checks are manual (`docs/remote-linux-gate.md`). |
 
