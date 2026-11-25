@@ -509,9 +509,9 @@ final class NativeShell {
         shown = values
     }
 
-    private func showSettings(tab: SettingsTab = .general) {
+    private func showSettings() {
         let listed = ServerLaunch.listed(available: distributions, choices: settings.serverLaunch)
-        SettingsWindow.show(owner: window, tab: tab, values: .init(appearance: settings.appearance, points: settings.fontPoints,
+        SettingsWindow.show(owner: window, values: .init(appearance: settings.appearance, points: settings.fontPoints,
                                                          notifications: settings.notifications, general: settings.general,
                                                          serverAtLaunch: Set(ServerLaunch.atLaunch(settings.serverLaunch))),
                             themes: TerminalAppearance.themes.catalog.names, fonts: TerminalAppearance.monospaceFonts,
@@ -2648,8 +2648,6 @@ extension NativeShell: NativeControlHost {
     var themeCatalog: ThemeCatalog { TerminalAppearance.themes.catalog }
 
     var systemIsDark: Bool { TerminalAppearance.isDark }
-
-    func openSettings(tab: SettingsTab) { showSettings(tab: tab) }
 
     func setAppearance(_ appearance: Appearance) {
         settings.appearance = appearance

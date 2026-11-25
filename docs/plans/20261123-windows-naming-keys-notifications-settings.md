@@ -70,7 +70,7 @@ The original defaults described below are historical. Current assignments and pe
 - Not yet: the sidebar and window chrome keep their dark colors; selection-foreground is not applied; a Settings
   window open during `theme.set` keeps showing its own values.
 - Settings is now three tabs, as on macOS: General, Appearance, Notifications.
-- `agtermctl settings open [tab]` (`settings.open`) shows a tab; no command reads or writes a setting (see control-api.md).
+- No command opens Settings or reads or writes a setting, as on macOS.
 - General, from macOS's General where it applies: where a new session opens (home, the selected session's folder,
   or a folder), where it goes (end, after the selected one), asking before closing a local session, right-click
   pastes (off: Windows keeps its menu, Shift+right-click opens it when on), lines a wheel notch scrolls, and the WSL

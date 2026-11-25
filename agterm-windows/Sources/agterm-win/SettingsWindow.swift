@@ -56,10 +56,10 @@ final class SettingsWindow {
 
     /// show opens Settings over `owner`, or brings an open one to the front. `finish` gets the kept values, nil for a
     /// cancel.
-    static func show(owner: HWND?, tab: SettingsTab = .general, values: Values, themes: [String], fonts: [String], distributions: [String],
+    static func show(owner: HWND?, values: Values, themes: [String], fonts: [String], distributions: [String],
                      preview: @escaping (Values) -> Void, finish: @escaping (Values?) -> Void) {
         if let open = current, let window = open.window {
-            open.select(tab)
+            open.select(.general)
             SetForegroundWindow(window)
             return
         }
@@ -67,7 +67,7 @@ final class SettingsWindow {
                                       finish: finish)
         current = settings
         settings.create(owner: owner)
-        settings.select(tab)
+        settings.select(.general)
     }
 
     /// select shows `tab`, as a click on it does.

@@ -1,4 +1,4 @@
-﻿# Settings' cases: they open Settings with `settings open` or as its menu item does, set its controls with the controls' own messages, press
+﻿# Settings' cases: they open Settings as its menu item does and pick a tab as its arrow key does, set its controls with the controls' own messages, press
 # OK or Cancel, then read native.json and what the window now does. Dot-sourced by shell-cases.ps1 after
 # title-bar-cases.ps1, whose AgtermWin32 helpers they use; the ids mirror SettingsWindow.Control.
 
@@ -27,15 +27,17 @@ $commandMessage = 0x8015; $newSessionCommand = 8; $settingsCommand = 19
 
 function Get-Control([IntPtr]$Settings, [string]$Name) { [AgtermSettings]::GetDlgItem($Settings, $settingsIds[$Name]) }
 
-# Open-Settings opens Settings on `$Tab` with `settings open`, or without one as the menu item does.
+# Open-Settings opens Settings as the menu item does, which shows General, an open one coming forward on it, then
+# moves to `$Tab` with the tabs' arrow key.
 function Open-Settings($Shell, [IntPtr]$Window, [string]$Tab) {
-    if ($Tab) {
-        $reply = Invoke-Ctl $Shell.State @("settings", "open", $Tab)
-        if ($reply.result.text -ne $Tab) { Write-Host "  settings open $Tab replied $($reply | ConvertTo-Json -Compress)"; return $null }
-    } else {
-        [AgtermSettings]::PostMessageW($Window, $commandMessage, [IntPtr]$settingsCommand, [IntPtr]::Zero) | Out-Null
-    }
-    Wait-Until { [AgtermWin32]::Visible($Shell.Process.Id, "agterm-settings") | Select-Object -First 1 } 10
+    [AgtermSettings]::PostMessageW($Window, $commandMessage, [IntPtr]$settingsCommand, [IntPtr]::Zero) | Out-Null
+    $settings = Wait-Until { [AgtermWin32]::Visible($Shell.Process.Id, "agterm-settings") | Select-Object -First 1 } 10
+    if (-not $settings) { return $null }
+    # the menu item shows General first, also on an open Settings; wait for that before moving on
+    if (-not (Wait-Until { [AgtermWin32]::IsWindowVisible((Get-Control $settings "directory")) } 5)) { return $null }
+    $steps = [array]::IndexOf(@("general", "appearance", "notifications"), $(if ($Tab) { $Tab } else { "general" }))
+    for ($i = 0; $i -lt $steps; $i++) { Next-Tab $settings }
+    $settings
 }
 
 # Send-Notification tells Settings a control changed, as the control itself does with WM_COMMAND.
@@ -172,9 +174,9 @@ $shellCases["settings"] = {
     $generalHidden = -not [AgtermWin32]::IsWindowVisible((Get-Control $settings "directory"))
     if (-not ($appearanceShown -and $generalHidden)) { $failures += "the Appearance tab shows theme $appearanceShown, hides General $generalHidden" }
     Save-Snapshot $Shell "settings-appearance" $settings
-    if ((Open-Settings $Shell $window "notifications") -ne $settings) { $failures += "settings open on an open Settings opened another window" }
-    if (-not [AgtermWin32]::IsWindowVisible((Get-Control $settings "banners"))) { $failures += "settings open notifications did not show that tab" }
-    if ([AgtermWin32]::IsWindowVisible((Get-Control $settings "theme"))) { $failures += "settings open notifications left the Appearance tab shown" }
+    if ((Open-Settings $Shell $window "notifications") -ne $settings) { $failures += "Settings… on an open Settings opened another window" }
+    if (-not [AgtermWin32]::IsWindowVisible((Get-Control $settings "banners"))) { $failures += "the Notifications tab is not shown" }
+    if ([AgtermWin32]::IsWindowVisible((Get-Control $settings "theme"))) { $failures += "the Notifications tab left the Appearance tab shown" }
     Save-Snapshot $Shell "settings-notifications" $settings
     Set-Check $settings "banners" $false
     if ([AgtermSettings]::IsWindowEnabled((Get-Control $settings "sound"))) { $failures += "turning banners off left the sound choice enabled" }
@@ -207,8 +209,8 @@ $shellCases["settings"] = {
     if ("$($note.result.text)" -notmatch "is off") { $failures += "notify with banners off replied $($note | ConvertTo-Json -Compress)" }
 
     $settings = Open-Settings $Shell $window "appearance"
-    if (-not $settings) { return $failures + @("settings open appearance did not open Settings") }
-    if (-not [AgtermWin32]::IsWindowVisible((Get-Control $settings "theme"))) { $failures += "settings open appearance did not show that tab" }
+    if (-not $settings) { return $failures + @("Settings… did not open Settings again") }
+    if (-not [AgtermWin32]::IsWindowVisible((Get-Control $settings "theme"))) { $failures += "the Appearance tab is not shown" }
     $dracula = Find-Row $settings "theme" "Dracula"
     if ($dracula -lt 0) { return $failures + @("the theme list lacks Dracula") }
     Set-Row $settings "theme" $dracula -List
@@ -238,14 +240,6 @@ function Set-AppMode([IntPtr]$Window, [bool]$Light) {
 
 # With Follow Windows light and dark mode on, the dark theme draws while Windows is dark and the light one while it is
 # light. It changes the desktop's app mode, so it runs on CI's runner only, putting the mode back after.
-# settings open refuses a tab Settings does not have
-$shellCases["settings-open"] = {
-    param($Shell)
-    $reply = Invoke-Ctl $Shell.State @("settings", "open", "keys")
-    if ($reply.ok) { return @("settings open keys replied $($reply | ConvertTo-Json -Compress)") }
-    if ([AgtermWin32]::Visible($Shell.Process.Id, "agterm-settings")) { @("a refused tab opened Settings") }
-}
-
 $shellCases["settings-system-theme"] = {
     param($Shell)
     if ($env:GITHUB_ACTIONS -ne "true") {
