@@ -1,4 +1,4 @@
-# The palettes' cases: Ctrl+P and Ctrl+Shift+P go in as real keystrokes, a query is the field's text, Enter, Esc and
+﻿# The palettes' cases: Ctrl+P and Ctrl+Shift+P go in as real keystrokes, a query is the field's text, Enter, Esc and
 # the arrows are posted to the field, and a click away is a real click. Rows are read back from the list, the outcome
 # through agtermctl. Dot-sourced by shell-cases.ps1 after title-bar-cases.ps1, whose AgtermWin32 helpers it uses.
 
@@ -251,13 +251,13 @@ $shellCases["palettes"] = {
     Start-Sleep -Milliseconds 800
     if (-not (Get-Palette $window)) { $failures += "Enter on the disabled Restart Session closed the palette" }
 
-    $before = (Get-SessionNodes $state).Count
+    $before = @(Get-SessionNodes $state).Count
     [AgtermInput]::SetText($palette.Edit, "new session windows")
     if (-not (Wait-Until { @(Get-Rows $palette)[0] -eq "New Session › Windows PowerShell" } 5)) {
         $failures += "'new session windows' leads with '$(@(Get-Rows $palette)[0])'"
     }
     Send-Key $palette.Edit 0x0D
-    if (-not (Wait-Until { (Get-SessionNodes $state).Count -eq $before + 1 } 10)) { $failures += "New Session from the palette left $((Get-SessionNodes $state).Count) session(s)" }
+    if (-not (Wait-Until { @(Get-SessionNodes $state).Count -eq $before + 1 } 10)) { $failures += "New Session from the palette left $(@(Get-SessionNodes $state).Count) session(s)" }
 
     # a palette row that opens the other palette leaves it open
     $palette = Open-Palette $window $true

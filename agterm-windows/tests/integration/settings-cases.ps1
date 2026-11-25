@@ -1,4 +1,4 @@
-# Settings' cases: they open Settings with `settings open` or as its menu item does, set its controls with the controls' own messages, press
+﻿# Settings' cases: they open Settings with `settings open` or as its menu item does, set its controls with the controls' own messages, press
 # OK or Cancel, then read native.json and what the window now does. Dot-sourced by shell-cases.ps1 after
 # title-bar-cases.ps1, whose AgtermWin32 helpers they use; the ids mirror SettingsWindow.Control.
 
