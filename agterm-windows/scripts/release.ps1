@@ -73,6 +73,7 @@ if (-not $SkipDmgCheck) {
     Remove-Item -Recurse -Force $dmgDir
 }
 
+$env:AGTERM_WEBVIEW2_ARCH = $Arch
 Push-Location $root
 try {
     swift build -c release
@@ -82,6 +83,7 @@ try {
     if ($LASTEXITCODE) { throw "swift build --product agtermctl failed" }
 } finally {
     Pop-Location
+    Remove-Item Env:AGTERM_WEBVIEW2_ARCH -ErrorAction SilentlyContinue
 }
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 & (Join-Path $PSScriptRoot "stage.ps1") -Configuration release -Output $stage

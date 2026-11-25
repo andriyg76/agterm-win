@@ -69,6 +69,7 @@ jobs:
       - name: Build
         env:
           AGTERM_ALLOW_UNSIGNED: "1"
+          AGTERM_WEBVIEW2_ARCH: ${{ matrix.arch }}
         run: ./scripts/release.ps1 -Version $env:VERSION -Arch ${{ matrix.arch }}
       # the Store signs it, so it is an artifact for Partner Center rather than a release asset
       - name: MSIX
