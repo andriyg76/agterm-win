@@ -917,8 +917,12 @@ final class NativeShell {
         locals.first { $0.id == id }?.name ?? serverSession(id)?.displayName
     }
 
+    private var requestedSidebarRename: Foundation.UUID?
+
     private func startRename() {
         guard let tree, canRename(selected), let selected, let item = items[selected] else { return }
+        requestedSidebarRename = selected
+        defer { requestedSidebarRename = nil }
         nt_tree_edit(tree, item)
     }
 
@@ -932,16 +936,20 @@ final class NativeShell {
         let id = tag > 0 && Int(tag) <= tagged.count ? tagged[Int(tag) - 1] : nil
         switch stage {
         case 1:
-            guard let id, canRename(id), let tree, let name = name(of: id) else { return 1 }
+            guard let id, id == requestedSidebarRename, let tree, let name = name(of: id) else { return 1 }
             nt_tree_set_edit_text(tree, Array(name.utf16) + [0])
             return 0
         case 2:
             let name = String(decodingCString: text, as: UTF16.self)
-            if let id { rename(id, to: name) }
-            focus()
+            // A click on another row can end editing while TreeView is still handling that click.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if let id { rename(id, to: name) }
+                focus()
+            }
             return 0
         default:
-            focus()
+            DispatchQueue.main.async { [weak self] in self?.focus() }
             return 0
         }
     }
