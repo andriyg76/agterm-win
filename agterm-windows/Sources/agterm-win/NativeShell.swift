@@ -479,7 +479,7 @@ final class NativeShell {
                                                          notifications: settings.notifications, general: settings.general,
                                                          serverAtLaunch: Set(ServerLaunch.atLaunch(settings.serverLaunch))),
                             themes: TerminalAppearance.themes.catalog.names, fonts: TerminalAppearance.monospaceFonts,
-                            distributions: listed, chrome: chromePalette,
+                            distributions: listed,
                             preview: { [unowned self] in applyAppearance($0) },
                             finish: { [unowned self] kept in
                                 guard let kept else { return }
@@ -589,8 +589,8 @@ final class NativeShell {
 
     fileprivate func editColors(_ context: HDC?) -> LRESULT {
         let palette = chromePalette
-        SetTextColor(context, findFailed ? palette.chromeAccent : palette.chromeText)
-        SetBkColor(context, palette.palBg)
+        SetTextColor(context, ChromePalette.colorref(findFailed ? palette.chromeAccent : palette.chromeText))
+        SetBkColor(context, ChromePalette.colorref(palette.clientBg))
         return LRESULT(Int(bitPattern: darkBrush))
     }
 
@@ -1562,14 +1562,15 @@ final class NativeShell {
     }
 
     fileprivate func staticColors(_ context: HDC?, _ control: HWND?) -> LRESULT {
+        let palette = chromePalette
         if let control, let index = captions.firstIndex(of: control) {
             let lit = dashboard.map { $0.members.indices.contains(index) && $0.members[index] == $0.highlighted } ?? false
-            SetTextColor(context, lit ? 0xFFFFFF : 0xC8C8C8)
-            SetBkColor(context, lit ? 0x784F26 : 0x262525)
+            SetTextColor(context, ChromePalette.colorref(palette.chromeText))
+            SetBkColor(context, ChromePalette.colorref(lit ? palette.palSel : palette.clientBg))
             return LRESULT(Int(bitPattern: lit ? highlightBrush : darkBrush))
         }
         SetTextColor(context, 0x5AB4E5)
-        SetBkColor(context, 0x262525)
+        SetBkColor(context, ChromePalette.colorref(palette.clientBg))
         return LRESULT(Int(bitPattern: darkBrush))
     }
 

@@ -1,5 +1,6 @@
 import AgtermWinKit
 import Foundation
+import NativeShim
 import WinSDK
 import agtermCore
 
@@ -31,11 +32,6 @@ final class SettingsWindow {
     private var pages: [[HWND?]] = [[], [], []]
     private var font: HFONT?
     private var loading = true
-    private var dialogBrush: HBRUSH?
-    private var chromeText = COLORREF(bitPattern: 0xCCCCCC)
-    private var chromeBg = COLORREF(bitPattern: 0x252526)
-    private var chromeDim = COLORREF(bitPattern: 0x808080)
-    private var chromeDark = true
 
     // UDM_SETBUDDY, UDM_SETRANGE32, UDM_SETPOS32, UDM_GETPOS32; TCM_INSERTITEMW, TCM_GETCURSEL; TCN_SELCHANGE
     private static let setBuddy = UINT(WM_USER + 105), setRange = UINT(WM_USER + 111), setPosition = UINT(WM_USER + 113),
@@ -61,7 +57,7 @@ final class SettingsWindow {
     /// show opens Settings over `owner`, or brings an open one to the front. `finish` gets the kept values, nil for a
     /// cancel.
     static func show(owner: HWND?, tab: SettingsTab = .general, values: Values, themes: [String], fonts: [String], distributions: [String],
-                     chrome: ChromePalette, preview: @escaping (Values) -> Void, finish: @escaping (Values?) -> Void) {
+                     preview: @escaping (Values) -> Void, finish: @escaping (Values?) -> Void) {
         if let open = current, let window = open.window {
             open.select(tab)
             SetForegroundWindow(window)
@@ -70,7 +66,6 @@ final class SettingsWindow {
         let settings = SettingsWindow(values: values, themes: themes, fonts: fonts, distributions: distributions, preview: preview,
                                       finish: finish)
         current = settings
-        settings.applyChrome(chrome)
         settings.create(owner: owner)
         settings.select(tab)
     }
@@ -94,33 +89,9 @@ final class SettingsWindow {
 
     var handle: HWND? { window }
 
-    private func applyChrome(_ palette: ChromePalette) {
-        if let dialogBrush { DeleteObject(dialogBrush) }
-        chromeDark = palette.isDark
-        chromeBg = COLORREF(bitPattern: Int32(palette.clientBg & 0xFFFFFF))
-        chromeText = COLORREF(bitPattern: Int32(palette.chromeText & 0xFFFFFF))
-        chromeDim = COLORREF(bitPattern: Int32(palette.chromeDim & 0xFFFFFF))
-        dialogBrush = CreateSolidBrush(COLORREF(bitPattern: Int32(palette.palBg & 0xFFFFFF)))
-    }
-
-    private func tintCommCtrls(_ window: HWND?) {
-        guard let window else { return }
-        let theme = Array((chromeDark ? "DarkMode_Explorer" : "Explorer").utf16) + [0]
-        theme.withUnsafeBufferPointer { name in
-            SetWindowTheme(window, name.baseAddress, nil)
-            var child = GetWindow(window, UINT(GW_CHILD))
-            while let current = child {
-                SetWindowTheme(current, name.baseAddress, nil)
-                child = GetWindow(current, UINT(GW_HWNDNEXT))
-            }
-        }
-    }
-
-    fileprivate func controlColors(_ context: HDC?) -> LRESULT {
-        guard let context, let dialogBrush else { return 0 }
-        SetTextColor(context, chromeText)
-        SetBkColor(context, chromeBg)
-        return LRESULT(Int(bitPattern: dialogBrush))
+    /// applyChrome recolors the open window after the chrome palette changed.
+    func applyChrome() {
+        if let window { nt_skin_window(UnsafeMutableRawPointer(window)) }
     }
 
     private func create(owner: HWND?) {
@@ -157,6 +128,7 @@ final class SettingsWindow {
         font = CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL, 0, 0, 0, DWORD(DEFAULT_CHARSET), DWORD(OUT_DEFAULT_PRECIS),
                            DWORD(CLIP_DEFAULT_PRECIS), DWORD(CLEARTYPE_QUALITY), DWORD(DEFAULT_PITCH), Array("Segoe UI".utf16) + [0])
 
+        let skinned = nt_skin_controls_begin()
         var page = -1
         func add(_ className: String, _ text: String, _ style: Int32, _ x: Int32, _ y: Int32, _ width: Int32, _ height: Int32,
                  id: Int32 = 0, exStyle: Int32 = 0) -> HWND? {
@@ -221,6 +193,7 @@ final class SettingsWindow {
         page = -1
         _ = add("BUTTON", "OK", Int32(BS_DEFPUSHBUTTON) | tab, 316, 520, 92, 28, id: Int32(IDOK))
         _ = add("BUTTON", "Cancel", Int32(BS_PUSHBUTTON) | tab, 416, 520, 92, 28, id: Int32(IDCANCEL))
+        nt_skin_controls_end(skinned)
 
         let general = original.general
         Self.directories.forEach { addString($0.1, to: directory, message: CB_ADDSTRING) }
@@ -253,7 +226,7 @@ final class SettingsWindow {
         EnableWindow(sound, notifications.banners ? true : false)
         TaskbarFlash.allCases.forEach { addString($0.title, to: flash, message: CB_ADDSTRING) }
         SendMessageW(flash, UINT(CB_SETCURSEL), WPARAM(TaskbarFlash.allCases.firstIndex(of: notifications.flash) ?? 0), 0)
-        tintCommCtrls(window)
+        applyChrome()
         loading = false
         ShowWindow(window, SW_SHOW)
         SetFocus(tabs)
@@ -373,7 +346,6 @@ final class SettingsWindow {
         self.window = nil
         DestroyWindow(window)
         if let font { DeleteObject(font) }
-        if let dialogBrush { DeleteObject(dialogBrush) }
         Self.current = nil
     }
 }
@@ -392,9 +364,6 @@ private let settingsWindowProcedure: WNDPROC = { window, message, wParam, lParam
         case UINT(WM_CLOSE):
             SettingsWindow.current?.close(keeping: nil)
             return 0
-        case UINT(WM_CTLCOLORSTATIC), UINT(WM_CTLCOLOREDIT), UINT(WM_CTLCOLORLISTBOX), UINT(WM_CTLCOLORBTN):
-            if let colors = SettingsWindow.current?.controlColors(HDC(bitPattern: UInt(wParam))), colors != 0 { return colors }
-            return DefWindowProcW(window, message, wParam, lParam)
         default:
             return DefWindowProcW(window, message, wParam, lParam)
         }

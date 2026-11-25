@@ -32,6 +32,11 @@ struct ChromePaletteTests {
         #expect(base.sbBg != warm.sbBg)
     }
 
+    @Test func colorrefSwapsRedAndBlue() {
+        #expect(ChromePalette.colorref(0x282A36) == 0x362A28)
+        #expect(ChromePalette.colorref(0xFF282A36) == 0x362A28)
+    }
+
     @Test func nilThemeUsesDefaults() {
         let palette = ChromePalette.recompute(theme: nil)
         #expect(palette.isDark)

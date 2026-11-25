@@ -11,12 +11,6 @@
 
 namespace {
 
-constexpr COLORREF background = RGB(0x25, 0x25, 0x26);
-constexpr COLORREF border = RGB(0x45, 0x45, 0x46);
-constexpr COLORREF selected = RGB(0x26, 0x4F, 0x78);  // the sidebar's selection
-constexpr COLORREF text = RGB(0xCC, 0xCC, 0xCC);
-constexpr COLORREF dim = RGB(0x80, 0x80, 0x80);
-constexpr COLORREF disabled = RGB(0x6E, 0x6E, 0x6E);
 constexpr int visibleRows = 10;
 constexpr UINT_PTR keysSubclass = 2;  // above the find bar's own, which is 1
 
@@ -97,7 +91,7 @@ void drawRow(Palette *palette, const DRAWITEMSTRUCT *item) {
     HDC dc = item->hDC;
     RECT rect = item->rcItem;
     bool lit = (item->itemState & ODS_SELECTED) != 0;
-    HBRUSH fill = CreateSolidBrush(lit ? selected : background);
+    HBRUSH fill = CreateSolidBrush(lit ? nt_chrome_pal_sel() : nt_chrome_pal_bg());
     FillRect(dc, &rect, fill);
     DeleteObject(fill);
     SetBkMode(dc, TRANSPARENT);
@@ -111,7 +105,7 @@ void drawRow(Palette *palette, const DRAWITEMSTRUCT *item) {
     detail = rect;
     detail.left = rect.right - pad - detailWidth;
     detail.right = rect.right - pad;
-    SetTextColor(dc, lit ? text : dim);
+    SetTextColor(dc, lit ? nt_chrome_pal_text() : nt_chrome_pal_dim());
     DrawTextW(dc, row.detail, -1, &detail, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
     int end = (detailWidth > 0 ? detail.left - gap : rect.right - pad);
@@ -123,13 +117,13 @@ void drawRow(Palette *palette, const DRAWITEMSTRUCT *item) {
     if (title.right > end) title.right = end;
     title.top = rect.top;
     title.bottom = rect.bottom;
-    SetTextColor(dc, !row.enabled ? disabled : lit ? RGB(0xFF, 0xFF, 0xFF) : text);
+    SetTextColor(dc, row.enabled ? nt_chrome_pal_text() : nt_chrome_pal_disabled());
     DrawTextW(dc, row.title, -1, &title, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
     if (row.subtitle[0] && title.right + gap < end) {
         SelectObject(dc, palette->small);
         RECT subtitle{title.right + gap, rect.top, end, rect.bottom};
-        SetTextColor(dc, lit ? text : dim);
+        SetTextColor(dc, lit ? nt_chrome_pal_text() : nt_chrome_pal_dim());
         DrawTextW(dc, row.subtitle, -1, &subtitle, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
     }
     SelectObject(dc, previous);
@@ -188,8 +182,8 @@ LRESULT CALLBACK panelProcedure(HWND panel, UINT message, WPARAM wParam, LPARAM 
         return 0;
     }
     case WM_CTLCOLOREDIT:
-        SetTextColor(reinterpret_cast<HDC>(wParam), RGB(0xE0, 0xE0, 0xE0));
-        SetBkColor(reinterpret_cast<HDC>(wParam), background);
+        SetTextColor(reinterpret_cast<HDC>(wParam), nt_chrome_pal_text());
+        SetBkColor(reinterpret_cast<HDC>(wParam), nt_chrome_pal_bg());
         return reinterpret_cast<LRESULT>(palette->brush);
     case WM_CTLCOLORLISTBOX:
         return reinterpret_cast<LRESULT>(palette->brush);
@@ -205,7 +199,7 @@ LRESULT CALLBACK panelProcedure(HWND panel, UINT message, WPARAM wParam, LPARAM 
         RECT rect;
         GetClientRect(panel, &rect);
         FillRect(dc, &rect, palette->brush);
-        HBRUSH frame = CreateSolidBrush(border);
+        HBRUSH frame = CreateSolidBrush(nt_chrome_pal_border());
         FrameRect(dc, &rect, frame);
         DeleteObject(frame);
         EndPaint(panel, &paint);
@@ -239,7 +233,7 @@ extern "C" void *nt_palette_create(void *parent, uint32_t dpi) {
     auto palette = new Palette;
     palette->panel = panel;
     palette->dpi = dpi;
-    palette->brush = CreateSolidBrush(background);
+    palette->brush = CreateSolidBrush(nt_chrome_pal_bg());
     loadFonts(palette);
     SetWindowLongPtrW(panel, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(palette));
     // the find bar's field, so the two look and type alike
@@ -252,7 +246,7 @@ extern "C" void *nt_palette_create(void *parent, uint32_t dpi) {
     SetWindowSubclass(palette->edit, keysProcedure, keysSubclass, reinterpret_cast<DWORD_PTR>(palette));
     palette->list = CreateWindowExW(0, L"LISTBOX", L"", WS_CHILD | WS_VSCROLL | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY |
                                         LBS_NOINTEGRALHEIGHT, 0, 0, 10, 10, panel, nullptr, GetModuleHandleW(nullptr), nullptr);
-    SetWindowTheme(palette->list, L"DarkMode_Explorer", nullptr);
+    SetWindowTheme(palette->list, nt_chrome_is_dark() ? L"DarkMode_Explorer" : L"Explorer", nullptr);
     return panel;
 }
 
@@ -318,6 +312,7 @@ extern "C" void nt_palette_apply_chrome(void *panel) {
     if (!palette) return;
     DeleteObject(palette->brush);
     palette->brush = CreateSolidBrush(nt_chrome_pal_bg());
+    SetWindowTheme(palette->list, nt_chrome_is_dark() ? L"DarkMode_Explorer" : L"Explorer", nullptr);
     InvalidateRect(palette->panel, nullptr, TRUE);
     InvalidateRect(palette->list, nullptr, TRUE);
 }

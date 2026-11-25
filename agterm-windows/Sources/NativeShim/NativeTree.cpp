@@ -19,10 +19,8 @@ extern "C" void *nt_tree_create(void *parent, uint32_t dpi) {
                                     TVS_SHOWSELALWAYS | TVS_FULLROWSELECT | TVS_EDITLABELS,
                                 0, 0, 100, 100, static_cast<HWND>(parent), nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!tree) return nullptr;
-    SetWindowTheme(tree, L"DarkMode_Explorer", nullptr);
     TreeView_SetExtendedStyle(tree, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
-    TreeView_SetBkColor(tree, RGB(0x25, 0x25, 0x26));
-    TreeView_SetTextColor(tree, RGB(0xCC, 0xCC, 0xCC));
+    nt_tree_apply_colors(tree);
     nt_tree_set_dpi(tree, dpi);
     return tree;
 }
@@ -50,6 +48,7 @@ extern "C" void nt_tree_apply_colors(void *tree) {
     if (!window) return;
     TreeView_SetBkColor(window, nt_chrome_sb_bg());
     TreeView_SetTextColor(window, nt_chrome_sb_text());
+    SetWindowTheme(window, nt_chrome_is_dark() ? L"DarkMode_Explorer" : L"Explorer", nullptr);
     InvalidateRect(window, nullptr, TRUE);
 }
 
@@ -92,12 +91,11 @@ extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *di
     if (draw->nmcd.dwDrawStage != CDDS_ITEMPREPAINT) return CDRF_DODEFAULT;
     int64_t tag = static_cast<int64_t>(draw->nmcd.lItemlParam);
     bool dim = tag > 0 && tag <= count && dimmed[tag - 1];
-    draw->clrText = dim ? RGB(0x80, 0x80, 0x80) : RGB(0xCC, 0xCC, 0xCC);
-    draw->clrTextBk = RGB(0x25, 0x25, 0x26);
+    draw->clrText = dim ? nt_chrome_sb_dim() : nt_chrome_sb_text();
+    draw->clrTextBk = nt_chrome_sb_bg();
     // the unthemed tree paints its selection in the light system colors unless the state is taken away
     if (draw->nmcd.uItemState & CDIS_SELECTED) {
-        draw->clrTextBk = RGB(0x26, 0x4F, 0x78);
-        if (!dim) draw->clrText = RGB(0xFF, 0xFF, 0xFF);
+        draw->clrTextBk = nt_chrome_sb_highlight();
         draw->nmcd.uItemState &= ~(CDIS_SELECTED | CDIS_FOCUS);
     }
     return CDRF_DODEFAULT;
