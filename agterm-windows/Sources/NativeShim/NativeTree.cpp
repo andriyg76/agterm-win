@@ -3,6 +3,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <windowsx.h>
 #include <commctrl.h>
 #include <uxtheme.h>
 
@@ -10,6 +11,49 @@
 #include <wchar.h>
 
 #pragma comment(lib, "uxtheme")
+
+namespace {
+
+int64_t itemTag(HWND tree, HTREEITEM node) {
+    if (!node) return 0;
+    TVITEMW item{};
+    item.hItem = node;
+    item.mask = TVIF_PARAM;
+    return SendMessageW(tree, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&item)) ? item.lParam : 0;
+}
+
+bool launchButtonRect(HWND tree, HTREEITEM item, RECT &rect) {
+    RECT client{};
+    if (!GetClientRect(tree, &client) || !TreeView_GetItemRect(tree, item, &rect, FALSE)) return false;
+    rect.right = client.right - MulDiv(4, GetDpiForWindow(tree), 96);
+    rect.left = rect.right - (rect.bottom - rect.top);
+    return rect.left >= 0;
+}
+
+int64_t launchButtonAt(HWND tree, POINT point) {
+    for (auto item = TreeView_GetFirstVisible(tree); item; item = TreeView_GetNextVisible(tree, item)) {
+        RECT rect{};
+        if (!launchButtonRect(tree, item, rect) || point.y < rect.top) break;
+        if (point.y < rect.bottom) {
+            auto tag = itemTag(tree, item);
+            return tag < 0 && PtInRect(&rect, point) ? tag : 0;
+        }
+    }
+    return 0;
+}
+
+LRESULT CALLBACK treeProcedure(HWND tree, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) {
+    if (message == WM_LBUTTONDOWN || message == WM_LBUTTONUP || message == WM_LBUTTONDBLCLK) {
+        if (auto tag = launchButtonAt(tree, POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)})) {
+            if (message == WM_LBUTTONDOWN) SendMessageW(GetParent(tree), NT_TREE_LAUNCH, 0, static_cast<LPARAM>(tag));
+            return 0;
+        }
+    }
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(tree, treeProcedure, 1);
+    return DefSubclassProc(tree, message, wParam, lParam);
+}
+
+}  // namespace
 
 extern "C" void *nt_tree_create(void *parent, uint32_t dpi) {
     // Settings' size arrows are an up-down control, registered with the tree's class
@@ -19,6 +63,7 @@ extern "C" void *nt_tree_create(void *parent, uint32_t dpi) {
                                     TVS_SHOWSELALWAYS | TVS_FULLROWSELECT | TVS_EDITLABELS,
                                 0, 0, 100, 100, static_cast<HWND>(parent), nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!tree) return nullptr;
+    SetWindowSubclass(tree, treeProcedure, 1, 0);
     TreeView_SetExtendedStyle(tree, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
     nt_tree_apply_colors(tree);
     nt_tree_set_dpi(tree, dpi);
@@ -84,12 +129,31 @@ extern "C" int32_t nt_track_menu(void *menu, void *owner, int32_t x, int32_t y) 
     return TrackPopupMenu(static_cast<HMENU>(menu), TPM_RETURNCMD | TPM_RIGHTBUTTON, x, y, 0, static_cast<HWND>(owner), nullptr);
 }
 
-extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count) {
+extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count,
+                                         const uint8_t *launchable, int64_t groupCount) {
     auto draw = reinterpret_cast<NMTVCUSTOMDRAW *>(notification);
     if (draw->nmcd.hdr.code != NM_CUSTOMDRAW) return -1;
     if (draw->nmcd.dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
-    if (draw->nmcd.dwDrawStage != CDDS_ITEMPREPAINT) return CDRF_DODEFAULT;
     int64_t tag = static_cast<int64_t>(draw->nmcd.lItemlParam);
+    const bool group = tag < 0 && tag >= -groupCount;
+    if (draw->nmcd.dwDrawStage == CDDS_ITEMPOSTPAINT && group) {
+        const auto tree = draw->nmcd.hdr.hwndFrom;
+        const auto item = reinterpret_cast<HTREEITEM>(draw->nmcd.dwItemSpec);
+        RECT rect{};
+        if (launchButtonRect(tree, item, rect)) {
+            const auto dc = draw->nmcd.hdc;
+            const auto oldMode = SetBkMode(dc, TRANSPARENT);
+            const auto oldColor = SetTextColor(dc, launchable[-tag - 1] ? nt_chrome_sb_text() : nt_chrome_sb_dim());
+            const auto brush = CreateSolidBrush(TreeView_GetSelection(tree) == item ? nt_chrome_sb_selected() : nt_chrome_sb_bg());
+            FillRect(dc, &rect, brush);
+            DeleteObject(brush);
+            DrawTextW(dc, L"+", 1, &rect, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+            SetTextColor(dc, oldColor);
+            SetBkMode(dc, oldMode);
+        }
+        return CDRF_DODEFAULT;
+    }
+    if (draw->nmcd.dwDrawStage != CDDS_ITEMPREPAINT) return CDRF_DODEFAULT;
     bool dim = tag > 0 && tag <= count && dimmed[tag - 1];
     draw->clrText = dim ? nt_chrome_sb_dim() : nt_chrome_sb_text();
     draw->clrTextBk = nt_chrome_sb_bg();
@@ -98,7 +162,7 @@ extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *di
         draw->clrTextBk = nt_chrome_sb_highlight();
         draw->nmcd.uItemState &= ~(CDIS_SELECTED | CDIS_FOCUS);
     }
-    return CDRF_DODEFAULT;
+    return group ? CDRF_NOTIFYPOSTPAINT : CDRF_DODEFAULT;
 }
 
 extern "C" int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y) {
@@ -118,9 +182,9 @@ extern "C" int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y) {
         hit.pt = {*x, *y};
         ScreenToClient(window, &hit.pt);
         item.hItem = TreeView_HitTest(window, &hit);
-        if (!item.hItem || !(hit.flags & TVHT_ONITEM)) return 0;
+        if (!item.hItem) return launchButtonAt(window, hit.pt);
     }
-    return SendMessageW(window, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&item)) ? static_cast<int64_t>(item.lParam) : 0;
+    return itemTag(window, item.hItem);
 }
 
 namespace {

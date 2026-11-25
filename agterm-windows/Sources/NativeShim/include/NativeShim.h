@@ -109,12 +109,11 @@ int32_t nt_tree_label_edit(intptr_t notification, int64_t *tag, uint16_t *text, 
 void nt_tree_edit(void *tree, void *item);
 // nt_tree_set_edit_text replaces the text an in-place edit starts from (the label without its marks).
 void nt_tree_set_edit_text(void *tree, const uint16_t *text);
-// nt_tree_item_at is the tag of the item at a WM_CONTEXTMENU's screen point (0 off any item, a workspace row
-// included); for a keyboard menu (-1, -1) it is the selected item's, and the point moves to that item's corner.
+// nt_tree_item_at returns the row's tag, or 0 off any row. For a keyboard menu it moves the point to the caret row.
 int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y);
-// nt_tree_custom_draw answers a tree's NM_CUSTOMDRAW (-1 for any other WM_NOTIFY): dark selection, and items whose
-// tag's `dimmed` byte is set drawn grey.
-intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count);
+// Positive tags index the dimmed sessions. Negative tags index workspace launch buttons.
+intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count,
+                             const uint8_t *launchable, int64_t group_count);
 // The find bar: an edit control posting NT_FIND_NEXT (wParam 1 with Shift) on Enter and NT_FIND_CLOSE on Escape to
 // its parent; its text changes arrive as the parent's EN_CHANGE.
 // The shim's messages sit at WM_APP + 0x100 and up; the Swift side numbers its own WM_APP + n below that.
@@ -215,6 +214,7 @@ int32_t nt_notice_bar_text_width(uint32_t dpi, const uint16_t *text);
 // Page overlays (WebView2) in a child HWND. `state` is 0 loading, 1 loaded, 2 failed; each change posts
 // NT_PAGE_STATE to the top-level window, which reads it back.
 #define NT_PAGE_STATE 0x8105
+#define NT_TREE_LAUNCH 0x8106
 // `data_folder` is the WebView2 user data folder; null keeps WebView2's default beside the executable.
 void *nt_page_create(void *parent, const uint16_t *data_folder);
 void nt_page_destroy(void *page);
