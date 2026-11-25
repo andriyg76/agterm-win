@@ -293,7 +293,8 @@ $shellCases = [ordered]@{
             $snap = Get-Node $state $id
             return $failures + @("html overlay never reached loaded: $($snap.htmlOverlays | ConvertTo-Json -Compress)")
         }
-        if ($node.htmlOverlays[0].file -ne $page) { $failures += "tree file is '$($node.htmlOverlays[0].file)'" }
+        # agtermctl sends the path in URL form, with forward slashes
+        if ([IO.Path]::GetFullPath($node.htmlOverlays[0].file) -ne [IO.Path]::GetFullPath($page)) { $failures += "tree file is '$($node.htmlOverlays[0].file)'" }
         Save-Snapshot $Shell "overlay-html"
         $noRead = Invoke-Ctl $state @("session", "overlay", "text", "--target", $id)
         if ($noRead.error -ne "no overlay to read: the slot holds an html page") { $failures += "overlay text replied $($noRead | ConvertTo-Json -Compress)" }
