@@ -10,6 +10,17 @@ struct WindowsKeymapTests {
         return keymap.press(chord)
     }
 
+    private func defaults() -> WindowsKeymap {
+        #if os(Windows)
+        WindowsKeymap(text: "")
+        #else
+        let chords = BuiltinAction.allCases.compactMap { action in action.windowsDefaultChord.map { (action, $0) } }
+        let unbound = Set(BuiltinAction.allCases.filter { $0.windowsDefaultChord == nil })
+        return WindowsKeymap(keymap: Keymap(builtinOverrides: Dictionary(uniqueKeysWithValues: chords), commands: [],
+                                            builtinUnbound: unbound), diagnostics: [], path: "keymap.conf")
+        #endif
+    }
+
     @Test func keysAreNamedAsKeymapConfWritesThem() {
         #expect(WindowsKeymap.chord(virtualKey: 0x54, control: true, alt: false, shift: true, win: false) == Chord(mods: [.control, .shift], key: "t"))
         #expect(WindowsKeymap.chord(virtualKey: 0xBB, control: true, alt: false, shift: false, win: false)?.key == "=")
@@ -40,7 +51,9 @@ struct WindowsKeymapTests {
         #expect(press(&keymap, "x") == .consumed)
         #expect(press(&keymap, "x") == .pass)
         #expect(keymap.shortcuts[.newSession] == "Ctrl+A, N")
+        #if os(Windows)
         #expect(!keymap.usesWinKey)
+        #endif
     }
 
     @Test func escAbandonsALeader() {
@@ -93,9 +106,8 @@ struct WindowsKeymapTests {
                 == Chord(mods: [.control], key: "insert"))
     }
 
-    #if os(Windows)
     @Test func theDefaultsAreTheWindowsChords() {
-        var keymap = WindowsKeymap(text: "")
+        var keymap = defaults()
         #expect(press(&keymap, "n", control: true) == .command(.newSession))
         #expect(press(&keymap, "w", control: true) == .command(.closeSession))
         #expect(press(&keymap, "f", control: true) == .command(.find))
@@ -114,7 +126,7 @@ struct WindowsKeymapTests {
     }
 
     @Test func retiredDefaultsAndShellKeysPassThrough() {
-        var keymap = WindowsKeymap(text: "")
+        var keymap = defaults()
         for chord in [Chord(mods: [.control], key: "d"), Chord(mods: [.control], key: "j"), Chord(mods: [.control], key: "z"),
                       Chord(mods: [.control, .shift], key: "t"), Chord(mods: [.control, .shift], key: "n"),
                       Chord(mods: [.control, .shift], key: "w"), Chord(mods: [.control, .shift], key: "f"),
@@ -126,6 +138,7 @@ struct WindowsKeymapTests {
         }
     }
 
+    #if os(Windows)
     @Test func existingExplicitBindingsKeepTheirChords() {
         var keymap = WindowsKeymap(text: "map ctrl+n toggle_scratch")
         #expect(keymap.diagnostics.isEmpty)
