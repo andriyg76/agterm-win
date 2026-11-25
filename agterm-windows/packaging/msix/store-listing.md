@@ -84,7 +84,9 @@ coding agents
 
 ## Restricted capabilities (Submission ▸ Properties)
 
-Partner Center asks why the package declares each restricted capability in `AppxManifest.xml`.
+Partner Center asks why the package declares each restricted capability in `AppxManifest.xml`. After a denial of
+`unvirtualizedResources` (2026-11-25, product 9N0DD68BCXZX), see [STORE-SUBMISSION.md](STORE-SUBMISSION.md) for
+reconsideration text, required URLs, and what not to change in the production manifest.
 
 ### runFullTrust
 
@@ -109,3 +111,8 @@ package copy. The same tools run from any other terminal would not see them, and
 silently delete the user's work. Turning virtualization off makes a program behave exactly as it does in Windows
 Terminal or a console window. agterm's own settings are stored in %LOCALAPPDATA%\agterm-win. Nothing is written
 outside the user's profile, and no elevated access is requested.
+
+WSL catalog sessions need that same real profile layout: agterm connects with wsl.exe, may download agterm-server
+from GitHub when the user chooses Install, and keeps state and the agtermctl control socket under the user's
+%LOCALAPPDATA%\agterm-win (not a package-private redirect). A virtualized package would break WSL reconnect,
+agtermctl from scripts, and parity with the winget and Inno builds users already run.

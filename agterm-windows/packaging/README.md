@@ -15,6 +15,8 @@ host's architecture; its header lists the tools and the signing variables.
 - **Microsoft Store**: one MSIX per architecture from `scripts\msix.ps1`, which `windows-release.yml` uploads as the
   `msix-x64` and `msix-arm64` artifacts; both go into the same Partner Center submission, and the Store signs them. Its identity comes from the repository variables `MSIX_IDENTITY_NAME`,
   `MSIX_PUBLISHER` and `MSIX_PUBLISHER_DISPLAY_NAME`, as Partner Center's Product identity page shows them.
+  Store submission notes and reconsideration text: `packaging/msix/STORE-SUBMISSION.md`. Optional MSIX test without
+  `unvirtualizedResources`: `packaging/msix/TESTING-VIRTUALIZED.md` and `msix.ps1 -Virtualized`.
   The package needs Windows 10 1903, turns AppData and registry write virtualization off (`unvirtualizedResources`) so
   shells write where they would outside it, and puts `agtermctl` on PATH as its one execution alias; `agterm-win` starts from the Start menu.
   A Store update ends the package's processes, local zmx sessions included; WSL sessions live in the distribution.
