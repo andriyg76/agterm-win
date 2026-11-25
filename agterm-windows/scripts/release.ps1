@@ -51,7 +51,7 @@ if ($signArguments) {
 $iscc = Find-Tool $env:AGTERM_ISCC "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" "ISCC"
 
 # ── dependencies and build ───────────────────────────────────────────────────
-foreach ($fetch in "fetch-server", "fetch-zmx", "fetch-ghostty-vt") {
+foreach ($fetch in "fetch-server", "fetch-zmx", "fetch-ghostty-vt", "fetch-webview2") {
     if ($fetch -eq "fetch-server") { & (Join-Path $PSScriptRoot "$fetch.ps1") } else { & (Join-Path $PSScriptRoot "$fetch.ps1") -Arch $Arch }
 }
 
