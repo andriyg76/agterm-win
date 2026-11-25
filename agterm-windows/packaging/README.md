@@ -12,6 +12,8 @@ host's architecture; its header lists the tools and the signing variables.
   that release's two installers into `build\package-managers\<version>`. The winget folder goes to a `microsoft/winget-pkgs` PR as
   `manifests/a/andriyg76/agterm-win/<version>`; the `.nupkg` is pushed with `choco push` and the account's API key.
   Both identifiers are `agterm-win`, leaving `agterm` to upstream.
+- **CI (`windows.yml`)**: after tests, `scripts\package-ci.ps1` builds an unsigned Inno installer and Store MSIX (plus a
+  registerable layout) and uploads `ci-installer-*`, `ci-msix-*`, and `msix-store-layout-*` on every run.
 - **Microsoft Store**: one MSIX per architecture from `scripts\msix.ps1`, which `windows-release.yml` uploads as the
   `msix-x64` and `msix-arm64` artifacts; both go into the same Partner Center submission, and the Store signs them. Its identity comes from the repository variables `MSIX_IDENTITY_NAME`,
   `MSIX_PUBLISHER` and `MSIX_PUBLISHER_DISPLAY_NAME`, as Partner Center's Product identity page shows them.
