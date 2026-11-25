@@ -8,6 +8,10 @@ Check that what you want does not already exist: agterm carries a broad control 
 
 Discussions are for ideas, questions, and anything open-ended. Issues are for concrete bugs and for features already agreed in a Discussion.
 
+## Windows parity review
+
+Every agterm-win change to an option, command, or user-facing feature requires an upstream parity check before implementation and a recorded result before merge. Follow the [upstream parity requirements](AGENTS.md).
+
 ## Is it worth it?
 
 Weigh what a feature adds against the code it brings with it.
