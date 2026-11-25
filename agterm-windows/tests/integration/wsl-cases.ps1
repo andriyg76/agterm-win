@@ -296,10 +296,14 @@ $shellCases["notice-bar"] = {
     Note "drag to the bottom"
     $x = [int](12 * $dpi / 96); $y = [int]($height / 2)
     Drag-Bar $bar $x $y $client.Bottom
-    if (-not (Wait-Until { (Get-ScreenRect $bar).Bottom -eq $bottomEdge } 5)) {
-        $failures += "the drop did not move the bar to the bottom: it ends at $((Get-ScreenRect $bar).Bottom), not $bottomEdge"
+    # the bar follows the pointer before the release settles it, so the release's log line says it moved; polling
+    # native.json instead would hold it open against the save
+    if (-not (Wait-Until { (Get-AgtermWinLog $state).Contains("native shell: notice bar at bottom") } 5)) {
+        $failures += "the drop did not move the bar to the bottom"
     }
+    Start-Sleep -Milliseconds 300
     $barRect = Get-ScreenRect $bar
+    if ($barRect.Bottom -ne $bottomEdge) { $failures += "the bar ends at $($barRect.Bottom), not the window's bottom $bottomEdge" }
     $terminalRect = Get-ScreenRect $terminal
     if ($terminalRect.Bottom -gt $barRect.Top) { $failures += "the terminal runs under the bar at the bottom" }
     if ($terminalRect.Top -ge $barRect.Top -or $terminalRect.Top -gt (Get-ScreenPoint $window 0 ([int](48 * $dpi / 96))).Y) {
@@ -317,9 +321,11 @@ $shellCases["notice-bar"] = {
 
     Note "drag to the top"
     Drag-Bar $bar $x $y (-$client.Bottom)
-    if (-not (Wait-Until { (Get-Saved $state).noticeBarPosition -eq "top" } 5)) {
-        $failures += "the drop did not move the bar back to the top: native.json keeps '$((Get-Saved $state).noticeBarPosition)'"
+    if (-not (Wait-Until { (Get-AgtermWinLog $state).Contains("native shell: notice bar at top") } 5)) {
+        $failures += "the drop did not move the bar back to the top"
     }
+    Start-Sleep -Milliseconds 300
+    if ((Get-Saved $state).noticeBarPosition -ne "top") { $failures += "native.json keeps '$((Get-Saved $state).noticeBarPosition)' after the drag to the top" }
     if ((Get-ScreenRect $bar).Top -gt $topEdge + [int](48 * $dpi / 96)) { $failures += "the bar did not return under the title bar" }
     if ((Get-ScreenRect $terminal).Top -lt (Get-ScreenRect $bar).Bottom) { $failures += "the terminal starts above the bar after the drag to the top" }
     Save-Snapshot $Shell "notice-top-light"
