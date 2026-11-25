@@ -248,25 +248,15 @@ deadline check in the poll loop alone cannot.
 It accepts light/dark, sets `NSApp.appearance`, posts `.agtermSystemAppearanceChanged`, echoes the effective
 side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provide no CLI or skill entry.
 
-`settings.open` (`agtermctl settings open [general|appearance|notifications]`) is agterm-win's, absent from the list
-above and compiled only under `#if os(Windows)` (the case, its `ControlActions` requirement, the dispatch arm and the
-CLI's `hostSubcommands` entry), so no other build's switch over every command owes it a case. It shows Settings on a
-tab, switching an open one, and answers the tab; `SettingsTab` owns the names and the refusal. It is window chrome
-with no tree read-back.
-
-`wsl.list`, `wsl.start` and `wsl.launch` (`agtermctl wsl list|start DIST|launch DIST on|off`) are agterm-win's too,
-compiled the same way. `NativeControl` serves them; `ControlWSL.parse` owns their validation, and the dispatcher arm
-only answers `ControlActionsUnsupported`. `wsl.launch` writes the Settings ▸ General check box for that distribution,
+`wsl.list`, `wsl.start` and `wsl.launch` (`agtermctl wsl list|start DIST|launch DIST on|off`) are agterm-win's, absent
+from the list above and compiled only under `#if os(Windows)` (the cases, the dispatch arm and the CLI's
+`hostSubcommands` entry), so no other build's switch over every command owes them a case. They are agterm-win's only
+commands the Mac lacks; its other chrome (Settings, the notice bar) has none.
+`NativeControl` serves them; `ControlWSL.parse` owns their validation, and the dispatcher arm only answers `ControlActionsUnsupported`. `wsl.launch` writes the Settings ▸ General check box for that distribution,
 `off` being a manual choice the first start no longer asks about. Every reply carries the whole `wsl` list, which
 `tree` reports as top-level `wslServers`. `wsl.start` never asks that first-start question: a modal dialog would hold
 the socket's one-at-a-time accept loop. `ControlWSLServer` and both fields compile everywhere, so a Mac decodes a
 Windows reply.
-
-`notice.list`, `notice.position` and `notice.dismiss` (`agtermctl notice list|position top|bottom|dismiss`) are
-agterm-win's notice bar, compiled the same way. `NativeControl` serves them over `NoticeBar.State`; `position` saves
-`native.json`'s `noticeBarPosition`, and `dismiss` hides the shown notice until its text changes, refusing with
-`no notice shown`. Every reply carries `noticeBar`, which `tree` reports at top level; `ControlNoticeBar` compiles
-everywhere.
 
 ## Organization commands
 

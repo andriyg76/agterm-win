@@ -133,11 +133,6 @@ public enum Command: String, Codable, Sendable, CaseIterable {
     case configReload = "config.reload"
     case themeSet = "theme.set"
     case themeList = "theme.list"
-    #if os(Windows)
-    /// settingsOpen shows Settings on a tab (`args.name`). Windows-only, so no other build's switch over every command
-    /// owes it a case.
-    case settingsOpen = "settings.open"
-    #endif
     case pickOpen = "pick.open"
     case pickResult = "pick.result"
     case pickCancel = "pick.cancel"
@@ -182,10 +177,6 @@ public enum Command: String, Codable, Sendable, CaseIterable {
     case wslList = "wsl.list"
     case wslStart = "wsl.start"
     case wslLaunch = "wsl.launch"
-    /// The window's notice bar (`ControlNoticeBar`): read it, move it top or bottom (`args.mode`), dismiss the notice it shows.
-    case noticeList = "notice.list"
-    case noticePosition = "notice.position"
-    case noticeDismiss = "notice.dismiss"
     #endif
     /// UI-TEST-ONLY: forces the app-level appearance (`light`|`dark` via `args.name`) so an XCUITest can
     /// simulate a macOS light/dark flip; with NO name it READS the side the last config feed applied, so a
@@ -823,8 +814,6 @@ public struct ControlResult: Codable, Sendable, Equatable {
     public var updates: ControlUpdateStatus?
     /// wsl is agterm-win's WSL agterm-servers, for `wsl.list`, `wsl.start` and `wsl.launch`.
     public var wsl: [ControlWSLServer]?
-    /// noticeBar is agterm-win's notice bar, for `notice.list`, `notice.position` and `notice.dismiss`.
-    public var noticeBar: ControlNoticeBar?
 
     public init(id: String? = nil, tree: ControlTree? = nil, text: String? = nil,
                 windows: [ControlWindowNode]? = nil, exitCode: Int? = nil, count: Int? = nil,
