@@ -110,11 +110,15 @@ struct WindowsKeymapTests {
         var keymap = defaults()
         #expect(press(&keymap, "n", control: true) == .command(.newSession))
         #expect(press(&keymap, "w", control: true) == .command(.closeSession))
+        #expect(keymap.press(Chord(mods: [.control], key: "f4")) == .command(.closeSession))
+        #expect(keymap.shortcuts[.closeSession] == "Ctrl+W / Ctrl+F4")
         #expect(press(&keymap, "f", control: true) == .command(.find))
         #expect(keymap.shortcuts[.nextSession] == "Ctrl+Alt+Right" && keymap.shortcuts[.fontBigger] == "Ctrl+Shift+=")
         #expect(keymap.shortcuts[.renameSession] == "" && keymap.diagnostics.isEmpty)
         #expect(press(&keymap, "p", control: true) == .command(.sessionPalette))
         #expect(press(&keymap, "p", control: true, shift: true) == .command(.commandPalette))
+        #expect(press(&keymap, "i", control: true, alt: true) == .command(.attentionPalette))
+        #expect(WindowsKeymap.fixedCommand(for: Chord(mods: [.control, .option], key: "i"), hasSelection: false) == nil)
         #expect(press(&keymap, "g", control: true, shift: true) == .command(.dashboard))
         #expect(press(&keymap, "j", control: true, shift: true) == .command(.toggleOverlay))
         #expect(press(&keymap, "d", control: true, shift: true) == .command(.toggleSplit))
@@ -150,6 +154,12 @@ struct WindowsKeymapTests {
         var keymap = WindowsKeymap(text: "map ctrl+alt+w close_session")
         #expect(press(&keymap, "w", control: true) == .pass)
         #expect(press(&keymap, "w", control: true, alt: true) == .command(.closeSession))
+    }
+
+    @Test func anExplicitBindingTakesPrecedenceOverTheCloseAlias() {
+        var keymap = WindowsKeymap(text: "map ctrl+f4 new_session")
+        #expect(keymap.press(Chord(mods: [.control], key: "f4")) == .command(.newSession))
+        #expect(keymap.shortcuts[.closeSession] == "Ctrl+W")
     }
     #endif
 }

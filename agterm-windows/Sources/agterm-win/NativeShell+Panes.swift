@@ -29,16 +29,27 @@ extension NativeShell {
         return NativeMenu.View(canSplit: session != nil && dashboard == nil, hasSplit: session?.splitTerminal != nil,
                                scratchShown: session?.scratchShown == true, quickShown: quickShown, canDashboard: !locals.isEmpty,
                                dashboardOpen: dashboard != nil, canToggleOverlay: selectedOverlayHidden != nil,
-                               overlayShown: selectedOverlayHidden == false, flaggedView: activeStore.sidebarMode == .flagged,
-                               filtered: activeStore.focusEnabled)
+                               overlayShown: selectedOverlayHidden == false)
     }
 
     /// enabled is whether a title bar button can act now; one that cannot stays in place, drawn dimmed.
     func enabled(_ button: TitleBar.Button) -> Bool {
         switch button {
-        case .split: dashboard == nil && local(selected) != nil
+        case .split, .scratch: viewState.canSplit
+        case .overlays: viewState.canToggleOverlay
         case .dashboard: dashboard != nil || !locals.isEmpty
         default: true
+        }
+    }
+
+    func buttonIsActive(_ button: TitleBar.Button) -> Bool {
+        switch button {
+        case .scratch: viewState.scratchShown
+        case .split: local(selected)?.split?.shown == true
+        case .overlays: selectedOverlayHidden == true
+        case .dashboard: viewState.dashboardOpen
+        case .quick: viewState.quickShown
+        default: false
         }
     }
 
@@ -101,13 +112,13 @@ extension NativeShell {
     // MARK: split
 
     /// splitKey is a split key or button: over a shown scratch it hides the scratch, else it toggles the split on `axis`.
-    func splitKey(_ axis: SplitAxis) {
+    func splitKey(_ axis: SplitAxis?) {
         guard let selected, let session = local(selected) else { return }
         if session.scratchShown {
             setScratch(selected, shown: false, command: nil)
             return
         }
-        if let next = NativeSplit.next(session.splitTerminal == nil ? nil : session.split, mode: .toggle, axis: axis) { setSplit(selected, next) }
+        if let next = NativeSplit.next(session.splitTerminal == nil ? nil : session.split, mode: .toggle, axis: axis ?? session.split?.axis ?? .leftRight) { setSplit(selected, next) }
     }
 
     func focusPaneKey(split: Bool) {
@@ -237,7 +248,7 @@ extension NativeShell {
     /// drag, and a double-click on one evens the split.
     func bodyMouseDown(_ lParam: LPARAM, double: Bool) -> Bool {
         let (x, y) = point(lParam)
-        guard y >= titleBar.height else { return false }
+        guard y >= titleBar.contentTop else { return false }
         if onSidebarDivider(x: x) {
             sidebarDragging = true
             SetCapture(window)
@@ -289,7 +300,7 @@ extension NativeShell {
         var cursor = POINT()
         GetCursorPos(&cursor)
         ScreenToClient(window, &cursor)
-        if sidebarDragging || (cursor.y >= titleBar.height && onSidebarDivider(x: cursor.x)) {
+        if sidebarDragging || (cursor.y >= titleBar.contentTop && onSidebarDivider(x: cursor.x)) {
             SetCursor(LoadCursorW(nil, UnsafePointer<WCHAR>(bitPattern: 32644))) // IDC_SIZEWE
             return true
         }

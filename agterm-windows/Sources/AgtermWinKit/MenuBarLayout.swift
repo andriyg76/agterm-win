@@ -1,6 +1,6 @@
-/// MenuBarLayout is the agwinterm-style menu row in the title bar: File, View, Navigate, Help.
+/// MenuBarLayout is the agwinterm-style menu row in the title bar: File, Edit, View, Navigate, Help.
 public enum MenuBarLayout: Sendable {
-    public static let titles = ["File", "View", "Navigate", "Help"]
+    public static let titles = ["File", "Edit", "View", "Navigate", "Help"]
 
     /// Each label's width in unscaled client pixels, including padding (agwinterm: text + 20).
     public static func labelWidth(_ title: String, dpi: UInt32) -> Int32 {

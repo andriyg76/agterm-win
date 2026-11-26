@@ -15,7 +15,7 @@ struct NativeMenuTests {
 
     @Test func windowMenuOffersEveryProfileUnderNewSession() {
         let menu = NativeMenu.window(profiles: profiles, canCloseSession: false, sessionCount: 1, hasSelection: false, canPaste: false)
-        let newSession = menu[0]
+        let newSession = menu.first { $0.title == "New Session" }!
         #expect(newSession.title == "New Session")
         #expect(newSession.children.map(\.title) == ["Windows PowerShell", "WSL Ubuntu"])
         #expect(newSession.children.map(\.pick) == [.profile(0), .profile(1)])
@@ -25,19 +25,22 @@ struct NativeMenuTests {
         #expect(menu.last?.pick == .command(.quit))
     }
 
-    @Test func sessionsMenuIsTheWindowMenusHead() {
-        let sessions = NativeMenu.sessions(profiles: profiles, canCloseSession: true, sessionCount: 2)
-        let window = NativeMenu.window(profiles: profiles, canCloseSession: true, sessionCount: 2, hasSelection: false, canPaste: false)
-        #expect(Array(window.prefix(sessions.count)) == sessions)
-        #expect(sessions.first { $0.pick == .command(.previousSession) }?.enabled == true)
-        #expect(!sessions.contains { $0.pick == .command(.copy) })
-        #expect(window.contains { $0.pick == .command(.find) })
+    @Test func fileGroupsWorkspaceAndCompanionActionsAndOwnsSettings() {
+        let state = NativeMenu.Structure(workspace: true, flagged: false, canConvert: true)
+        let file = NativeMenu.file(profiles: profiles, canCloseSession: true, structure: state)
+        #expect(file.prefix(3).map(\.pick) == [.command(.newWorkspace), .command(.renameWorkspace), .command(.deleteWorkspace)])
+        #expect(file.first { $0.pick == .command(.newCompanion) }?.enabled == true)
+        #expect(file.first { $0.pick == .command(.convertCompanion) }?.enabled == true)
+        #expect(file.last?.title == "Settings")
+        #expect(file.last?.children.compactMap(\.pick) == [.command(.settings), .command(.editKeymap), .command(.reloadKeymap)])
+        #expect(!file.contains { $0.pick == .command(.copy) || $0.pick == .command(.nextSession) })
     }
 
-    @Test func windowMenuContainsTheTerminalMenu() {
-        let terminal = NativeMenu.terminal(hasSelection: true, canPaste: true)
-        let window = NativeMenu.window(profiles: profiles, canCloseSession: true, sessionCount: 3, hasSelection: true, canPaste: true)
-        #expect(window.contains(terminal[0]) && window.contains(terminal[terminal.count - 1]))
+    @Test func editAndHelpOwnTheirActions() {
+        let edit = NativeMenu.edit(hasSelection: true, canPaste: true)
+        #expect(edit.compactMap(\.pick) == [.command(.copy), .command(.paste), .command(.selectAll), .command(.clearScrollback)])
+        #expect(NativeMenu.help().map(\.title) == ["About"])
+        #expect(NativeMenu.help().compactMap(\.pick) == [.command(.about)])
     }
 
     @Test func picksRoundTripThroughMenuIDs() {
@@ -47,10 +50,10 @@ struct NativeMenuTests {
         #expect(NativeMenu.Pick(id: 0) == nil)
     }
 
-    @Test func localSidebarOffersLocalLaunchAndSettingsWithoutSessionActionsOnTheWorkspace() {
+    @Test func localSidebarOffersLocalLaunchWithoutSessionActionsOnTheWorkspace() {
         let menu = NativeMenu.sidebar(profiles: profiles, defaultProfile: 1, servers: [], destination: nil,
                                        canLaunch: true, canRename: nil, canRestart: false, canClose: false)
-        #expect(menu.map(\.title) == ["New Local Session", "Local Profiles", "Default Local Profile", "Settings…"])
+        #expect(menu.map(\.title) == ["New Local Session", "Local Profiles", "Default Local Profile"])
         #expect(menu.first?.pick == .sidebarSession && menu.first?.enabled == true)
         #expect(menu[1].children.map(\.pick) == [.profile(0), .profile(1)])
         #expect(menu[2].children.map(\.checked) == [false, true])
@@ -78,21 +81,23 @@ struct NativeMenuTests {
                                                                                       .toggleHorizontalSplit, .closeSplit, .swapPanes, .toggleScratch,
                                                                                       .newWorkspace, .renameWorkspace, .deleteWorkspace, .toggleFlag, .toggleFlaggedView,
                                                                                       .focusWorkspace, .toggleWorkspaceFilter, .previousWorkspace, .nextWorkspace,
-                                                                                      .newCompanion, .convertCompanion])
+                                                                                      .newCompanion, .convertCompanion, .selectTheme, .about])
     }
 
-    @Test func viewHoldsThePanesScratchQuickTerminalAndDashboard() {
-        let window = NativeMenu.window(profiles: profiles, canCloseSession: true, sessionCount: 1, hasSelection: false, canPaste: false,
-                                       view: .init(canSplit: true, hasSplit: false, scratchShown: true, canDashboard: true))
-        let view = window.first { $0.title == "View" }?.children ?? []
-        #expect(view.first { $0.pick == .command(.toggleSplit) }?.enabled == true)
+    @Test func viewOwnsDisplayActionsAndNavigateOwnsSessionAndPaneMovement() {
+        let state = NativeMenu.View(canSplit: true, hasSplit: true, scratchShown: true, canDashboard: true)
+        let view = NativeMenu.view(state)
         #expect(view.first { $0.pick == .command(.toggleSplit) }?.shortcut == "Ctrl+Shift+D")
-        #expect(view.first { $0.pick == .command(.swapPanes) }?.enabled == false)
         #expect(view.first { $0.pick == .command(.toggleScratch) }?.checked == true)
-        #expect(view.first { $0.pick == .command(.dashboard) }?.enabled == true)
-        let none = NativeMenu.view(.init())
-        let always: [NativeMenu.Pick?] = [.command(.quickTerminal), .command(.toggleFlaggedView), .command(.toggleWorkspaceFilter)]
-        #expect(none.filter { $0.pick != nil && !always.contains($0.pick) }.allSatisfy { !$0.enabled })
+        #expect(view.contains { $0.pick == .command(.find) })
+        #expect(view.contains { $0.pick == .command(.selectTheme) })
+        #expect(!view.contains { $0.pick == .command(.dashboard) || $0.pick == .command(.focusRightPane) })
+        let nav = NativeMenu.navigate(state, sessionCount: 2)
+        for command: NativeMenu.Command in [.dashboard, .focusRightPane, .previousSession, .nextSession] {
+            #expect(nav.first { $0.pick == .command(command) }?.enabled == true)
+        }
+        #expect(!nav.contains { $0.pick == .command(.find) })
+        #expect(NativeMenu.view(.init()).first { $0.pick == .command(.toggleSplit) }?.enabled == false)
     }
 
     @Test func fontStepsStayInRange() {
@@ -113,18 +118,18 @@ struct NativeMenuTests {
         let servers = [NativeMenu.Server(label: "WSL Ubuntu", started: true, connected: true, current: true),
                        NativeMenu.Server(label: "WSL Debian", started: true, connected: false),
                        NativeMenu.Server(label: "WSL Arch")]
-        let launches = NativeMenu.sessions(profiles: profiles, servers: servers, canCloseSession: false, sessionCount: 1)[0].children
+        let launches = NativeMenu.sessions(profiles: profiles, servers: servers, canCloseSession: false)[0].children
         let sessions = launches.filter { if case .serverSession = $0.pick { true } else { false } }
         #expect(sessions.map(\.title) == ["WSL Ubuntu (agterm-server)", "WSL Debian (agterm-server)"])
         #expect(sessions.map(\.pick) == [.serverSession(0), .serverSession(1)])
         #expect(sessions.map(\.enabled) == [true, false])
         #expect(sessions.map(\.shortcut) == ["", ""])
-        #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: false, sessionCount: 1)[0].children.count == profiles.count)
+        #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: false)[0].children.count == profiles.count)
     }
 
     @Test func startListsEveryServerEnabledUntilItIsStarted() {
         let servers = [NativeMenu.Server(label: "WSL Ubuntu", started: true), NativeMenu.Server(label: "WSL Debian")]
-        let start = NativeMenu.sessions(profiles: profiles, servers: servers, canCloseSession: false, sessionCount: 1)[0].children.last
+        let start = NativeMenu.sessions(profiles: profiles, servers: servers, canCloseSession: false)[0].children.last
         #expect(start?.title == "Start agterm-server in")
         #expect(start?.children.map(\.title) == ["WSL Ubuntu", "WSL Debian"])
         #expect(start?.children.map(\.pick) == [.startServer(0), .startServer(1)])
@@ -136,14 +141,14 @@ struct NativeMenuTests {
     }
 
     @Test func renameIsEnabledByTheCaller() {
-        #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: true, sessionCount: 1)
+        #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: true)
             .first { $0.pick == .command(.renameSession) }?.enabled == false)
-        #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: true, sessionCount: 1, canRenameSession: true)
+        #expect(NativeMenu.sessions(profiles: profiles, canCloseSession: true, canRenameSession: true)
             .first { $0.pick == .command(.renameSession) }?.enabled == true)
     }
 
     @Test func theDefaultProfileCarriesTheShortcutAndTheCheck() {
-        let menu = NativeMenu.sessions(profiles: profiles, defaultProfile: 1, canCloseSession: false, sessionCount: 1)
+        let menu = NativeMenu.sessions(profiles: profiles, defaultProfile: 1, canCloseSession: false)
         #expect(menu[0].children.map(\.shortcut) == profiles.indices.map { $0 == 1 ? "Ctrl+N" : "" })
         #expect(menu[1].title == "Default Profile")
         #expect(menu[1].children.map(\.checked) == profiles.indices.map { $0 == 1 })

@@ -57,6 +57,7 @@ public enum BuiltinAction: String, CaseIterable, Sendable {
         case .resetFontSize: Chord(mods: [.control], key: "0")
         case .sessionPalette: Chord(mods: [.control], key: "p")
         case .commandPalette: Chord(mods: [.control, .shift], key: "p")
+        case .showAttention: Chord(mods: [.control, .option], key: "i")
         case .toggleSplit: Chord(mods: [.control, .shift], key: "d")
         case .focusLeftPane: Chord(mods: [.control], key: "1")
         case .focusRightPane: Chord(mods: [.control], key: "2")

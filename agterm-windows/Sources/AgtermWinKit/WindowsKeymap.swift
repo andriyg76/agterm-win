@@ -10,7 +10,7 @@ public struct WindowsKeymap: Sendable {
         (.newSession, .newSession), (.newServerSession, .newRemoteSession), (.renameSession, .renameSession),
         (.closeSession, .closeSession), (.nextSession, .nextSession), (.previousSession, .previousSession),
         (.find, .toggleSearch), (.fontBigger, .increaseFontSize), (.fontSmaller, .decreaseFontSize), (.fontReset, .resetFontSize),
-        (.sessionPalette, .sessionPalette), (.commandPalette, .commandPalette), (.toggleSplit, .toggleSplit),
+        (.sessionPalette, .sessionPalette), (.commandPalette, .commandPalette), (.attentionPalette, .showAttention), (.toggleSplit, .toggleSplit),
         (.toggleHorizontalSplit, .toggleHorizontalSplit), (.focusLeftPane, .focusLeftPane), (.focusRightPane, .focusRightPane),
         (.toggleScratch, .toggleScratch), (.toggleOverlay, .toggleOverlay), (.quickTerminal, .quickTerminal), (.dashboard, .dashboard),
         (.newWorkspace, .newWorkspace), (.renameWorkspace, .renameWorkspace), (.deleteWorkspace, .deleteWorkspace), (.toggleFlag, .toggleFlag),
@@ -38,6 +38,7 @@ public struct WindowsKeymap: Sendable {
     public let path: String
     private var matcher: KeybindMatcher
     private let binds: [(keybind: Keybind, action: BuiltinAction)]
+    static let closeSessionAlias = Chord(mods: [.control], key: "f4")
 
     public init(text: String, path: String = "keymap.conf") {
         let (keymap, diagnostics) = parseKeymap(text)
@@ -56,6 +57,9 @@ public struct WindowsKeymap: Sendable {
                     binds.append((keybind, action))
                 }
             }
+        }
+        if !keymap.builtinUnbound.contains(.closeSession), !binds.contains(where: { $0.keybind.first == Self.closeSessionAlias }) {
+            binds.append(([Self.closeSessionAlias], .closeSession))
         }
         let available = Set(Self.actions.map(\.action))
         let mapped = Set(keymap.builtinOverrides.keys).union(keymap.builtinSequences.keys)
@@ -100,6 +104,10 @@ public struct WindowsKeymap: Sendable {
         for (command, action) in Self.actions {
             let keybind = binds.first { $0.action == action }?.keybind
             labels[command] = keybind.map { $0.map(Self.label).joined(separator: ", ") } ?? ""
+        }
+        if let primary = labels[.closeSession], primary != Self.label(Self.closeSessionAlias),
+           binds.contains(where: { $0.action == .closeSession && $0.keybind == [Self.closeSessionAlias] }) {
+            labels[.closeSession] = "\(primary) / \(Self.label(Self.closeSessionAlias))"
         }
         return labels
     }

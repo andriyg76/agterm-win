@@ -186,7 +186,7 @@ typedef struct {
     int32_t lit;
 } nt_menu_tab;
 /// `icon_width` is the client strip on the left that shows the app icon; `icon_lit` highlights it like a hovered tab.
-void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, int32_t icon_width, int32_t icon_lit,
+void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, int32_t menu_bottom, int32_t icon_width, int32_t icon_lit,
                         const uint16_t *title, int32_t title_left, int32_t title_right, const nt_title_button *buttons,
                         int32_t count, int32_t active, const nt_menu_tab *tabs, int32_t tab_count);
 // A tooltip over rectangles of `parent`'s client; nt_tooltip_set with an empty text removes the tool `id`.

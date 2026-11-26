@@ -176,6 +176,7 @@ final class NativeShell {
     private var tagged: [Foundation.UUID] = []
     private var sidebarGroups: [(destination: SidebarDestination, item: UnsafeMutableRawPointer)] = []
     private var selectedSidebarGroup: SidebarDestination?
+    private var footerButtons: [NativeMenu.Command: HWND] = [:]
     private var dimmed: [UInt8] = []
     private var launchableGroups: [UInt8] = []
     private var items: [Foundation.UUID: UnsafeMutableRawPointer] = [:]
@@ -252,6 +253,7 @@ final class NativeShell {
         tooltip = nt_tooltip_create(UnsafeMutableRawPointer(window))
         palette = nt_palette_create(UnsafeMutableRawPointer(window), dpi)
         tree = nt_tree_create(UnsafeMutableRawPointer(window), dpi)
+        makeSidebarFooter()
         makeNoticeBar()
         findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
         remoteTerminal = makeTerminal()
@@ -558,13 +560,13 @@ final class NativeShell {
         shown = values
     }
 
-    private func showSettings() {
+    private func showSettings(tab: SettingsTab = .general) {
         let listed = ServerLaunch.listed(available: remotes, choices: settings.serverLaunch)
         SettingsWindow.show(owner: window, values: .init(appearance: settings.appearance, points: settings.fontPoints,
                                                          notifications: settings.notifications, general: settings.general,
                                                          serverAtLaunch: Set(ServerLaunch.atLaunch(settings.serverLaunch))),
                             themes: TerminalAppearance.themes.catalog.names, fonts: TerminalAppearance.monospaceFonts,
-                            distributions: listed,
+                            distributions: listed, tab: tab,
                             preview: { [unowned self] in applyAppearance($0) },
                             finish: { [unowned self] kept in
                                 guard let kept else { return }
@@ -1243,7 +1245,8 @@ final class NativeShell {
 
     func windowCommand(_ command: NativeMenu.Command) {
         log("native shell: \(command)")
-        if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .quit, .editKeymap, .reloadKeymap, .commandPalette].contains(command) {
+        if command == .attentionPalette, pickPalette != nil { return }
+        if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .selectTheme, .about, .quit, .editKeymap, .reloadKeymap, .commandPalette].contains(command) {
             closeDashboard()
         }
         switch command {
@@ -1266,8 +1269,14 @@ final class NativeShell {
         case .find: showFindBar()
         case .sessionPalette: openPalette(.sessions)
         case .commandPalette: openPalette(.commands)
+        case .attentionPalette:
+            if paletteMode == .attention { closePalette(refocus: true) } else { openPalette(.attention) }
         case .quit: if confirmQuit() { DestroyWindow(window) }
         case .settings: showSettings()
+        case .selectTheme: showSettings(tab: .appearance)
+        case .about:
+            let description = "agterm for Windows\nVersion \(version)"
+            MessageBoxW(window, Array(description.utf16) + [0], Array("About agterm".utf16) + [0], UINT(MB_OK | MB_ICONINFORMATION))
         case .editKeymap: Keys.edit(owner: window)
         case .reloadKeymap: Keys.reload(owner: window)
         case .toggleSplit: splitKey(.leftRight)
@@ -1281,7 +1290,7 @@ final class NativeShell {
         case .quickTerminal: toggleQuick()
         case .dashboard: toggleDashboard()
         case _ where command.isStructure:
-            let destination = selectedSidebarGroup ?? selected.map(sidebarDestination(for:)) ?? .local(workspace: nil)
+            let destination = activeSidebarDestination
             runStructure(command, session: selectedSidebarGroup == nil ? selected : nil, destination: destination)
         default: visibleTerminal.perform(command)
         }
@@ -1343,23 +1352,32 @@ final class NativeShell {
         }
     }
 
-    /// structureMenu is the sidebar menu's workspace section for the row `destination` is, or `session`.
-    private func structureMenu(session: Foundation.UUID?, destination: SidebarDestination) -> (entries: [NativeMenu.Entry], targets: [Workspace]) {
+    private func structureState(session: Foundation.UUID?, destination: SidebarDestination) -> NativeMenu.Structure {
         let store = storeOf(destination)
         let workspace = structureWorkspace(destination)
-        var model = NativeMenu.Structure(flaggedView: store.sidebarMode == .flagged, filtered: store.focusEnabled)
-        var targets: [Workspace] = []
-        if session == nil {
-            model.workspace = workspace != nil
-            model.focused = workspace.map(store.focusedWorkspaceIDs.contains) ?? false
-        } else if let session, let stored = store.session(withID: session) {
-            model.flagged = stored.flagged
-            let home = store.workspace(forSession: session)
-            model.canConvert = stored.parentID == nil && home.map { $0.sessions.first?.id != session } ?? false
-            targets = store.workspaces.filter { $0.id != home?.id }
-            model.moveTargets = targets.map { $0.isRoot ? "Top Level" : $0.name }
+        let stored = session.flatMap(store.session(withID:))
+        var state = NativeMenu.Structure(workspace: workspace != nil, focused: workspace.map(store.focusedWorkspaceIDs.contains) ?? false,
+                                         flagged: stored?.flagged, flaggedView: store.sidebarMode == .flagged, filtered: store.focusEnabled)
+        if let stored {
+            state.canConvert = stored.parentID == nil && store.workspace(forSession: stored.id).map { $0.sessions.first?.id != stored.id } == true
         }
-        return (NativeMenu.structure(model, shortcuts: menuShortcuts), targets)
+        state.canFilter = !store.focusedWorkspaceIDs.isEmpty
+        state.canToggleFlaggedView = state.flaggedView || !store.flaggedSessions.isEmpty
+        return state
+    }
+
+    private var activeStructure: NativeMenu.Structure {
+        structureState(session: selectedSidebarGroup == nil ? selected : nil, destination: activeSidebarDestination)
+    }
+
+    /// structureMenu is the sidebar menu's workspace section for the clicked row.
+    private func structureMenu(session: Foundation.UUID?, destination: SidebarDestination) -> (entries: [NativeMenu.Entry], targets: [Workspace]) {
+        let store = storeOf(destination)
+        var state = structureState(session: session, destination: destination)
+        let targets = session.flatMap { store.workspace(forSession: $0) }.map { home in store.workspaces.filter { $0.id != home.id } } ?? []
+        if session != nil { state.workspace = nil }
+        state.moveTargets = targets.map { $0.isRoot ? "Top Level" : $0.name }
+        return (NativeMenu.structure(state, shortcuts: menuShortcuts), targets)
     }
 
     /// activeStore is the tree of the window the selection is in, which a window-scoped command from a key acts on.
@@ -1980,8 +1998,10 @@ final class NativeShell {
         let width = sidebarWidth
         noticeWindow?.state.update(noticeMessages)
         let content = contentSpan
-        noticeWindow?.place(y: noticeWindow?.state.position == .bottom ? content.bottom : titleBar.height, width: client.right)
-        MoveWindow(tree?.assumingMemoryBound(to: HWND__.self), 0, content.top, width, content.bottom - content.top, true)
+        noticeWindow?.place(y: noticeWindow?.state.position == .bottom ? content.bottom : titleBar.contentTop, width: client.right)
+        let footerTop = max(content.top, content.bottom - scaled(27))
+        MoveWindow(tree?.assumingMemoryBound(to: HWND__.self), 0, content.top, width, footerTop - content.top, true)
+        layoutSidebarFooter(width: width, top: footerTop, height: content.bottom - footerTop)
         placeSessions()
         let findWidth = min(scaled(280), max(client.right - width - scaled(24), scaled(80)))
         MoveWindow(findBar, client.right - findWidth - scaled(16), content.top + scaled(8), findWidth, scaled(28), true)
@@ -2005,7 +2025,7 @@ final class NativeShell {
     private func makeNoticeBar() {
         let bar = NoticeBarWindow(parent: window, position: settings.noticeBarPosition, dpi: dpi, tooltip: tooltip)
         bar.colors = { [unowned self] in NoticeBar.colors(chromePalette, theme: NativeTerminal.theme, severity: $0) }
-        bar.area = { [unowned self] in (titleBar.height, clientRect.bottom) }
+        bar.area = { [unowned self] in (titleBar.contentTop, clientRect.bottom) }
         bar.onAction = { [unowned self] in noticeAction($0, $1) }
         bar.onPosition = { [unowned self] in setNoticePosition($0) }
         bar.onDismiss = { [unowned self] in _ = dismissNotice() }
@@ -2085,6 +2105,7 @@ final class NativeShell {
         }
         syncSidebarSelection()
         updateBlink(blinks)
+        refreshSidebarFooter()
         titleChanged()
     }
 
@@ -2165,6 +2186,7 @@ final class NativeShell {
         guard requestedSidebarRename == nil else { return }
         if let destination = sidebarGroup(tag) {
             selectedSidebarGroup = destination
+            refreshSidebarFooter()
             return
         }
         guard tag > 0, Int(tag) <= tagged.count else { return }
@@ -2192,6 +2214,7 @@ final class NativeShell {
         // banners already shown for the session say nothing new once it is in view
         if toastsReady { nt_toast_remove_group(Array(id.uuidString.utf16) + [0]) }
         syncSidebarSelection()
+        refreshSidebarFooter()
         titleChanged()
         placeSessions()
         let owner = locals.contains(where: { $0.id == id }) ? nil : server(of: id)
@@ -2243,21 +2266,82 @@ final class NativeShell {
     /// focus gives the keyboard to what is in view: the dashboard's grid takes it in the window itself.
     func focus() { SetFocus(dashboard != nil ? window : visibleTerminal.window) }
 
+    static func handleSidebarShortcut(_ message: MSG) -> Bool {
+        guard message.message == UINT(WM_KEYDOWN) || message.message == UINT(WM_SYSKEYDOWN),
+              let shell, let tree = shell.tree, message.hwnd == tree.assumingMemoryBound(to: HWND__.self),
+              let chord = Keys.chord(virtualKey: Int32(truncatingIfNeeded: message.wParam)) else { return false }
+        switch Keys.keymap.press(chord) {
+        case .command(let command): shell.windowCommand(command); return true
+        case .consumed: return true
+        case .pass: return false
+        }
+    }
+
     private var menuShortcuts: NativeMenu.Shortcuts { Keys.keymap.shortcuts }
 
-    /// menuBarEntries is one title-bar menu tab's popup, in the order MenuBarLayout lays them out.
+    private func makeSidebarFooter() {
+        for (command, label) in [(NativeMenu.Command.newWorkspace, "+ Workspace"), (.newSession, "+ Session"),
+                                 (.toggleWorkspaceFilter, "Filter"), (.toggleFlaggedView, "Flags")] {
+            let toggles = command == .toggleWorkspaceFilter || command == .toggleFlaggedView
+            let style = toggles ? DWORD(BS_PUSHLIKE) | DWORD(BS_CHECKBOX) : DWORD(BS_PUSHBUTTON)
+            guard let button = CreateWindowExW(0, Array("BUTTON".utf16) + [0], Array(label.utf16) + [0],
+                                               DWORD(WS_CHILD) | DWORD(WS_VISIBLE) | style,
+                                               0, 0, 0, 0, window, HMENU(bitPattern: command.rawValue), GetModuleHandleW(nil), nil) else { continue }
+            let font = GetStockObject(DEFAULT_GUI_FONT)
+            SendMessageW(button, UINT(WM_SETFONT), WPARAM(UInt(bitPattern: Int(bitPattern: font))), 1)
+            footerButtons[command] = button
+        }
+    }
+
+    private func layoutSidebarFooter(width: Int32, top: Int32, height: Int32) {
+        let gap = scaled(3)
+        let side = min(scaled(44), max(0, (width - 5 * gap) / 4))
+        let launch = min(scaled(74), max(0, (width - 5 * gap - 2 * side) / 2))
+        for (command, x, size) in [(NativeMenu.Command.newWorkspace, gap, launch), (.newSession, 2 * gap + launch, launch),
+                                   (.toggleWorkspaceFilter, width - 2 * (side + gap), side), (.toggleFlaggedView, width - side - gap, side)] {
+            MoveWindow(footerButtons[command], x, top + gap, size, max(0, height - 2 * gap), true)
+        }
+        refreshSidebarFooter()
+    }
+
+    private func refreshSidebarFooter() {
+        let state = activeStructure
+        for (command, checked, enabled) in [(NativeMenu.Command.toggleWorkspaceFilter, state.filtered, state.canFilter),
+                                            (.toggleFlaggedView, state.flaggedView, state.canToggleFlaggedView)] {
+            guard let button = footerButtons[command] else { continue }
+            SendMessageW(button, UINT(BM_SETCHECK), WPARAM(checked ? BST_CHECKED : BST_UNCHECKED), 0)
+            EnableWindow(button, enabled)
+        }
+    }
+
+    fileprivate func sidebarFooterClicked(_ source: LPARAM) {
+        guard let button = HWND(bitPattern: Int(source)), let command = footerButtons.first(where: { $0.value == button })?.key else { return }
+        if command == .newSession {
+            let destination = activeSidebarDestination
+            let names = menuServers
+            var rect = RECT()
+            GetWindowRect(button, &rect)
+            let entries = sidebarEntries(destination: destination, names: names)
+            let pick = showMenu(entries, owner: window, at: POINT(x: rect.left, y: rect.bottom))
+            runSidebarPick(pick, destination: destination, names: names)
+        } else {
+            focus()
+            windowCommand(command)
+        }
+    }
+
     private func menuBarEntries(tab: Int) -> [NativeMenu.Entry] {
         let shortcuts = menuShortcuts
         switch tab {
         case 0:
             return NativeMenu.file(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries, canCloseSession: canClose(selected),
-                                   sessionCount: tagged.count, canRenameSession: canRename(selected),
-                                   canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
-                                   canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)),
+                                   canRenameSession: canRename(selected), canRestartSession: canRestart(selected), structure: activeStructure,
                                    localDefaultShortcut: activeSidebarDestination.isLocal, shortcuts: shortcuts)
-        case 1: return NativeMenu.view(viewState, shortcuts: shortcuts)
-        case 2: return NativeMenu.navigate(shortcuts: shortcuts)
-        case 3: return NativeMenu.help(shortcuts: shortcuts)
+        case 1:
+            return NativeMenu.edit(hasSelection: visibleTerminal.hasSelection, canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
+        case 2: return NativeMenu.view(viewState, structure: activeStructure, shortcuts: shortcuts)
+        case 3: return NativeMenu.navigate(viewState, sessionCount: tagged.count, shortcuts: shortcuts)
+        case 4: return NativeMenu.help()
         default: return []
         }
     }
@@ -2265,22 +2349,18 @@ final class NativeShell {
     /// openMenuTab shows a title-bar menu tab under the label the user clicked.
     private func openMenuTab(_ index: Int) {
         let bar = titleBar
-        let gap = bar.actionWidth / 4
-        let limit = bar.span(of: .quick).left - gap
-        let start = bar.span(of: .newSession).right + gap
-        guard let span = MenuBarLayout.menuSpans(origin: start, limit: limit, dpi: dpi).first(where: { $0.index == index })?.span else { return }
-        var corner = POINT(x: span.left, y: bar.height)
+        guard let span = bar.menuSpans.first(where: { $0.index == index })?.span else { return }
+        var corner = POINT(x: span.left, y: bar.contentTop)
         ClientToScreen(window, &corner)
         run(showMenu(menuBarEntries(tab: index), owner: window, at: corner))
     }
 
-    /// windowEntries is the ☰ menu as it stands now, which the command palette lists too.
     private var windowEntries: [NativeMenu.Entry] {
         NativeMenu.window(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries,
                           canCloseSession: canClose(selected), sessionCount: tagged.count, canRenameSession: canRename(selected),
                           canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
-                          canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), view: viewState,
-                          localDefaultShortcut: activeSidebarDestination.isLocal, shortcuts: Keys.keymap.shortcuts)
+                          canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), view: viewState, structure: activeStructure,
+                          localDefaultShortcut: activeSidebarDestination.isLocal, shortcuts: menuShortcuts)
     }
 
     fileprivate func treeMenu(x: Int32, y: Int32) {
@@ -2289,6 +2369,14 @@ final class NativeShell {
         let tag = nt_tree_item_at(tree, &point.x, &point.y)
         let session = tag > 0 && tag <= Int64(tagged.count) ? tagged[Int(tag) - 1] : nil
         let destination = sidebarGroup(tag) ?? session.map(sidebarDestination(for:)) ?? .local(workspace: nil)
+        let names = menuServers
+        let entries = sidebarEntries(destination: destination, names: names, session: session)
+        let section = structureMenu(session: session, destination: destination)
+        let pick = showMenu(entries + [.separator] + section.entries, owner: window, at: point)
+        runSidebarPick(pick, destination: destination, names: names, session: session, targets: section.targets)
+    }
+
+    private func sidebarEntries(destination: SidebarDestination, names: [String], session: Foundation.UUID? = nil) -> [NativeMenu.Entry] {
         let destinationName: String?
         switch destination {
         case .local: destinationName = nil
@@ -2300,21 +2388,22 @@ final class NativeShell {
                 return server.label
             }
         }
-        let names = menuServers
-        let entries = NativeMenu.sidebar(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries(for: names),
+        return NativeMenu.sidebar(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries(for: names),
                                          destination: destinationName, canLaunch: canLaunchInSidebar(destination),
                                          canRename: session.map { canRename($0) }, canRestart: canRestart(session),
                                          canClose: canClose(session), shortcuts: menuShortcuts)
-        let section = structureMenu(session: session, destination: destination)
-        let pick = showMenu(entries + [.separator] + section.entries, owner: window, at: point)
+    }
+
+    private func runSidebarPick(_ pick: NativeMenu.Pick?, destination: SidebarDestination, names: [String],
+                                session: Foundation.UUID? = nil, targets: [Workspace] = []) {
         focus()
         switch pick {
         case .sidebarSession?: launchInSidebar(destination)
         case .profile(let index)? where profiles.indices.contains(index) && destination.isLocal:
             newSession(profiles[index], in: structureWorkspace(destination) ?? localStore.rootWorkspace?.id)
-        case .moveToWorkspace(let index)? where section.targets.indices.contains(index):
+        case .moveToWorkspace(let index)? where targets.indices.contains(index):
             var args = ControlArgs()
-            args.workspace = section.targets[index].id.uuidString
+            args.workspace = targets[index].id.uuidString
             structure(.sessionMove, target: session, args)
         case .command(let command)? where command.isStructure: runStructure(command, session: session, destination: destination)
         case .command(.renameSession)?: startRename(session)
@@ -2372,6 +2461,21 @@ final class NativeShell {
                                        unseen: counting ? serverUnseen : [:])
         case .commands:
             return Palette.commandRows(windowEntries)
+        case .attention:
+            let localRows = locals.map { local in
+                let workspace = localStore.workspace(forSession: local.id)
+                let subtitle = workspace?.isRoot == false ? workspace?.name ?? "" : ""
+                return (local.id, local.name, subtitle, local.activity.indicator.status, local.activity.changedAt)
+            }
+            let serverRows = servers.flatMap { server in
+                server.remote.store.workspaces.flatMap { workspace in
+                    let subtitle = workspace.isRoot ? server.label : "\(server.label) · \(workspace.name)"
+                    return workspace.sessions.map { session in
+                        (session.id, session.displayName, subtitle, session.agentIndicator.status, session.statusChangedAt)
+                    }
+                }
+            }
+            return Palette.attentionRows(localRows + serverRows)
         }
     }
 
@@ -2434,7 +2538,23 @@ final class NativeShell {
         closePalette(refocus: false)
         switch row.target {
         case .session(let id):
+            let indicator = mode == .attention ? local(id)?.activity.indicator : nil
             select(id)
+            if let indicator, indicator.status == .blocked {
+                switch indicator.statusPane {
+                case .right:
+                    if let session = local(id), session.splitTerminal != nil, var split = session.split {
+                        split.shown = true
+                        split.focused = true
+                        if session.scratchShown { setScratch(id, shown: false, command: nil) }
+                        setSplit(id, split)
+                    }
+                case .scratch: if local(id)?.scratch != nil { setScratch(id, shown: true, command: nil) }
+                case .left, nil:
+                    if local(id)?.scratchShown == true { setScratch(id, shown: false, command: nil) }
+                    focusPaneKey(split: false)
+                }
+            }
             focus()
         case .pick(let pick):
             run(pick)
@@ -2470,7 +2590,7 @@ final class NativeShell {
 
     func invalidateTitleBar() {
         guard let window else { return }
-        var rect = RECT(left: 0, top: 0, right: titleBar.width, bottom: titleBar.height)
+        var rect = RECT(left: 0, top: 0, right: titleBar.width, bottom: titleBar.contentTop)
         InvalidateRect(window, &rect, false)
     }
 
@@ -2560,13 +2680,7 @@ final class NativeShell {
         (Int32(Int16(truncatingIfNeeded: lParam)), Int32(Int16(truncatingIfNeeded: lParam >> 16)))
     }
 
-    private func menuTab(at x: Int32, y: Int32) -> Int? {
-        let bar = titleBar
-        guard y >= 0, y < bar.height else { return nil }
-        let gap = bar.actionWidth / 4
-        let limit = bar.span(of: .quick).left - gap
-        return bar.menuTab(x: x, y: y, dpi: dpi, limit: limit)
-    }
+    private func menuTab(at x: Int32, y: Int32) -> Int? { titleBar.menuTab(x: x, y: y) }
 
     private func refreshMenuBarHighlight(x: Int32, y: Int32) {
         let tab = menuTab(at: x, y: y)
@@ -2607,7 +2721,7 @@ final class NativeShell {
             invalidateTitleBar()
             return
         }
-        if y < titleBar.height, let tab = menuTab(at: x, y: y) {
+        if let tab = menuTab(at: x, y: y) {
             pressedMenuTab = tab
             menuBarHighlight = tab
             SetCapture(window)
@@ -2673,11 +2787,8 @@ final class NativeShell {
         case .minimize: ShowWindow(window, SW_MINIMIZE)
         case .maximize: ShowWindow(window, IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE)
         case .close: PostMessageW(window, UINT(WM_CLOSE), 0, 0)
-        case .newSession:
-            windowCommand(.newSession)
-            focus()
-        case .find: windowCommand(.find)
-        case .quick, .split, .dashboard, .settings:
+        case .split: if enabled(button) { splitKey(nil) }
+        case .quick, .dashboard, .scratch, .overlays:
             if enabled(button), let command = button.command { windowCommand(command) }
         }
     }
@@ -2731,14 +2842,11 @@ final class NativeShell {
         let buttons = TitleBar.Button.allCases.map { button in
             let span = bar.span(of: button)
             let lit = hovered == button && (pressed == nil || pressed == button)
-            let state: Int32 = !enabled(button) ? 3 : lit ? (pressed == button ? 2 : 1) : 0
+            let state: Int32 = !enabled(button) ? 3 : lit ? (pressed == button ? 2 : 1) : buttonIsActive(button) ? 4 : 0
             return nt_title_button(left: span.left, right: span.right, glyph: button.glyph(maximized: maximized),
                                    kind: button == .close ? 2 : button.isCaption ? 1 : 0, state: state)
         }
-        let gap = bar.actionWidth / 4
-        let limit = bar.span(of: .quick).left - gap
-        let start = bar.span(of: .newSession).right + gap
-        let spans = MenuBarLayout.menuSpans(origin: start, limit: limit, dpi: dpi)
+        let spans = bar.menuSpans
         var labels = spans.map { Array(MenuBarLayout.titles[$0.index].utf16) + [0] }
         var tabs = spans.enumerated().map { offset, entry in
             nt_menu_tab(left: entry.span.left, right: entry.span.right, label: nil,
@@ -2750,7 +2858,7 @@ final class NativeShell {
                 let title = Array(shownTitle.utf16) + [0]
                 title.withUnsafeBufferPointer { title in
                     let iconLit = appIconHighlight || pressedAppIcon
-                    nt_title_bar_paint(UnsafeMutableRawPointer(window), dpi, bar.height, bar.appIcon.right, iconLit ? 1 : 0,
+                    nt_title_bar_paint(UnsafeMutableRawPointer(window), dpi, bar.height, bar.contentTop, bar.appIcon.right, iconLit ? 1 : 0,
                                        title.baseAddress, bar.title.left, bar.title.right, buttons.baseAddress,
                                        Int32(buttons.count), windowActive ? 1 : 0, tabPtr, tabCount)
                 }
@@ -2800,12 +2908,11 @@ private extension TitleBar.Button {
 
     func glyph(maximized: Bool) -> UInt16 {
         switch self {
-        case .newSession: 0xE710
-        case .find: 0xE721
+        case .scratch: 0xE737
+        case .overlays: 0xE8A7
         case .quick: 0xE756
         case .split: 0xE8A0
         case .dashboard: 0xE8A9
-        case .settings: 0xE713
         case .minimize: 0xE921
         case .maximize: maximized ? 0xE923 : 0xE922
         case .close: 0xE8BB
@@ -2891,7 +2998,9 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
         case messageNCLeftUp:
             return shell.frameUp(wParam) ? 0 : DefWindowProcW(window, message, wParam, lParam)
         case UINT(WM_COMMAND):
-            if wParam >> 16 & 0xFFFF == WPARAM(EN_CHANGE) { shell.findChanged() }
+            let notification = wParam >> 16 & 0xFFFF
+            if notification == WPARAM(EN_CHANGE) { shell.findChanged() }
+            if notification == WPARAM(BN_CLICKED), lParam != 0 { shell.sidebarFooterClicked(lParam) }
             return 0
         case NativeShell.titleActionMessage:
             if let button = TitleBar.Button(rawValue: Int(wParam)) { shell.act(button) }

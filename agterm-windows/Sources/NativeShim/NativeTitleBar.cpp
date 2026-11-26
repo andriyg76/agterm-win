@@ -31,13 +31,13 @@ void loadFonts(uint32_t dpi) {
 COLORREF fill(const nt_title_button &button) {
     bool close = button.kind == 2;
     if (button.state == 2) return nt_chrome_title_pressed(close);
-    if (button.state == 1) return nt_chrome_title_hover(close);
+    if (button.state == 1 || button.state == 4) return nt_chrome_title_hover(close);
     return nt_chrome_title_bg();
 }
 
 }  // namespace
 
-extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, int32_t icon_width, int32_t icon_lit,
+extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, int32_t menu_bottom, int32_t icon_width, int32_t icon_lit,
                                    const uint16_t *text, int32_t title_left, int32_t title_right, const nt_title_button *buttons,
                                    int32_t count, int32_t active, const nt_menu_tab *tabs, int32_t tab_count) {
     auto hwnd = static_cast<HWND>(window);
@@ -45,7 +45,7 @@ extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, i
     HDC dc = BeginPaint(hwnd, &paint);
     RECT client;
     GetClientRect(hwnd, &client);
-    RECT bar{0, 0, client.right, height};
+    RECT bar{0, 0, client.right, menu_bottom};
     const COLORREF barBg = nt_chrome_title_bg();
     HBRUSH backgroundBrush = CreateSolidBrush(barBg);
 
@@ -83,7 +83,7 @@ extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, i
         for (int32_t i = 0; i < count; ++i) {
             const nt_title_button &button = buttons[i];
             RECT rect{button.left, 0, button.right, height};
-            if (button.state == 1 || button.state == 2) {
+            if (button.state == 1 || button.state == 2 || button.state == 4) {
                 HBRUSH brush = CreateSolidBrush(fill(button));
                 FillRect(memory, &rect, brush);
                 DeleteObject(brush);
@@ -99,7 +99,7 @@ extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, i
         for (int32_t i = 0; i < tab_count; ++i) {
             const nt_menu_tab &tab = tabs[i];
             if (tab.right <= tab.left) continue;
-            RECT rect{tab.left, 0, tab.right, height};
+            RECT rect{tab.left, height, tab.right, menu_bottom};
             if (tab.lit) {
                 HBRUSH brush = CreateSolidBrush(nt_chrome_title_hover(0));
                 FillRect(memory, &rect, brush);
