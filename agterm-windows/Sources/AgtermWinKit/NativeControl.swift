@@ -41,12 +41,13 @@ public protocol NativeControlHost: AnyObject {
     var systemIsDark: Bool { get }
     /// setAppearance saves `appearance` and draws every terminal with it.
     func setAppearance(_ appearance: Appearance)
-    /// wslServers are the distributions that can hold an agterm-server, with each one's state and launch choice.
-    var wslServers: [ControlWSLServer] { get }
-    /// startWSLServer starts `distribution`'s server without asking about launch; nil once started, else why not.
-    func startWSLServer(_ distribution: String) -> String?
-    /// setWSLLaunch makes `distribution`'s server start at launch, or be a manual choice that never asks.
-    func setWSLLaunch(_ distribution: String, atLaunch: Bool)
+    /// remoteServers are the `remote.properties` remotes, each with whether its server is started and its stream's state.
+    var remoteServers: [NativeControl.RemoteServer] { get }
+    /// startRemoteServer starts `name`'s server without asking about launch, or probes a started one that is not
+    /// connected again; nil once started, else why not.
+    func startRemoteServer(_ name: String) -> String?
+    /// newRemoteSession creates `create` on `name`'s connected server and selects it once the catalog brings it.
+    func newRemoteSession(_ name: String, _ create: RemoteSessionCreate) async -> ControlResponse
     /// openOverlay starts a program overlay over a local session whose slot NativeControl found empty.
     func openOverlay(_ id: UUID, _ open: NativeOverlay.Open)
     /// openPageOverlay shows a local HTML or URL page in the session-wide overlay slot.
@@ -145,6 +146,20 @@ public enum NativeControl {
         }
     }
 
+    /// RemoteServer is one `remote.properties` remote, which `window.list` reports as a remote window.
+    public struct RemoteServer: Equatable {
+        public let name: String
+        public let started: Bool
+        /// state is the started server's catalog stream, nil before it is started.
+        public let state: RemoteCatalogMirror.State?
+
+        public init(name: String, started: Bool, state: RemoteCatalogMirror.State?) {
+            self.name = name
+            self.started = started
+            self.state = state
+        }
+    }
+
     /// localWorkspace is the id the Local group reports, fixed so a script can address it across launches.
     public static let localWorkspace = UUID(uuidString: "00000000-0000-0000-0000-00000000000A")!
     public static let localWorkspaceTarget = "local"
@@ -216,10 +231,12 @@ public enum NativeControl {
         case .sessionOverlayOpen, .sessionOverlayClose, .sessionOverlayResize, .sessionOverlayResult, .sessionOverlayText,
              .sessionOverlayCopy, .sessionOverlayHide, .sessionOverlayShow, .sessionOverlayToggle:
             return await overlay(request, host: host)
-        #if os(Windows)
-        case .wslList, .wslStart, .wslLaunch:
-            return wsl(request, host: host)
-        #endif
+        case .windowList:
+            return ControlResponse(ok: true, result: ControlResult(windows: remoteWindows(host)))
+        case .windowRemoteOpen:
+            return openRemoteWindow(request.args?.host, host: host)
+        case .sessionRemoteNew:
+            return await newRemoteSession(request, host: host)
         case .sessionSplit, .sessionSplitClose, .sessionSwap, .sessionFocus, .sessionResize, .sessionScratch:
             return await panes(request, host: host)
         case .quick, .quickType, .quickText:
@@ -318,35 +335,66 @@ public enum NativeControl {
         return ControlResponse(ok: true, result: ControlResult(id: next.uuidString))
     }
 
-    #if os(Windows)
-    /// wsl answers the `wsl.*` commands with every distribution's state, the one a start or launch change named
-    /// included, so the reply is its own read-back.
-    private static func wsl(_ request: ControlRequest, host: NativeControlHost) -> ControlResponse {
-        let parsed: ControlWSL.Request
-        switch ControlWSL.parse(request) {
-        case .failure(let rejection): return failure(rejection.message)
-        case .success(let request): parsed = request
+    /// remoteWindows are the `remote.properties` remotes as remote windows: open while the server is started, with its
+    /// stream's state, under an id derived from the name.
+    static func remoteWindows(_ host: NativeControlHost) -> [ControlWindowNode] {
+        host.remoteServers.map { server in
+            var node = ControlWindowNode(id: remoteWindowID(server.name).uuidString, name: server.name, open: server.started,
+                                         active: false)
+            node.remote = ControlRemoteWindow(host: server.name, catalogID: nil, state: server.state)
+            return node
         }
-        let named: String
-        switch parsed {
-        case .list:
-            return ControlResponse(ok: true, result: ControlResult(wsl: host.wslServers))
-        case .start(let distribution), .launch(let distribution, _):
-            named = distribution
-        }
-        guard let known = host.wslServers.first(where: { $0.distribution.caseInsensitiveCompare(named) == .orderedSame }) else {
-            return failure("no WSL distribution named \(named)")
-        }
-        switch parsed {
-        case .list: break
-        case .start:
-            if let refusal = host.startWSLServer(known.distribution) { return failure(refusal) }
-        case .launch(_, let atLaunch):
-            host.setWSLLaunch(known.distribution, atLaunch: atLaunch)
-        }
-        return ControlResponse(ok: true, result: ControlResult(wsl: host.wslServers))
     }
-    #endif
+
+    /// remoteWindowID is the stable id of a remote's window: an FNV-1a hash of its name, the same every launch.
+    public static func remoteWindowID(_ name: String) -> UUID {
+        var high: UInt64 = 0xcbf2_9ce4_8422_2325, low: UInt64 = 0x8422_2325_cbf2_9ce4
+        for byte in name.utf8 {
+            high = (high ^ UInt64(byte)) &* 0x0000_0100_0000_01b3
+            low = (low ^ UInt64(byte) ^ (high >> 32)) &* 0x0000_0100_0000_01b3
+        }
+        var uuid = withUnsafeBytes(of: high.bigEndian) { Array($0) } + withUnsafeBytes(of: low.bigEndian) { Array($0) }
+        uuid[6] = (uuid[6] & 0x0f) | 0x80
+        uuid[8] = (uuid[8] & 0x3f) | 0x80
+        return UUID(uuid: (uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7],
+                           uuid[8], uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]))
+    }
+
+    /// remoteServer resolves a destination to a `remote.properties` remote, or says why it names none: agterm-win reaches
+    /// no ssh host.
+    private static func remoteServer(_ destination: String?, command: String, host: NativeControlHost) -> Result<String, Refusal> {
+        guard let destination, !destination.isEmpty else { return .failure(Refusal(message: "\(command) requires a host")) }
+        guard host.remoteServers.contains(where: { $0.name == destination }) else {
+            return .failure(Refusal(message: "\(command): \(destination) is not defined in \(RemoteCommands.fileName)"))
+        }
+        return .success(destination)
+    }
+
+    /// openRemoteWindow starts the remote's server, or probes a started one again, and answers its window's id.
+    private static func openRemoteWindow(_ destination: String?, host: NativeControlHost) -> ControlResponse {
+        switch remoteServer(destination, command: "window.remote.open", host: host) {
+        case .failure(let refusal): return failure(refusal.message)
+        case .success(let name):
+            if let refusal = host.startRemoteServer(name) { return failure(refusal) }
+            return ControlResponse(ok: true, result: ControlResult(id: remoteWindowID(name).uuidString))
+        }
+    }
+
+    private static func newRemoteSession(_ request: ControlRequest, host: NativeControlHost) async -> ControlResponse {
+        let create: RemoteSessionCreate
+        switch RemoteSessionCreate.parse(request) {
+        case .failure(let refusal): return failure(refusal.message)
+        case .success(let parsed): create = parsed
+        }
+        switch remoteServer(create.host, command: "session.remote.new", host: host) {
+        case .failure(let refusal): return failure(refusal.message)
+        case .success(let name):
+            guard host.remoteServers.contains(where: { $0.name == name && $0.state == .connected }) else {
+                return failure("no connection to \(name)")
+            }
+            return await host.newRemoteSession(name, create)
+        }
+    }
 
     /// tree is the Local group, while it has sessions, ahead of the server's workspaces, as the sidebar shows them.
     public static func tree(_ host: NativeControlHost) -> ControlTree {
@@ -366,11 +414,10 @@ public enum NativeControl {
         let local = locals.isEmpty ? [] : [ControlWorkspaceNode(id: localWorkspace.uuidString, name: "Local",
                                                                 active: locals.contains { $0.active }, sessions: locals)]
         let dashboard = host.dashboard
-        var tree = ControlTree(workspaces: local + host.serverWorkspaces, sidebarWidth: host.sidebarWidthPoints,
+        let tree = ControlTree(workspaces: local + host.serverWorkspaces, sidebarWidth: host.sidebarWidthPoints,
                                quickVisible: host.quickShown, dashboardMembers: dashboard?.members.map(\.controlRef),
                                dashboardHighlighted: dashboard?.highlighted?.controlRef, dashboardFontSize: dashboard?.fontSize,
                                dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
-        tree.wslServers = host.wslServers
         return tree
     }
 

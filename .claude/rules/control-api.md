@@ -225,11 +225,14 @@ terminals and a scratch outside Live sessions, which have none, are refused, and
 pasteboard write. It also injects between two 4096-byte pty reads, where the program's own escape sequence
 may be unfinished: the OSC 52 still parses whole, and the interrupted sequence is cut short.
 
-`server install` is the third, macOS-only. It installs the agterm-server release matching the app over ssh
+`server install` is the third. It installs the agterm-server release matching the app over ssh
 and a download, and opens no socket. `ServerInstall` in `agtermCore` owns the asset naming, the checksum
 rules and the argv on `TerminfoInstall`'s connection surface; `ServerInstaller` in the CLI runs the steps
 over injectable effects, and no archive bytes are sent to the host until the tarball's sha256 matches the app's
 `agterm-server.sha256`. A bad destination is refused in `run`, not `validate`, so every refusal exits 1.
+A `remote.properties` name runs the same three steps through its command (below) and refuses ssh's options.
+On agterm-win (`ServerCommandsWindows.swift`) it installs only on such a name, with curl.exe and certutil, and the
+app's install button runs it.
 
 `paste receive` is the fourth. It stages a paste bundle on the host whose program a pasted file must reach,
 run by the viewing Mac over ssh (`RemoteSession.pasteReceiveCommand`); [[libghostty]] owns the bundle and
@@ -248,15 +251,19 @@ deadline check in the poll loop alone cannot.
 It accepts light/dark, sets `NSApp.appearance`, posts `.agtermSystemAppearanceChanged`, echoes the effective
 side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provide no CLI or skill entry.
 
-`wsl.list`, `wsl.start` and `wsl.launch` (`agtermctl wsl list|start DIST|launch DIST on|off`) are agterm-win's, absent
-from the list above and compiled only under `#if os(Windows)` (the cases, the dispatch arm and the CLI's
-`hostSubcommands` entry), so no other build's switch over every command owes them a case. They are agterm-win's only
-commands the Mac lacks; its other chrome (Settings, the notice bar) has none.
-`NativeControl` serves them; `ControlWSL.parse` owns their validation, and the dispatcher arm only answers `ControlActionsUnsupported`. `wsl.launch` writes the Settings ▸ General check box for that distribution,
-`off` being a manual choice the first start no longer asks about. Every reply carries the whole `wsl` list, which
-`tree` reports as top-level `wslServers`. `wsl.start` never asks that first-start question: a modal dialog would hold
-the socket's one-at-a-time accept loop. `ControlWSLServer` and both fields compile everywhere, so a Mac decodes a
-Windows reply.
+`remote.properties` (`RemoteCommands`, beside `keymap.conf` in the config directory) names remotes reached by a
+command of their own instead of `ssh <host>`, in the Java properties format, parsed once per change with
+`KeymapDiagnostic`s. Every `RemoteSession` and `ServerInstall` builder takes the name as its host: a defined name
+runs its command's words followed by the same `/bin/sh -c SCRIPT` ssh would carry as one line (the attach by
+`/usr/bin/env … zmx attach`), so the command must run its arguments as a program, and any other name stays an ssh
+destination. A defined remote gets no ControlMaster pool (`SshConnectionPool.ready` answers true and starts none),
+no `ssh -G` keepalive, no BatchMode/ConnectTimeout, and no `-L` forward: `forwardCommand` throws `definedRemote` and
+a loopback page or link opens at its own port, which WSL2 shares with Windows. Its pty is the pane's own, the one
+ssh's `-tt` would have asked for. No command or field is added: `window.remote.open`, `session.remote.new`,
+`server install` and `window.list` take and report the name. The app reads `RemoteCommands.current`, pointed at
+the config directory by `SettingsModel` (a notification on bad lines) or agterm-win's `main.swift`; the CLI calls
+`useConfigured`. agterm-win reaches nothing else: its `NativeControl` answers `window.list` with each defined name as
+a remote window, refuses an undefined one, and writes the file from `wsl -l -q` only while none exists.
 
 ## Organization commands
 

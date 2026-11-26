@@ -89,7 +89,10 @@ extension ControlServer {
     /// that port reaches the origin through: a page the store refuses never starts one.
     private func showForwardedPage(_ page: PresentationPage, address: String, in store: AppStore, session: Session) -> String? {
         guard let host = session.remoteHost, let forwarded = ForwardedPage(address) else { return "invalid url" }
-        guard let port = RemotePortForward.freePort(host: forwarded.host), let local = forwarded.url(localPort: port) else {
+        // a remote.properties host shares this Mac's loopback or reaches it its own way, so the page opens at its own port
+        let direct = RemoteCommands.current.command(for: host) != nil
+        guard let port = direct ? forwarded.port : RemotePortForward.freePort(host: forwarded.host),
+              let local = forwarded.url(localPort: port) else {
             return "no free local port for the page's forward"
         }
         var shown = page
@@ -101,6 +104,7 @@ extension ControlServer {
         let pageID = slot.page.id
         replicaPages[pageID] = ReplicaPageRecord(session: session.id, origin: origin, channel: nil, offer: page.offer)
         _ = HtmlOverlayRegistry.shared.page(for: slot.page, store: store, backgroundColor: page.backgroundColor, replica: nil)
+        guard !direct else { return nil }
         let spec = forwarded.spec(localPort: port)
         let onEvent: @MainActor (PortForwardEvent) -> Void = { [weak self, weak store] event in
             guard let store, self?.replicaPages[pageID]?.forward != nil else { return }

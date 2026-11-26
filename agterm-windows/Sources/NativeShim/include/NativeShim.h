@@ -14,8 +14,6 @@ typedef void (*nt_reply_fn)(void *context, const uint8_t *bytes, uint32_t length
 void nt_init_process(void);
 // Appends unhandled exceptions and UCRT invalid-parameter aborts to `path` before the process dies.
 void nt_install_crash_log(const uint16_t *path);
-// Writes the file's SHA-256 into the 32 bytes at `digest`: 0, else the Win32 error or NTSTATUS that stopped it.
-int32_t nt_sha256_file(const uint16_t *path, uint8_t *digest);
 // nt_create returns NULL with the reason in `error` when the core or the renderer cannot start.
 nt_terminal *nt_create(void *window, const uint16_t *font, float points, uint16_t *error, int32_t error_capacity);
 void nt_destroy(nt_terminal *terminal);

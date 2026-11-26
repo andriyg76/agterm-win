@@ -1,23 +1,23 @@
 import Foundation
 import agtermCore
 
-/// The catalog stream and short commands of a remote window, carried by `wsl.exe` instead of ssh. agtermCore hands
-/// over ssh argv; the remote line is its last element, run by `/bin/sh -c` inside the distribution.
+/// The catalog stream and short commands of a remote window. agtermCore hands over each invocation whole, the remote's
+/// own command first, and this runs it as a hidden Windows process.
 @MainActor
-final class WSLTransport: RemotePresentationTransport {
-    let host: WSLHost
+final class RemoteTransport: RemotePresentationTransport {
+    let host: RemoteHost
 
-    init(host: WSLHost) {
+    init(host: RemoteHost) {
         self.host = host
     }
 
     func open(_ argv: [String], onLine: @escaping @MainActor (Data) -> Void,
               onClose: @escaping @MainActor (String) -> Void) -> RemotePresentationLink {
-        let link = WSLLink()
+        let link = RemoteLink()
         do {
-            try link.start(host.start(argv.last ?? "", captureErrors: false), onLine: onLine, onClose: onClose)
+            try link.start(host.start(argv, captureErrors: false), onLine: onLine, onClose: onClose)
         } catch {
-            let reason = "wsl.exe did not start: \(error)"
+            let reason = "\(argv.first ?? "the remote command") did not start: \(error)"
             DispatchQueue.main.async { MainActor.assumeIsolated { onClose(reason) } }
         }
         return link
@@ -29,7 +29,7 @@ final class WSLTransport: RemotePresentationTransport {
         return { argv in
             await withCheckedContinuation { continuation in
                 Thread {
-                    let result = (try? host.run(argv.last ?? "")) ?? (status: -1, stdout: "", stderr: "")
+                    let result = (try? host.run(argv)) ?? (status: -1, stdout: "", stderr: "")
                     continuation.resume(returning: (result.status, result.stdout))
                 }.start()
             }
@@ -37,7 +37,7 @@ final class WSLTransport: RemotePresentationTransport {
     }
 }
 
-final class WSLLink: RemotePresentationLink {
+final class RemoteLink: RemotePresentationLink {
     private var process: HiddenProcess?
 
     func start(_ process: HiddenProcess, onLine: @escaping @MainActor (Data) -> Void,
@@ -57,7 +57,7 @@ final class WSLLink: RemotePresentationLink {
                 }
             }
             process.waitUntilExit()
-            let reason = "wsl.exe exited \(process.terminationStatus)"
+            let reason = "the remote command exited \(process.terminationStatus)"
             DispatchQueue.main.async { MainActor.assumeIsolated { onClose(reason) } }
         }.start()
     }

@@ -8,6 +8,8 @@ public enum RemoteSession {
         case invalidHost
         case invalidSession
         case invalidEndpoint
+        /// definedRemote is an ssh-only request, a port forward, for a host `remote.properties` defines.
+        case definedRemote
     }
 
     /// One ssh invocation running the far side's own `zmx tree`, which returns its attachable sessions
@@ -16,7 +18,8 @@ public enum RemoteSession {
     /// `-T` because no pty is wanted, `BatchMode=yes` because a host-key or password prompt would hang a
     /// dispatcher with no way to answer it. `ConnectTimeout` bounds the handshake only — the caller still
     /// needs its own deadline for a remote command that never returns.
-    public static func treeCommand(host: String, connectTimeout: Int = 5, controlPath: String? = nil) throws -> [String] {
+    public static func treeCommand(host: String, connectTimeout: Int = 5, controlPath: String? = nil,
+                                   remotes: RemoteCommands = .current) throws -> [String] {
         try validate(host: host)
         // the far side runs the BARE form of the same command, which does the whole join in one
         // main-actor walk of its own windows and answers with one document
@@ -24,8 +27,8 @@ public enum RemoteSession {
         // sshd runs the remote command through the ACCOUNT's shell, where a bare `VAR=value` assignment is
         // a syntax error in fish and tcsh; wrapped, every login shell sees one ordinary command, as
         // `attachCommand` already sends.
-        let remote = CommandRestore.shellQuotedLine(["/bin/sh", "-c", chain])
-        return sshArguments(host: host, connectTimeout: connectTimeout, interactive: false, controlPath: controlPath) + [remote]
+        return invocation(host: host, command: ["/bin/sh", "-c", chain], connectTimeout: connectTimeout, interactive: false,
+                          controlPath: controlPath, remotes: remotes)
     }
 
     /// One ssh invocation carrying `session`'s presentation stream, for as long as the row is shown.
@@ -33,21 +36,23 @@ public enum RemoteSession {
     /// `-T` because frames travel on plain stdio and a pty would mangle them, and no lifetime deadline:
     /// the stream is meant to stay up. `exec` so the far-side shell does not linger between ssh and the
     /// bridge, which would keep a dead bridge's stdio open.
-    public static func presentCommand(host: String, session: String, connectTimeout: Int = 5, controlPath: String? = nil) throws -> [String] {
+    public static func presentCommand(host: String, session: String, connectTimeout: Int = 5, controlPath: String? = nil,
+                                      remotes: RemoteCommands = .current) throws -> [String] {
         try validate(host: host)
         guard isPlain(session) else { throw InvocationError.invalidSession }
         let chain = cliPathPrefix + " && exec agtermctl zmx present " + CommandRestore.shellQuotedLine([session])
-        let remote = CommandRestore.shellQuotedLine(["/bin/sh", "-c", chain])
-        return sshArguments(host: host, connectTimeout: connectTimeout, interactive: false, controlPath: controlPath) + [remote]
+        return invocation(host: host, command: ["/bin/sh", "-c", chain], connectTimeout: connectTimeout, interactive: false,
+                          controlPath: controlPath, remotes: remotes)
     }
 
     /// catalogCommand carries agterm-server's catalog stream for a remote window, for as long as it is open; plain
     /// stdio and `exec` for the reasons `presentCommand` gives.
-    public static func catalogCommand(host: String, connectTimeout: Int = 5, controlPath: String? = nil) throws -> [String] {
+    public static func catalogCommand(host: String, connectTimeout: Int = 5, controlPath: String? = nil,
+                                      remotes: RemoteCommands = .current) throws -> [String] {
         try validate(host: host)
         let chain = cliPathPrefix + " && exec agtermctl catalog subscribe"
-        let remote = CommandRestore.shellQuotedLine(["/bin/sh", "-c", chain])
-        return sshArguments(host: host, connectTimeout: connectTimeout, interactive: false, controlPath: controlPath) + [remote]
+        return invocation(host: host, command: ["/bin/sh", "-c", chain], connectTimeout: connectTimeout, interactive: false,
+                          controlPath: controlPath, remotes: remotes)
     }
 
     /// endedCommand is what a catalog row whose session ended shows in place of an attach: a line naming the host,
@@ -61,37 +66,41 @@ public enum RemoteSession {
     /// as the overlay is up. `-tt` because the program is the user's and reads the pty; `exec` so the helper's
     /// hangup check sees the ssh session's own pty close.
     public static func runJobCommand(host: String, job: String, token: String? = nil, connectTimeout: Int = 5,
-                                     controlPath: String? = nil) throws -> [String] {
+                                     controlPath: String? = nil, remotes: RemoteCommands = .current) throws -> [String] {
         try validate(host: host)
         guard isPlain(job), token.map(isPlain) ?? true else { throw InvocationError.invalidSession }
         let chain = cliPathPrefix + " && exec agtermctl session overlay run-job "
             + CommandRestore.shellQuotedLine([job] + (token.map { ["--token", $0] } ?? []))
-        let remote = CommandRestore.shellQuotedLine(["/bin/sh", "-c", chain])
-        return sshArguments(host: host, connectTimeout: connectTimeout, interactive: true, controlPath: controlPath) + [remote]
+        return invocation(host: host, command: ["/bin/sh", "-c", chain], connectTimeout: connectTimeout, interactive: true,
+                          controlPath: controlPath, remotes: remotes)
     }
 
     /// pageServeCommand uses plain ssh stdio to claim and carry a remote page's channel.
-    public static func pageServeCommand(host: String, token: String, connectTimeout: Int = 5, controlPath: String? = nil) throws -> [String] {
+    public static func pageServeCommand(host: String, token: String, connectTimeout: Int = 5, controlPath: String? = nil,
+                                        remotes: RemoteCommands = .current) throws -> [String] {
         try validate(host: host)
         guard isPlain(token) else { throw InvocationError.invalidSession }
         let chain = cliPathPrefix + " && exec agtermctl session overlay page-serve " + CommandRestore.shellQuotedLine([token])
-        let remote = CommandRestore.shellQuotedLine(["/bin/sh", "-c", chain])
-        return sshArguments(host: host, connectTimeout: connectTimeout, interactive: false, controlPath: controlPath) + [remote]
+        return invocation(host: host, command: ["/bin/sh", "-c", chain], connectTimeout: connectTimeout, interactive: false,
+                          controlPath: controlPath, remotes: remotes)
     }
 
     /// pasteReceiveCommand runs the far side's `agtermctl paste receive`, which reads a paste bundle on plain ssh stdin.
-    public static func pasteReceiveCommand(host: String, connectTimeout: Int = 5, controlPath: String? = nil) throws -> [String] {
+    public static func pasteReceiveCommand(host: String, connectTimeout: Int = 5, controlPath: String? = nil,
+                                           remotes: RemoteCommands = .current) throws -> [String] {
         try validate(host: host)
         let chain = cliPathPrefix + " && exec agtermctl paste receive"
-        let remote = CommandRestore.shellQuotedLine(["/bin/sh", "-c", chain])
-        return sshArguments(host: host, connectTimeout: connectTimeout, interactive: false, controlPath: controlPath) + [remote]
+        return invocation(host: host, command: ["/bin/sh", "-c", chain], connectTimeout: connectTimeout, interactive: false,
+                          controlPath: controlPath, remotes: remotes)
     }
 
     /// forwardCommand is a forward of its own for a row with no pooled master: ControlMaster and ControlPath are
     /// switched off over any ssh_config, so the listener lives in this process and ends with it. It takes the pane
     /// attach's keepalive, or a half-open link would leave it running with the page's port dead.
-    public static func forwardCommand(host: String, spec: String, connectTimeout: Int = 5) throws -> [String] {
+    public static func forwardCommand(host: String, spec: String, connectTimeout: Int = 5,
+                                      remotes: RemoteCommands = .current) throws -> [String] {
         try validate(host: host)
+        guard remotes.command(for: host) == nil else { throw InvocationError.definedRemote }
         let options = ["-T", "-N", "-o", "BatchMode=yes", "-o", "ConnectTimeout=\(connectTimeout)", "-o", "ControlMaster=no",
                        "-o", "ControlPath=none", "-o", "ExitOnForwardFailure=yes"]
         let ssh = CommandRestore.shellQuotedLine(["ssh"] + options) + " $ka " + CommandRestore.shellQuotedLine(["-L", spec, host])
@@ -99,8 +108,10 @@ public enum RemoteSession {
     }
 
     /// forwardControlCommand adds (`forward`), removes (`cancel`) or, with no spec, checks the master at `controlPath`.
-    public static func forwardControlCommand(_ operation: String, host: String, controlPath: String, spec: String? = nil) throws -> [String] {
+    public static func forwardControlCommand(_ operation: String, host: String, controlPath: String, spec: String? = nil,
+                                             remotes: RemoteCommands = .current) throws -> [String] {
         try validate(host: host)
+        guard remotes.command(for: host) == nil else { throw InvocationError.definedRemote }
         return ["ssh", "-O", operation, "-o", "ControlPath=" + controlPath] + (spec.map { ["-L", $0] } ?? []) + [host]
     }
 
@@ -121,12 +132,12 @@ public enum RemoteSession {
     /// server's own response line. Arguments carry user text, so the outer layer is quoted for any login shell.
     /// `operands` follow a `--`, so one starting with `-` is never read as an option.
     public static func controlCommand(host: String, arguments: [String], operands: [String] = [], connectTimeout: Int = 5,
-                                      controlPath: String? = nil) throws -> [String] {
+                                      controlPath: String? = nil, remotes: RemoteCommands = .current) throws -> [String] {
         try validate(host: host)
         let tail = operands.isEmpty ? [] : ["--"] + operands
         let chain = cliPathPrefix + " && agtermctl " + CommandRestore.shellQuotedLine(arguments + ["--json"] + tail)
-        let remote = ["/bin/sh", "-c", chain].map(CommandRestore.accountShellQuoted).joined(separator: " ")
-        return sshArguments(host: host, connectTimeout: connectTimeout, interactive: false, controlPath: controlPath) + [remote]
+        return invocation(host: host, command: ["/bin/sh", "-c", chain], connectTimeout: connectTimeout, interactive: false,
+                          controlPath: controlPath, remotes: remotes, quote: CommandRestore.accountShellQuoted)
     }
 
     /// sshd's PATH and a profile-less shell miss an installed CLI (exit 127), so `CommandPath`'s Mac directories and
@@ -152,15 +163,15 @@ public enum RemoteSession {
     /// `lead` opts the far zmx client into explicit leadership; an origin whose zmx predates it ignores
     /// the two variables and the pane behaves as it did before.
     public static func attachCommand(host: String, endpoint: ControlZmxEndpoint, daemon: String,
-                                     lead: ZmxLeadAttachment? = nil,
-                                     connectTimeout: Int = 5, controlPath: String? = nil) throws -> [String] {
+                                     lead: ZmxLeadAttachment? = nil, connectTimeout: Int = 5, controlPath: String? = nil,
+                                     remotes: RemoteCommands = .current) throws -> [String] {
         try validate(host: host)
         guard ZmxSupport.isDaemonName(daemon) || ZmxSupport.isScratchDaemonName(daemon) else { throw InvocationError.invalidSession }
         guard isPath(endpoint.executable), isPath(endpoint.socketDirectory) else {
             throw InvocationError.invalidEndpoint
         }
         let guardScript = "printf '%s\\n' 'agterm: remote session is gone'; exit 1"
-        let remote = CommandRestore.shellQuotedLine([
+        let command = [
             // the four the LOCAL pane sets in `ZmxSupport`, empty being unset to zmx: an inherited
             // `ZMX_SESSION` makes attach SWITCH session instead, never reaching the create-only guard,
             // and an inherited prefix resolves a name agterm never created.
@@ -168,8 +179,10 @@ public enum RemoteSession {
             "ZMX_DIR=" + endpoint.socketDirectory,
         ] + (lead?.assignments ?? []) + [
             endpoint.executable, "attach", daemon, "/bin/sh", "-c", guardScript,
-        ])
-        var argv = sshArguments(host: host, connectTimeout: connectTimeout, interactive: true, controlPath: controlPath) + [remote]
+        ]
+        if let prefix = remotes.command(for: host) { return prefix + command }
+        var argv = sshArguments(host: host, connectTimeout: connectTimeout, interactive: true, controlPath: controlPath)
+            + [CommandRestore.shellQuotedLine(command)]
         // why ERROR: control-api.md, Remote sessions
         argv.insert(contentsOf: ["-o", "LogLevel=ERROR"], at: argv.count - 2)
         return argv
@@ -192,17 +205,20 @@ public enum RemoteSession {
     public static func attachPaneCommand(host: String, endpoint: ControlZmxEndpoint, daemon: String,
                                          session: String, pane: ZmxPaneRole,
                                          lead: ZmxLeadAttachment? = nil, linkNonce: String? = nil,
-                                         connectTimeout: Int = 5, controlPath: String? = nil) throws -> String {
+                                         connectTimeout: Int = 5, controlPath: String? = nil,
+                                         remotes: RemoteCommands = .current) throws -> String {
         let argv = try attachCommand(host: host, endpoint: endpoint, daemon: daemon, lead: lead,
-                                     connectTimeout: connectTimeout, controlPath: controlPath)
-        // $ka is unquoted on purpose: four words or none
-        let keepAlive = keepAliveCheck(Array(argv.dropFirst()))
-        let attach = CommandRestore.shellQuotedLine(Array(argv.dropLast(2))) + " $ka "
-            + CommandRestore.shellQuotedLine(Array(argv.suffix(2)))
+                                     connectTimeout: connectTimeout, controlPath: controlPath, remotes: remotes)
+        let defined = remotes.command(for: host) != nil
+        // a defined remote has no master to wait for and no ssh keepalive; $ka is unquoted on purpose: four words or none
+        let poolPath = defined ? nil : controlPath
+        let keepAlive = defined ? "ka=" : keepAliveCheck(Array(argv.dropFirst()))
+        let attach = defined ? CommandRestore.shellQuotedLine(argv)
+            : CommandRestore.shellQuotedLine(Array(argv.dropLast(2))) + " $ka " + CommandRestore.shellQuotedLine(Array(argv.suffix(2)))
         // a pooled pane waits for its master; one that never came up is a lost connection, so 255
-        let run = controlPath == nil ? "\(attach); status=$?"
+        let run = poolPath == nil ? "\(attach); status=$?"
             : "if agterm_connection_wait; then \(attach); status=$?; else status=255; fi"
-        let prelude = controlPath.map { connectionWait(host: host, controlPath: $0) + "; " } ?? ""
+        let prelude = poolPath.map { connectionWait(host: host, controlPath: $0) + "; " } ?? ""
         var wait = ""
         if let nonce = lead?.nonce ?? linkNonce {
             let title = CommandRestore.shellQuotedLine([RemoteLinkNotice.title(nonce: nonce)])
@@ -222,8 +238,9 @@ public enum RemoteSession {
         + "\\033[?2031l\\033[?2048l\\033[=0u"
 
     /// One ssh invocation that only proves the host answers again, before a waiting pane is attached anew.
-    public static func probeCommand(host: String, controlPath: String? = nil) throws -> [String] {
+    public static func probeCommand(host: String, controlPath: String? = nil, remotes: RemoteCommands = .current) throws -> [String] {
         try validate(host: host)
+        if let prefix = remotes.command(for: host) { return prefix + ["/bin/sh", "-c", "true"] }
         return sshArguments(host: host, connectTimeout: 5, interactive: false, controlPath: controlPath) + ["true"]
     }
 
@@ -238,11 +255,22 @@ public enum RemoteSession {
 
     /// waitingForConnection runs `line`, a job helper's command, once its master answers; without one it says so and
     /// exits 255.
-    public static func waitingForConnection(_ line: String, host: String, controlPath: String) -> String {
+    public static func waitingForConnection(_ line: String, host: String, controlPath: String,
+                                            remotes: RemoteCommands = .current) -> String {
+        guard remotes.command(for: host) == nil else { return line }
         let failed = CommandRestore.shellQuotedLine(["agterm: no connection to \(host)"])
         let script = connectionWait(host: host, controlPath: controlPath)
             + "; agterm_connection_wait || { printf '%s\\n' \(failed); exit 255; }; exec " + line
         return CommandRestore.shellQuotedLine(["/usr/bin/env", "/bin/sh", "-c", script])
+    }
+
+    /// invocation is ssh reaching `host` with `command` as one quoted line, or the command `remote.properties` defines for
+    /// `host` followed by `command`'s words: ssh's options, master and keepalive have no meaning there.
+    static func invocation(host: String, command: [String], connectTimeout: Int, interactive: Bool, controlPath: String?,
+                           remotes: RemoteCommands, quote: (String) -> String = { CommandRestore.shellQuotedLine([$0]) }) -> [String] {
+        if let prefix = remotes.command(for: host) { return prefix + command }
+        return sshArguments(host: host, connectTimeout: connectTimeout, interactive: interactive, controlPath: controlPath)
+            + [command.map(quote).joined(separator: " ")]
     }
 
     private static func sshArguments(host: String, connectTimeout: Int, interactive: Bool, controlPath: String? = nil) -> [String] {

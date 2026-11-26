@@ -90,20 +90,17 @@ private final class FakeHost: NativeControlHost {
     var systemIsDark = false
     func setAppearance(_ appearance: Appearance) { self.appearance = appearance }
 
-    var wslServers = [ControlWSLServer(distribution: "Ubuntu", started: false, connected: false, launch: nil)]
+    var remoteServers = [NativeControl.RemoteServer(name: "Ubuntu", started: false, state: nil)]
     var startRefusal: String?
-    func startWSLServer(_ distribution: String) -> String? {
+    func startRemoteServer(_ name: String) -> String? {
         guard startRefusal == nil else { return startRefusal }
-        wslServers = wslServers.map {
-            $0.distribution == distribution ? ControlWSLServer(distribution: distribution, started: true, connected: false, launch: $0.launch) : $0
-        }
+        remoteServers = remoteServers.map { $0.name == name ? NativeControl.RemoteServer(name: name, started: true, state: .connected) : $0 }
         return nil
     }
-    func setWSLLaunch(_ distribution: String, atLaunch: Bool) {
-        wslServers = wslServers.map {
-            $0.distribution == distribution ? ControlWSLServer(distribution: distribution, started: $0.started, connected: $0.connected,
-                                                               launch: atLaunch ? "atLaunch" : "manual") : $0
-        }
+    var created: [(name: String, create: RemoteSessionCreate)] = []
+    func newRemoteSession(_ name: String, _ create: RemoteSessionCreate) async -> ControlResponse {
+        created.append((name, create))
+        return ControlResponse(ok: true, result: ControlResult(id: "S1"))
     }
 
     var opened: [NativeOverlay.Open] = []
@@ -210,25 +207,33 @@ struct NativeControlTests {
         await NativeControl.handle(request, host: host, version: "1.2.3")
     }
 
-    #if os(Windows)
-    @Test func wslStartAndLaunchAnswerWithEveryServer() async {
+    @Test func windowListReportsEveryRemoteAsARemoteWindow() async {
         let host = FakeHost()
-        #expect(await handle(ControlRequest(cmd: .wslList), host).result?.wsl == host.wslServers)
-        let started = await handle(ControlRequest(cmd: .wslStart, args: ControlArgs(name: "ubuntu")), host)
-        #expect(started.ok && started.result?.wsl?.first?.started == true)
-        let launch = await handle(ControlRequest(cmd: .wslLaunch, args: ControlArgs(name: "Ubuntu", mode: "off")), host)
-        #expect(launch.result?.wsl?.first?.launch == "manual")
-        #expect(await handle(ControlRequest(cmd: .tree), host).result?.tree?.wslServers == host.wslServers)
+        let before = await handle(ControlRequest(cmd: .windowList), host).result?.windows?.first
+        #expect(before?.id == NativeControl.remoteWindowID("Ubuntu").uuidString && before?.open == false)
+        #expect(before?.remote?.host == "Ubuntu" && before?.remote?.state == nil)
+        let opened = await handle(ControlRequest(cmd: .windowRemoteOpen, args: ControlArgs(host: "Ubuntu")), host)
+        #expect(opened.result?.id == before?.id)
+        let after = await handle(ControlRequest(cmd: .windowList), host).result?.windows?.first
+        #expect(after?.open == true && after?.remote?.state == "connected")
     }
 
-    @Test func wslRefusesAnUnknownDistributionAndPassesAStartRefusalOn() async {
+    @Test func aRemoteWindowRefusesAnUndefinedNameAndPassesAStartRefusalOn() async {
         let host = FakeHost()
-        #expect(await handle(ControlRequest(cmd: .wslStart, args: ControlArgs(name: "Arch")), host).error == "no WSL distribution named Arch")
-        #expect(await handle(ControlRequest(cmd: .wslLaunch, args: ControlArgs(name: "Ubuntu")), host).error == "wsl.launch requires on or off")
+        let open = { (destination: String) in await self.handle(ControlRequest(cmd: .windowRemoteOpen, args: ControlArgs(host: destination)), host) }
+        #expect(await open("buildbox").error == "window.remote.open: buildbox is not defined in remote.properties")
         host.startRefusal = "asking"
-        #expect(await handle(ControlRequest(cmd: .wslStart, args: ControlArgs(name: "Ubuntu")), host).error == "asking")
+        #expect(await open("Ubuntu").error == "asking")
     }
-    #endif
+
+    @Test func aRemoteSessionNeedsAConnectedRemote() async {
+        let host = FakeHost()
+        let request = ControlRequest(cmd: .sessionRemoteNew, args: ControlArgs(cwd: "/tmp", host: "Ubuntu"))
+        #expect(await handle(request, host).error == "no connection to Ubuntu")
+        _ = host.startRemoteServer("Ubuntu")
+        #expect(await handle(request, host).result?.id == "S1")
+        #expect(host.created.first?.name == "Ubuntu" && host.created.first?.create.cwd == "/tmp")
+    }
 
     @Test func treeListsLocalSessionsAheadOfTheServersWorkspaces() async {
         let host = FakeHost()

@@ -11,7 +11,7 @@ private let shellWindowID = Foundation.UUID(uuidString: "00000000-0000-0000-0000
 
 /// NativeShell is the application window: a Win32 sidebar beside the selected native terminal. It holds local
 /// sessions started from launch profiles, each with a terminal of its own, and the catalogs of the agterm-servers started
-/// in WSL distributions, whose sessions share one terminal that attaches whichever is selected.
+/// on `remote.properties` remotes, whose sessions share one terminal that attaches whichever is selected.
 @MainActor
 final class NativeShell {
     struct LocalSession {
@@ -77,7 +77,7 @@ final class NativeShell {
         var terminal: NativeTerminal { frame.terminal }
     }
 
-    /// ServerOverlay is a catalog session's program overlay, run in WSL through the job helper the origin handed over.
+    /// ServerOverlay is a catalog session's program overlay, run on its remote through the job helper the origin handed over.
     private struct ServerOverlay {
         var state: NativeOverlay
         let frame: OverlayFrame
@@ -106,16 +106,16 @@ final class NativeShell {
 
         init(_ remote: RemoteWindow) { self.remote = remote }
 
-        var distribution: String { remote.host.distribution }
-        var label: String { NativeShell.label(of: distribution) }
+        var name: String { remote.host.name }
+        var label: String { name }
     }
 
-    /// servers are the started agterm-servers, in the order they started; a distribution's server is here only once
-    /// started, so nothing runs wsl.exe for it before then.
+    /// servers are the started agterm-servers, in the order they started; a remote's server is here only once started,
+    /// so nothing runs its command before then.
     private var servers: [Server] = []
-    /// distributions are the WSL distributions that can hold a server, once wsl.exe lists them.
-    private var distributions: [String] = []
-    // distributions whose first start is asking, so a Start the question's message loop delivers waits for the answer
+    /// remotes are the names `remote.properties` defines, each a remote that can hold a server, read again on each use.
+    private var remotes: [String] { RemoteCommands.current.names }
+    // remotes whose first start is asking, so a Start the question's message loop delivers waits for the answer
     private var asking: Set<String> = []
     private let settingsURL: URL
     var settings: NativeSettings
@@ -190,7 +190,7 @@ final class NativeShell {
     private var closeSessionCoalesced: Date?
 
     /// open shows the window; `profiles` name launch profiles to start local sessions from once they are known.
-    /// `server` (`--wsl`) starts that distribution's agterm-server as the menu does, installing it first when
+    /// `server` (`--wsl`) starts that remote's agterm-server as the menu does, installing it first when
     /// `installServer`; the others start as agterm opens only where the user chose that.
     static func open(settings: URL, profiles: [String], version: String, server: String?, installServer: Bool) {
         nt_init_process()
@@ -268,8 +268,8 @@ final class NativeShell {
         } else {
             // once the window is up, so the question a first start asks has it to sit on
             DispatchQueue.main.async { [self] in
-                for distribution in starting {
-                    startServer(distribution, installing: installServer && distribution == requestedServer)
+                for name in starting {
+                    startServer(name, installing: installServer && name == requestedServer)
                 }
             }
         }
@@ -277,14 +277,13 @@ final class NativeShell {
 
     // MARK: agterm-server
 
-    fileprivate static func label(of distribution: String) -> String { "WSL \(distribution)" }
-
-    /// menuServers are the servers the menus offer: every distribution WSL lists, then any started that it does not.
+    /// menuServers are the servers the menus offer: every remote the file defines, then any started that it no longer does.
     private var menuServers: [String] {
-        distributions + servers.map(\.distribution).filter { !distributions.contains($0) }
+        let defined = remotes
+        return defined + servers.map(\.name).filter { !defined.contains($0) }
     }
 
-    private func server(_ distribution: String) -> Server? { servers.first { $0.distribution == distribution } }
+    private func server(_ name: String) -> Server? { servers.first { $0.name == name } }
 
     /// server(of:) is the server holding session `id`.
     private func server(of id: Foundation.UUID) -> Server? { servers.first { $0.remote.session(id) != nil } }
@@ -298,25 +297,25 @@ final class NativeShell {
 
     private var serverEntries: [NativeMenu.Server] { serverEntries(for: menuServers) }
 
-    private func serverEntries(for distributions: [String]) -> [NativeMenu.Server] {
-        let current = currentServer?.distribution
-        return distributions.map { distribution in
-            let started = server(distribution)
-            return NativeMenu.Server(label: Self.label(of: distribution), started: started != nil,
-                                     connected: started?.remote.connected == true, current: distribution == current)
+    private func serverEntries(for names: [String]) -> [NativeMenu.Server] {
+        let current = currentServer?.name
+        return names.map { name in
+            let started = server(name)
+            return NativeMenu.Server(label: name, started: started != nil, connected: started?.remote.connected == true,
+                                     current: name == current)
         }
     }
 
-    /// startServer connects to `distribution`'s agterm-server, installing it first when `installing`; while nothing is
-    /// chosen for the distribution, a start that is `asking` first asks whether the server starts at launch.
-    private func startServer(_ distribution: String, installing: Bool = false, asking ask: Bool = true) {
-        guard server(distribution) == nil, !asking.contains(distribution) else { return }
-        if ask, ServerLaunch.asks(settings.serverLaunch[distribution]) {
-            asking.insert(distribution)
-            askServerLaunch(distribution)
-            asking.remove(distribution)
+    /// startServer connects to `name`'s agterm-server, installing it first when `installing`; while nothing is
+    /// chosen for the name, a start that is `asking` first asks whether the server starts at launch.
+    private func startServer(_ name: String, installing: Bool = false, asking ask: Bool = true) {
+        guard server(name) == nil, !asking.contains(name) else { return }
+        if ask, ServerLaunch.asks(settings.serverLaunch[name]) {
+            asking.insert(name)
+            askServerLaunch(name)
+            asking.remove(name)
         }
-        let started = Server(RemoteWindow(host: WSLHost(distribution: distribution), stateDirectory: stateDirectory))
+        let started = Server(RemoteWindow(host: RemoteHost(name: name), stateDirectory: stateDirectory))
         started.remote.changed = { [weak self] in self?.catalogChanged() }
         started.remote.onNotification = { [weak self] id, notification in
             self?.deliver(id, title: notification.title, body: notification.body, source: notification.source == "control" ? .control : .terminal)
@@ -388,8 +387,8 @@ final class NativeShell {
         prepareAndConnect(started, forceInstall: installing)
     }
 
-    private func askServerLaunch(_ distribution: String) {
-        let question = ServerLaunch.question(server: Self.label(of: distribution))
+    private func askServerLaunch(_ name: String) {
+        let question = ServerLaunch.question(server: name)
         let answers = ServerLaunch.Answer.allCases
         let titles = answers.map { Array($0.title.utf16) + [0] }
         let picked = Int(withWideStrings(titles) {
@@ -397,14 +396,15 @@ final class NativeShell {
                           Array(question.text.utf16) + [0], $0, Int32(titles.count))
         })
         let answer = answers.indices.contains(picked) ? answers[picked] : .notNow
-        settings.serverLaunch[distribution] = ServerLaunch.choice(after: answer)
+        settings.serverLaunch[name] = ServerLaunch.choice(after: answer)
         saveSettings()
-        log("native shell: agterm-server in \(Self.label(of: distribution)) at launch: \(answer)")
+        log("native shell: agterm-server on \(name) at launch: \(answer)")
     }
 
-    /// prepareAndConnect probes agterm-server in WSL, installs or starts it when needed, then opens the catalog stream.
+    /// prepareAndConnect probes agterm-server on the remote, installs or starts it when needed, then opens the catalog
+    /// stream.
     private func prepareAndConnect(_ server: Server, forceInstall: Bool) {
-        server.bootstrapNotice = NoticeBar.Message(source: server.distribution, text: "Checking \(server.label)…", severity: .progress)
+        server.bootstrapNotice = NoticeBar.Message(source: server.name, text: "Checking \(server.label)…", severity: .progress)
         layout()
         let host = server.remote.host
         let label = server.label
@@ -424,61 +424,79 @@ final class NativeShell {
                 release = try serverRelease()
             } catch {
                 log("server release info unavailable: \(error)")
-                finish(NoticeBar.Message(source: host.distribution, text: "\(label): this build cannot download agterm-server (\(error)). "
-                                         + "Install from a release build or run install.sh in WSL.", severity: .error, actions: [.openLog]))
+                finish(NoticeBar.Message(source: host.name, text: "\(label): this build cannot download agterm-server (\(error)). "
+                                         + "Install from a release build or run install.sh there.", severity: .error, actions: [.openLog]))
                 return
             }
             if forceInstall {
-                finish(Self.runServerInstall(host: host, label: label, release: release))
+                finish(Self.runServerInstall(host: host, label: label))
                 return
             }
             let inspection = host.inspect()
-            log("wsl inspect \(host.distribution): \(inspection.health) — \(inspection.detail)")
+            log("remote inspect \(host.name): \(inspection.health) — \(inspection.detail)")
             let action = WSLServerEnsure.plan(health: inspection.health, expectedVersion: release.version)
-            log("wsl ensure \(host.distribution): \(action)")
+            log("remote ensure \(host.name): \(action)")
             switch action {
             case .connect:
                 finish(nil)
             case .startServiceThenConnect:
-                Self.dispatchNotice(host.distribution, "\(label): starting agterm-server…", .progress)
+                Self.dispatchNotice(host.name, "\(label): starting agterm-server…", .progress)
                 let start = host.startService()
                 if start.ok {
                     finish(nil)
                 } else {
-                    log("wsl start service failed: \(start.message)")
-                    finish(Self.runServerInstall(host: host, label: label, release: release,
+                    log("remote start service failed: \(start.message)")
+                    finish(Self.runServerInstall(host: host, label: label,
                                                  preamble: "Service did not start (\(start.message)). Installing…"))
                 }
             case .install(let reason):
-                finish(Self.runServerInstall(host: host, label: label, release: release, preamble: reason))
+                finish(Self.runServerInstall(host: host, label: label, preamble: reason))
             case .refuse(let reason):
-                finish(NoticeBar.Message(source: host.distribution, text: "\(label): \(reason)", severity: .error, actions: [.retry, .openLog]))
+                finish(NoticeBar.Message(source: host.name, text: "\(label): \(reason)", severity: .error, actions: [.retry, .openLog]))
             }
         }
     }
 
-    /// runServerInstall performs download, unpack and install.sh, reporting progress in the notice bar.
-    nonisolated private static func runServerInstall(host: WSLHost, label: String, release: (version: String, checksums: String),
-                                                        preamble: String? = nil) -> NoticeBar.Message? {
-        if let preamble { dispatchNotice(host.distribution, "\(label): \(preamble)", .progress) }
+    /// runServerInstall runs `agtermctl server install <name>`, the one install, showing each line it prints in the notice
+    /// bar. agtermctl finds the same `remote.properties` through the `AGTERM_STATE_DIR` main.swift exports.
+    nonisolated private static func runServerInstall(host: RemoteHost, label: String, preamble: String? = nil) -> NoticeBar.Message? {
+        if let preamble { dispatchNotice(host.name, "\(label): \(preamble)", .progress) }
+        let ctl = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).deletingLastPathComponent()
+            .appendingPathComponent("agtermctl.exe").path
+        let install: HiddenProcess
         do {
-            let code = try host.installServer(version: release.version, checksums: release.checksums) { line in
-                log("server install: \(line)")
-                dispatchNotice(host.distribution, "\(label): \(line)", .progress)
-            }
-            log("server install exited \(code)")
-            return WSLServerEnsure.installNotice(exitCode: code, error: nil, label: label, source: host.distribution)
+            install = try HiddenProcess(commandLine: RemoteHost.commandLine([ctl, "server", "install", host.name]), captureErrors: true)
         } catch {
             log("server install failed: \(error)")
-            return WSLServerEnsure.installNotice(exitCode: 1, error: String(describing: error), label: label, source: host.distribution)
+            return WSLServerEnsure.installNotice(exitCode: 1, error: String(describing: error), label: label, source: host.name)
         }
+        install.closeInput()
+        var pending = Data()
+        while case let chunk = install.read(), !chunk.isEmpty {
+            pending += chunk
+            while let end = pending.firstIndex(of: UInt8(ascii: "\n")) {
+                let line = String(decoding: pending[..<end], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                pending = Data(pending[pending.index(after: end)...])
+                guard !line.isEmpty else { continue }
+                log("server install: \(line)")
+                dispatchNotice(host.name, "\(label): \(line)", .progress)
+            }
+        }
+        let errors = String(decoding: install.readErrorsToEnd(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        install.waitUntilExit()
+        let code = install.terminationStatus
+        log(code == 0 || code == 3 ? "server install exited \(code)" : "server install failed (exit \(code)): \(errors)")
+        // ArgumentParser prefixes a thrown error; the notice names the failure itself
+        let reason = errors.hasPrefix("Error: ") ? String(errors.dropFirst("Error: ".count)) : errors
+        return WSLServerEnsure.installNotice(exitCode: code, error: code == 0 || code == 3 || reason.isEmpty ? nil : reason, label: label,
+                                             source: host.name)
     }
 
-    nonisolated private static func dispatchNotice(_ distribution: String, _ text: String, _ severity: NoticeBar.Severity) {
+    nonisolated private static func dispatchNotice(_ name: String, _ text: String, _ severity: NoticeBar.Severity) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
-                guard let server = shell.server(distribution) else { return }
-                server.bootstrapNotice = NoticeBar.Message(source: distribution, text: text, severity: severity)
+                guard let server = shell.server(name) else { return }
+                server.bootstrapNotice = NoticeBar.Message(source: name, text: text, severity: severity)
                 shell.layout()
             }
         }
@@ -518,7 +536,7 @@ final class NativeShell {
     }
 
     private func showSettings() {
-        let listed = ServerLaunch.listed(available: distributions, choices: settings.serverLaunch)
+        let listed = ServerLaunch.listed(available: remotes, choices: settings.serverLaunch)
         SettingsWindow.show(owner: window, values: .init(appearance: settings.appearance, points: settings.fontPoints,
                                                          notifications: settings.notifications, general: settings.general,
                                                          serverAtLaunch: Set(ServerLaunch.atLaunch(settings.serverLaunch))),
@@ -663,7 +681,7 @@ final class NativeShell {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     shell.profiles = LaunchProfiles.available(wslDistributions: distributions, powerShell7: powerShell7)
-                    shell.distributions = LaunchProfiles.serverDistributions(distributions)
+                    shell.seedRemoteCommands(LaunchProfiles.serverDistributions(distributions))
                     log("native shell: \(shell.profiles.count) launch profile(s): \(shell.profiles.map(\.name).joined(separator: ", "))")
                     for name in requested {
                         if let profile = LaunchProfiles.named(name, in: shell.profiles) {
@@ -675,6 +693,23 @@ final class NativeShell {
                 }
             }
         }
+    }
+
+    /// seedRemoteCommands writes `remote.properties` with a line per WSL distribution when the file does not exist; an
+    /// existing file is the user's and is never rewritten.
+    private func seedRemoteCommands(_ distributions: [String]) {
+        let configDirectory = Keys.configDirectory
+        let url = RemoteCommands.path(configDirectory: configDirectory)
+        guard !FileManager.default.fileExists(atPath: url.path) else { return }
+        let text = RemoteCommands.template(distributions.map { (name: $0, command: "wsl.exe -d \($0) -e") })
+        do {
+            try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url, options: .withoutOverwriting)
+            log("native shell: wrote \(url.path) with \(distributions.count) WSL distribution(s)")
+        } catch {
+            log("native shell: could not write \(url.path): \(error)")
+        }
+        catalogChanged()
     }
 
     private func newSession(_ profile: LaunchProfile) {
@@ -1426,15 +1461,13 @@ final class NativeShell {
     private func showReplicaOverlay(on server: Server, sessionID: Foundation.UUID, overlay: PresentationOverlay) -> Bool {
         guard overlay.pane == nil, overlay.width == nil, overlay.height == nil else { return false }
         guard serverOverlays[sessionID] == nil, serverPageOverlays[sessionID] == nil else { return false }
-        let remoteLine: String
+        let command: String
         do {
-            guard let line = try RemoteSession.runJobCommand(host: "wsl", job: overlay.job, token: overlay.token).last else { return false }
-            remoteLine = line
+            command = RemoteHost.commandLine(try RemoteSession.runJobCommand(host: server.name, job: overlay.job, token: overlay.token))
         } catch {
             log("native shell: replica overlay for [\(sessionID)]: \(error)")
             return false
         }
-        let command = server.remote.host.commandLine(remoteLine)
         let job = overlay.job
         guard server.remote.store.prepareReplicaOverlay(overlay, forSession: sessionID, closed: { [weak server] closedJob in
             server?.remote.answerPresentation(sessionID, .overlayClosed(PresentationOverlayChange(job: closedJob)))
@@ -1745,7 +1778,7 @@ final class NativeShell {
             let state = server.remote.mirror.state
             guard let text = state.windowNotice(host: server.label) else { return nil }
             let connecting = state == .connecting
-            return NoticeBar.Message(source: server.distribution, text: text, severity: connecting ? .progress : .error,
+            return NoticeBar.Message(source: server.name, text: text, severity: connecting ? .progress : .error,
                                      actions: connecting ? [] : [.openLog])
         }
     }
@@ -1990,8 +2023,8 @@ final class NativeShell {
                 return server.label
             }
         }
-        let distributions = menuServers
-        let entries = NativeMenu.sidebar(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries(for: distributions),
+        let names = menuServers
+        let entries = NativeMenu.sidebar(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries(for: names),
                                          destination: destinationName, canLaunch: canLaunchInSidebar(destination),
                                          canRename: session.map { canRename($0) }, canRestart: canRestart(session),
                                          canClose: canClose(session), shortcuts: menuShortcuts)
@@ -2002,9 +2035,9 @@ final class NativeShell {
         case .command(.renameSession)?: startRename(session)
         case .command(.restartSession)?: restartFromUI(session)
         case .command(.closeSession)?: closeFromUI(session)
-        case .serverSession(let index)? where distributions.indices.contains(index):
-            if let server = server(distributions[index]) { launchInSidebar(.server(server.group, workspace: nil)) }
-        case .startServer(let index)? where distributions.indices.contains(index): startServer(distributions[index])
+        case .serverSession(let index)? where names.indices.contains(index):
+            if let server = server(names[index]) { launchInSidebar(.server(server.group, workspace: nil)) }
+        case .startServer(let index)? where names.indices.contains(index): startServer(names[index])
         case nil: break
         default: run(pick)
         }
@@ -2785,27 +2818,50 @@ extension NativeShell: NativeControlHost {
 
     func setFontPoints(_ points: Float) { setFontSize(points) }
 
-    var wslServers: [ControlWSLServer] {
-        ServerLaunch.listed(available: menuServers, choices: settings.serverLaunch).map { distribution in
-            let started = server(distribution)
-            return ControlWSLServer(distribution: distribution, started: started != nil, connected: started?.remote.connected == true,
-                                    launch: settings.serverLaunch[distribution]?.rawValue)
+    var remoteServers: [NativeControl.RemoteServer] {
+        menuServers.map { name in
+            let started = server(name)
+            return NativeControl.RemoteServer(name: name, started: started != nil, state: started?.remote.mirror.state)
         }
     }
 
-    func startWSLServer(_ distribution: String) -> String? {
-        guard !asking.contains(distribution) else { return "agterm-server in \(Self.label(of: distribution)) is asking whether it starts at launch" }
-        if let existing = server(distribution) {
+    func startRemoteServer(_ name: String) -> String? {
+        guard !asking.contains(name) else { return "agterm-server on \(name) is asking whether it starts at launch" }
+        if let existing = server(name) {
             if !existing.remote.connected { prepareAndConnect(existing, forceInstall: false) }
             return nil
         }
-        startServer(distribution, asking: false)
+        startServer(name, asking: false)
         return nil
     }
 
-    func setWSLLaunch(_ distribution: String, atLaunch: Bool) {
-        settings.serverLaunch[distribution] = atLaunch ? .atLaunch : .manual
-        saveSettings()
+    func newRemoteSession(_ name: String, _ create: RemoteSessionCreate) async -> ControlResponse {
+        guard let server = server(name), server.remote.connected else { return ControlResponse(ok: false, error: "no connection to \(name)") }
+        guard create.originWindow == nil else { return ControlResponse(ok: false, error: "an agterm-server has no window to name") }
+        let store = server.remote.store
+        // with no name the session lands where the server's sidebar is, as a Mac's lands in its current workspace
+        let current = store.currentWorkspaceID.flatMap { id in store.workspaces.first { $0.id == id && !$0.isRoot } }
+        let arguments = create.arguments(origin: .server, workspaceName: create.workspaceName ?? current?.name)
+        let host = server.remote.host
+        let reply = await Task.detached { () -> Result<ControlResponse, Error> in
+            Result {
+                let ran = try host.run(RemoteSession.controlCommand(host: host.name, arguments: arguments))
+                guard let response = try? JSONDecoder().decode(ControlResponse.self, from: Data(ran.stdout.utf8)) else {
+                    throw RemoteHost.Failure.command("agtermctl session new", ran.status, ran.stderr)
+                }
+                return response
+            }
+        }.value
+        switch reply {
+        case .failure(let error):
+            return ControlResponse(ok: false, error: "\(name): \(error)")
+        case .success(let response):
+            if response.ok, let created = response.result?.id.flatMap(Foundation.UUID.init(uuidString:)) {
+                pendingCreatedSession = (server.group, created)
+                selectCreatedSession()
+            }
+            return response
+        }
     }
 
     func openOverlay(_ id: Foundation.UUID, _ open: NativeOverlay.Open) {

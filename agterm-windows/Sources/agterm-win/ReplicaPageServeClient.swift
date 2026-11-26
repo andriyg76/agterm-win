@@ -1,7 +1,7 @@
 import Foundation
 import agtermCore
 
-/// ReplicaPageServeClient holds one page-serve helper over WSL and fetches a single file path from the origin.
+/// ReplicaPageServeClient holds one page-serve helper on a remote and fetches a single file path from the origin.
 @MainActor
 final class ReplicaPageServeClient {
     private let process: HiddenProcess
@@ -11,9 +11,9 @@ final class ReplicaPageServeClient {
         self.process = process
     }
 
-    static func start(host: WSLHost, token: String) throws -> ReplicaPageServeClient {
-        let remote = try RemoteSession.pageServeCommand(host: "wsl", token: token).last!
-        return ReplicaPageServeClient(process: try host.start(remote, captureErrors: true))
+    static func start(host: RemoteHost, token: String) throws -> ReplicaPageServeClient {
+        let argv = try RemoteSession.pageServeCommand(host: host.name, token: token)
+        return ReplicaPageServeClient(process: try host.start(argv, captureErrors: true))
     }
 
     func close() {
@@ -41,14 +41,14 @@ final class ReplicaPageServeClient {
             case .end(let id) where id == requestID:
                 return (mime, buffer)
             case .failure(let id, let error) where id == requestID:
-                throw WSLHost.Failure.reply(error)
+                throw RemoteHost.Failure.reply(error)
             case .failure, .end, .chunk, .head:
                 continue
             default:
                 continue
             }
         }
-        if buffer.isEmpty { throw WSLHost.Failure.reply("page channel ended before the file arrived") }
+        if buffer.isEmpty { throw RemoteHost.Failure.reply("page channel ended before the file arrived") }
         return (mime, buffer)
     }
 

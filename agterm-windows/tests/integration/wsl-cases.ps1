@@ -1,13 +1,32 @@
-﻿# WSL agterm-server cases. They need no WSL: a distribution no machine has stands in, so a start runs wsl.exe and its
-# server stays unconnected, which is all these read back. Dot-sourced by shell-cases.ps1 after settings-cases.ps1, whose
-# helpers they use.
+﻿# remote.properties agterm-server cases. They need no WSL: a remote defined on a distribution no machine has stands in,
+# so a start runs wsl.exe and its server stays unconnected, which is all these read back. Dot-sourced by shell-cases.ps1
+# after settings-cases.ps1, whose helpers they use.
 
 $absent = "agterm-test-absent"
 # TDM_CLICK_BUTTON and the first-start question's button ids (NativeDialog.cpp): 100 + ServerLaunch.Answer's index
 $clickButton = 0x0466; $neverAskButton = 102
 
+# Set-RemoteProperties seeds the case's config with `remote.properties` defining the remotes `$Names` as WSL
+# distributions, and `$Launch` as native.json's serverLaunch choices when given.
+function Set-RemoteProperties([string]$State, [string[]]$Names, [hashtable]$Launch) {
+    $config = Join-Path $State "config"
+    New-Item -ItemType Directory -Force -Path $config | Out-Null
+    $lines = @("# seeded by the integration case") + @($Names | % { "$_ = wsl.exe -d $_ -e" })
+    [IO.File]::WriteAllText((Join-Path $config "remote.properties"), ($lines -join "`n") + "`n")
+    if ($Launch) {
+        $choices = ($Launch.Keys | % { "`"$($_ -replace '"','\"')`": `"$($Launch[$_])`"" }) -join ", "
+        Set-Content (Join-Path $State "native.json") "{`"serverLaunch`": {$choices}}"
+    }
+}
+
+# Get-WSLServer is the remote's window as window list reports it: open while its server is started, connected while
+# its stream is, and the launch choice native.json saves for it.
 function Get-WSLServer([string]$State, [string]$Distribution) {
-    (Invoke-Ctl $State @("wsl", "list")).result.wsl | ? { $_.distribution -eq $Distribution } | Select-Object -First 1
+    $window = (Invoke-Ctl $State @("window", "list")).result.windows | ? { $_.remote.host -eq $Distribution } | Select-Object -First 1
+    if ($window) {
+        [pscustomobject]@{ distribution = $Distribution; id = $window.id; started = [bool]$window.open
+                           connected = $window.remote.state -eq "connected"; launch = Get-ServerLaunch $State $Distribution }
+    }
 }
 
 function Get-ServerLaunch([string]$State, [string]$Distribution) {
@@ -36,7 +55,8 @@ function Get-AgtermWinLog([string]$State) {
     Get-Content $path -Raw -Encoding UTF8
 }
 
-# with nothing chosen, agterm opens without starting any server or asking
+# with nothing chosen, agterm opens without starting any server or asking, and writes remote.properties from what WSL
+# lists, whose remotes window list then reports
 $shellCases["wsl-not-at-launch"] = {
     param($Shell)
     $state = $Shell.State
@@ -45,20 +65,29 @@ $shellCases["wsl-not-at-launch"] = {
     $log = Get-Content (Join-Path $state "agterm-win.log") -Raw
     if (-not $log.Contains("no agterm-server starts at launch")) { $failures += "the log does not say no server starts" }
     if ([AgtermWin32]::Visible($Shell.Process.Id, "#32770")) { $failures += "a dialog opened at launch" }
-    $list = Invoke-Ctl $state @("wsl", "list")
-    if (-not $list.ok) { return $failures + @("wsl list replied $($list | ConvertTo-Json -Compress)") }
-    $running = @($list.result.wsl | ? { $_.started })
-    if ($running) { $failures += "servers started at launch: $(($running.distribution) -join ', ')" }
+    $file = Join-Path $state "config\remote.properties"
+    $written = Wait-Until { if (Test-Path $file) { Get-Content $file -Raw -Encoding UTF8 } } 30
+    if (-not $written) { return $failures + @("agterm did not write $file") }
+    if (-not $written.Contains("# remote.properties:")) { $failures += "the written remote.properties has no header: $written" }
+    $defined = @($written -split "`n" | ? { $_ -match '^\s*[^#!\s]' } | % { ($_ -split '\s*=\s*', 2)[0].Trim() })
+    $list = Invoke-Ctl $state @("window", "list")
+    if (-not $list.ok) { return $failures + @("window list replied $($list | ConvertTo-Json -Compress)") }
+    $running = @($list.result.windows | ? { $_.open })
+    if ($running) { $failures += "servers started at launch: $(($running.remote.host) -join ', ')" }
+    $listed = @($list.result.windows | % { $_.remote.host })
+    if (($listed -join ",") -ne ($defined -join ",")) { $failures += "window list reports '$($listed -join ',')', remote.properties defines '$($defined -join ',')'" }
     $tree = (Invoke-Ctl $state @("tree")).result.tree
-    if (@($tree.wslServers).Count -ne @($list.result.wsl).Count) { $failures += "tree wslServers differs from wsl list" }
+    $remote = @($tree.workspaces.sessions | ? { $_.remoteHost })
+    if ($remote) { $failures += "tree has server sessions with no server started: $(($remote.remoteHost) -join ', ')" }
     $processes = Get-ServerProcesses $Shell
     if ($processes) { $failures += "wsl.exe runs for a server: $($processes[0].CommandLine)" }
     $failures
 }
 
-# a distribution chosen to start at launch starts without asking; wsl launch and Settings ▸ General change the choice
+# a remote chosen to start at launch starts without asking; Settings ▸ General changes the choice, and agterm leaves the
+# seeded remote.properties as it was
 $shellPreparations["wsl-at-launch"] = {
-    param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$absent`": `"atLaunch`"}}"
+    param($state) Set-RemoteProperties $state @($absent) @{ $absent = "atLaunch" }
 }
 $shellCases["wsl-at-launch"] = {
     param($Shell)
@@ -70,43 +99,46 @@ $shellCases["wsl-at-launch"] = {
     if ($server.launch -ne "atLaunch") { $failures += "$absent launch is '$($server.launch)'" }
     if ([AgtermWin32]::Visible($Shell.Process.Id, "#32770")) { $failures += "a chosen start asked" }
     $log = Get-AgtermWinLog $state
-    if (-not $log.Contains("starting agterm-server in WSL $absent")) { $failures += "the log does not show the start" }
-    if (-not $log.Contains("wsl inspect $absent")) { $failures += "the log does not show wsl inspect before connect" }
-    if (-not $log.Contains("wsl ensure $absent")) { $failures += "the log does not show wsl ensure" }
+    if (-not $log.Contains("starting agterm-server in $absent")) { $failures += "the log does not show the start" }
+    if (-not $log.Contains("remote inspect $absent")) { $failures += "the log does not show remote inspect before connect" }
+    if (-not $log.Contains("remote ensure $absent")) { $failures += "the log does not show remote ensure" }
     $notice = Wait-Until {
         $text = (Get-WSLBootstrapNotices $Shell) -join "`n"
-        if ($text -match "not reachable|Checking WSL $absent") { $text }
+        if ($text -match "not reachable|Checking $absent") { $text }
     } 20
     if (-not $notice) { $failures += "the sidebar notice did not show the probe outcome" }
     Save-Snapshot $Shell "started"
 
-    $off = Invoke-Ctl $state @("wsl", "launch", $absent, "off")
-    $offServer = $off.result.wsl | ? { $_.distribution -eq $absent }
-    if (-not $off.ok -or $offServer.launch -ne "manual") { $failures += "wsl launch off replied $($off | ConvertTo-Json -Compress -Depth 4)" }
-    if ((Get-ServerLaunch $state $absent) -ne "manual") { $failures += "native.json keeps '$(Get-ServerLaunch $state $absent)' after off" }
-    $unknown = Invoke-Ctl $state @("wsl", "launch", "agterm-test-nowhere", "on")
-    if ($unknown.ok -or $unknown.error -ne "no WSL distribution named agterm-test-nowhere") {
-        $failures += "an unknown distribution replied $($unknown | ConvertTo-Json -Compress)"
+    $seeded = Get-Content (Join-Path $state "config\remote.properties") -Raw
+    if (-not $seeded.StartsWith("# seeded by the integration case")) { $failures += "agterm rewrote the seeded remote.properties: $seeded" }
+    $unknown = Invoke-Ctl $state @("window", "remote", "open", "agterm-test-nowhere")
+    if ($unknown.ok -or $unknown.error -ne "window.remote.open: agterm-test-nowhere is not defined in remote.properties") {
+        $failures += "an undefined remote replied $($unknown | ConvertTo-Json -Compress)"
     }
-    $again = Invoke-Ctl $state @("wsl", "start", $absent)
-    if (-not $again.ok) { $failures += "starting a started server replied $($again | ConvertTo-Json -Compress)" }
-    Invoke-Ctl $state @("wsl", "launch", $absent, "on") | Out-Null
+    $again = Invoke-Ctl $state @("window", "remote", "open", $absent)
+    if (-not $again.ok -or $again.result.id -ne $server.id) { $failures += "opening a started server replied $($again | ConvertTo-Json -Compress)" }
 
-    $window = Get-ShellWindow $Shell
-    $settings = Open-Settings $Shell $window "general"
+    $settings = Open-Settings $Shell (Get-ShellWindow $Shell) "general"
     if (-not $settings) { return $failures + @("Settings did not open") }
-    $box = [AgtermWin32]::VisibleChildren($settings, "Button") | ? { [AgtermWin32]::TextOf($_) -eq "WSL $absent" } | Select-Object -First 1
-    if (-not $box) { return $failures + @("Settings ▸ General has no WSL $absent check box") }
+    $box = [AgtermWin32]::VisibleChildren($settings, "Button") | ? { [AgtermWin32]::TextOf($_) -eq $absent } | Select-Object -First 1
+    if (-not $box) { return $failures + @("Settings ▸ General has no $absent check box") }
     Save-Snapshot $Shell "settings-servers" $settings
     if ([int][AgtermSettings]::SendMessageW($box, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero) -ne 1) { $failures += "the check box is not ticked" }  # BM_GETCHECK
     [AgtermSettings]::SendMessageW($box, 0x00F1, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null  # BM_SETCHECK unchecked
     if (-not (Close-Settings $settings $true)) { return $failures + @("OK did not close Settings") }
     if ((Get-ServerLaunch $state $absent) -ne "manual") { $failures += "unticking left native.json '$(Get-ServerLaunch $state $absent)'" }
-    if ((Get-WSLServer $state $absent).launch -ne "manual") { $failures += "unticking left wsl list '$((Get-WSLServer $state $absent).launch)'" }
+    $settings = Open-Settings $Shell (Get-ShellWindow $Shell) "general"
+    $box = [AgtermWin32]::VisibleChildren($settings, "Button") | ? { [AgtermWin32]::TextOf($_) -eq $absent } | Select-Object -First 1
+    if (-not $box) { return $failures + @("Settings did not open again on the $absent check box") }
+    if ([int][AgtermSettings]::SendMessageW($box, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero) -ne 0) { $failures += "the check box is ticked after the untick" }
+    [AgtermSettings]::SendMessageW($box, 0x00F1, [IntPtr]1, [IntPtr]::Zero) | Out-Null  # BM_SETCHECK checked
+    if (-not (Close-Settings $settings $true)) { return $failures + @("OK did not close Settings the second time") }
+    if ((Get-ServerLaunch $state $absent) -ne "atLaunch") { $failures += "ticking left native.json '$(Get-ServerLaunch $state $absent)'" }
     $failures
 }
 
 # --wsl starts that server, asking first while nothing is chosen; Don't ask again starts it and saves manual
+$shellPreparations["wsl-first-start"] = { param($state) Set-RemoteProperties $state @($absent) }
 $shellLaunches["wsl-first-start"] = @{ Arguments = "--wsl $absent"; CaseWaits = $true }
 $shellCases["wsl-first-start"] = {
     param($Shell)
@@ -125,14 +157,14 @@ $shellCases["wsl-first-start"] = {
     if (-not (Wait-Until { (Invoke-Ctl $state @("tree")).ok } 30)) { return @("the control socket did not answer after the question") }
     $server = Wait-Until { $s = Get-WSLServer $state $absent; if ($s.started) { $s } } 15
     if (-not $server) { $failures += "$absent did not start after the answer" }
-    if ($server.launch -ne "manual") { $failures += "wsl list launch is '$($server.launch)', not manual" }
+    if ($server.launch -ne "manual") { $failures += "window list's server reads launch '$($server.launch)', not manual" }
     if ((Get-ServerLaunch $state $absent) -ne "manual") { $failures += "native.json keeps '$(Get-ServerLaunch $state $absent)'" }
     $failures
 }
 
 # at-launch ensure reports why a missing distribution stays disconnected, without attempting a GitHub download
 $shellPreparations["wsl-ensure-probe"] = {
-    param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$absent`": `"atLaunch`"}}"
+    param($state) Set-RemoteProperties $state @($absent) @{ $absent = "atLaunch" }
 }
 $shellCases["wsl-ensure-probe"] = {
     param($Shell)
@@ -143,21 +175,22 @@ $shellCases["wsl-ensure-probe"] = {
     if (-not $server) { return @("$absent did not start") }
     if ($server.connected) { $failures += "$absent reads connected for a distribution this machine does not have" }
     $log = Get-AgtermWinLog $state
-    if (-not $log.Contains("wsl inspect $absent")) { $failures += "log lacks wsl inspect" }
+    if (-not $log.Contains("remote inspect $absent")) { $failures += "log lacks remote inspect" }
     if ($log -match "downloading https://github.com/umputun/agterm/releases") { $failures += "ensure tried to download agterm-server for an unreachable distribution" }
     if (-not ((Get-WSLBootstrapNotices $Shell) -join "`n" -match "not reachable")) {
-        $failures += "sidebar notice does not explain the unreachable distribution"
+        $failures += "sidebar notice does not explain the unreachable remote"
     }
-    if (-not $log.Contains("distributionUnreachable") -and -not ($log -match "wsl ensure $absent.*refuse")) {
+    if (-not $log.Contains("distributionUnreachable") -and -not ($log -match "remote ensure $absent.*refuse")) {
         $failures += "log does not record a refused ensure plan"
     }
     Save-Snapshot $Shell "ensure-probe"
     $failures
 }
 
-# wsl start on an already-started server runs ensure again when still disconnected
+# opening an already-started server's window runs ensure again when still disconnected; a session needs a connection,
+# and an ssh host is no remote agterm-win reaches
 $shellPreparations["wsl-ensure-reprobe"] = {
-    param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$absent`": `"atLaunch`"}}"
+    param($state) Set-RemoteProperties $state @($absent) @{ $absent = "atLaunch" }
 }
 $shellCases["wsl-ensure-reprobe"] = {
     param($Shell)
@@ -165,19 +198,28 @@ $shellCases["wsl-ensure-reprobe"] = {
     $failures = @()
     $null = Wait-Until { (Get-WSLServer $state $absent).started } 25
     Start-Sleep -Seconds 2
-    $before = ([regex]::Matches((Get-AgtermWinLog $state), "wsl inspect $absent")).Count
-    $again = Invoke-Ctl $state @("wsl", "start", $absent)
-    if (-not $again.ok) { $failures += "wsl start replied $($again | ConvertTo-Json -Compress)" }
+    $before = ([regex]::Matches((Get-AgtermWinLog $state), "remote inspect $absent")).Count
+    $again = Invoke-Ctl $state @("window", "remote", "open", $absent)
+    if (-not $again.ok) { $failures += "window remote open replied $($again | ConvertTo-Json -Compress)" }
     Start-Sleep -Seconds 2
-    $after = ([regex]::Matches((Get-AgtermWinLog $state), "wsl inspect $absent")).Count
-    if ($after -le $before) { $failures += "wsl start did not run another inspect ($before -> $after)" }
+    $after = ([regex]::Matches((Get-AgtermWinLog $state), "remote inspect $absent")).Count
+    if ($after -le $before) { $failures += "window remote open did not run another inspect ($before -> $after)" }
+    $session = Invoke-Ctl $state @("session", "new", "--remote", $absent)
+    if ($session.ok -or $session.error -ne "no connection to $absent") {
+        $failures += "a session on a disconnected server replied $($session | ConvertTo-Json -Compress)"
+    }
+    $ssh = Invoke-Ctl $state @("window", "remote", "open", "buildbox")
+    if ($ssh.ok -or $ssh.error -ne "window.remote.open: buildbox is not defined in remote.properties") {
+        $failures += "an ssh host replied $($ssh | ConvertTo-Json -Compress)"
+    }
     $failures
 }
 
-# --install-server on an unreachable distribution surfaces install failure in the log and notice instead of hanging
+# --install-server on an unreachable remote surfaces install failure in the log and notice instead of hanging, and
+# agtermctl server install, which that install runs, fails the same way
 # a chosen launch keeps the first-start question, which holds the main thread, out of this case
 $shellPreparations["wsl-install-unreachable"] = {
-    param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$absent`": `"manual`"}}"
+    param($state) Set-RemoteProperties $state @($absent) @{ $absent = "manual" }
 }
 $shellLaunches["wsl-install-unreachable"] = @{ Arguments = "--wsl $absent --install-server" }
 $shellCases["wsl-install-unreachable"] = {
@@ -197,6 +239,16 @@ $shellCases["wsl-install-unreachable"] = {
     if (-not $notice) { $failures += "sidebar notice does not report install failure" }
     if ((Get-WSLServer $state $absent).connected) { $failures += "unreachable install left the server connected" }
     Save-Snapshot $Shell "install-unreachable"
+    $ErrorActionPreference = "Continue"
+    $env:AGTERM_STATE_DIR = $state
+    try {
+        $errors = @(& $ctl server install $absent 2>&1 | ? { $_ -is [System.Management.Automation.ErrorRecord] } | % { $_.ToString() })
+        $code = $LASTEXITCODE
+    } finally { Remove-Item Env:AGTERM_STATE_DIR }
+    $reason = if ($errors) { $errors[0] -replace '^Error: ', '' }
+    if ($code -ne 1) { $failures += "agtermctl server install exited $code" }
+    if (-not $reason) { $failures += "agtermctl server install printed no reason" }
+    elseif ($notice -and -not $notice.Contains($reason.Trim())) { $failures += "the CLI's reason '$reason' is not the notice's '$notice'" }
     $failures
 }
 
@@ -262,7 +314,7 @@ function Drag-Bar([IntPtr]$Bar, [int]$X, [int]$Y, [int]$By) {
 # it to the bottom and another brings it back, the terminal reflowing each time; Retry probes again; the close dismisses
 # it; its colors follow the theme
 $shellPreparations["notice-bar"] = {
-    param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$absent`": `"atLaunch`"}}"
+    param($state) Set-RemoteProperties $state @($absent) @{ $absent = "atLaunch" }
 }
 $shellCases["notice-bar"] = {
     param($Shell)
@@ -332,10 +384,10 @@ $shellCases["notice-bar"] = {
 
     if ($buttons.Count -eq 2) {
         Note "Retry"
-        $before = ([regex]::Matches((Get-AgtermWinLog $state), "wsl inspect $absent")).Count
+        $before = ([regex]::Matches((Get-AgtermWinLog $state), "remote inspect $absent")).Count
         Click-Bar $bar ([int](($buttons[0].Left + $buttons[0].Right) / 2)) $y
         if (-not (Wait-Until { (Get-AgtermWinLog $state).Contains("notice action retry for $absent") } 5)) { $failures += "Retry did not run the retry action" }
-        if (-not (Wait-Until { ([regex]::Matches((Get-AgtermWinLog $state), "wsl inspect $absent")).Count -gt $before } 20)) {
+        if (-not (Wait-Until { ([regex]::Matches((Get-AgtermWinLog $state), "remote inspect $absent")).Count -gt $before } 20)) {
             $failures += "Retry did not probe $absent again"
         }
         $bar = Wait-Until { $b = Get-NoticeBar $window; if ($b -and [AgtermWin32]::TextOf($b) -match "not reachable") { $b } } 30
@@ -356,10 +408,10 @@ $localWorkspace = "00000000-0000-0000-0000-00000000000A"
 $shellPreparations["overlay-server-program"] = {
     param($state)
     $dist = if ($env:AGTERM_WIN_GATE_WSL) { $env:AGTERM_WIN_GATE_WSL } else { $absent }
-    Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$($dist -replace '"','\"')`": `"atLaunch`"}}"
+    Set-RemoteProperties $state @($dist) @{ $dist = "atLaunch" }
 }
 
-# Stage B: ctl overlay on a catalog session when connected; smoke on synthetic WSL when not (docs/plans/20261124-server-program-overlay.md).
+# Stage B: ctl overlay on a catalog session when connected; smoke on a synthetic remote when not (docs/plans/20261124-server-program-overlay.md).
 $shellCases["overlay-server-program"] = {
     param($Shell)
     $state = $Shell.State

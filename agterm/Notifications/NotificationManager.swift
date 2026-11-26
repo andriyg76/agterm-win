@@ -151,6 +151,18 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
         }
     }
 
+    /// Post a banner for `remote.properties` lines that were skipped, read again on each change.
+    func notifyRemoteCommandsDiagnostics(count: Int) {
+        guard bannersEnabled else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Remotes"
+        content.body = "\(count) issue\(count == 1 ? "" : "s") in remote.properties"
+        let request = UNNotificationRequest(identifier: "remote-properties-diagnostics", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error { logger.error("remote-properties banner add failed: \(error.localizedDescription, privacy: .public)") }
+        }
+    }
+
     /// Post a banner for `hooks.conf` parse diagnostics, mirroring the keymap one.
     func notifyHooksDiagnostics(count: Int) {
         guard bannersEnabled else { return }

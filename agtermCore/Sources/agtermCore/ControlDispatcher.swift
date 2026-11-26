@@ -91,11 +91,6 @@ public struct ControlDispatcher {
             return await dispatchWindowCommand(request)
         case .dashboard:
             return dispatchDashboard(request)
-        #if os(Windows)
-        case .wslList, .wslStart, .wslLaunch:
-            // agterm-win's NativeControl serves them; no ControlActions conformer has WSL servers
-            return ControlResponse(ok: false, error: ControlActionsUnsupported.message(request.cmd.rawValue))
-        #endif
         case .debugAppearance:
             // UI-test-only seam handled app-side in `ControlServer` (needs AppKit + `ContentView.isUITestLaunch`).
             return nil

@@ -83,6 +83,7 @@ final class SettingsModel {
         ensureStarterGhosttyConfig()
         ensureStarterRestoreDenylist()
         loadRestoreDenylist()
+        useRemoteCommands()
         // follow the macOS appearance: `SystemAppearanceObserver` posts the resolved `isDark`, threaded
         // straight into `appearanceChanged`.
         NotificationCenter.default.addObserver(forName: .agtermSystemAppearanceChanged, object: nil,
@@ -492,6 +493,15 @@ final class SettingsModel {
         reloadHooks()
         reloadGhosttyConfig()
         remotes.watch(remotesURL)
+        useRemoteCommands()
+    }
+
+    /// useRemoteCommands points `RemoteCommands.current` at this config directory's `remote.properties`; a read that
+    /// finds bad lines posts a banner like `remotes.conf`'s.
+    private func useRemoteCommands() {
+        RemoteCommands.use(configDirectory: configDirectoryURL()) { diagnostics in
+            Task { @MainActor in NotificationManager.shared.notifyRemoteCommandsDiagnostics(count: diagnostics.count) }
+        }
     }
 
     /// Re-read `hooks.conf` and post `.agtermHooksChanged` so the scheduler applies it; diagnostics surface as

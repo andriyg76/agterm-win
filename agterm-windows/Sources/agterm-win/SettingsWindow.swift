@@ -5,7 +5,7 @@ import WinSDK
 import agtermCore
 
 /// SettingsWindow is agterm-win's Settings, in tabs as macOS agterm's: General (new sessions, closing, the mouse, the
-/// WSL distributions whose agterm-server starts at launch), Appearance (themes and the font) and Notifications. An appearance change previews on the
+/// remote.properties remotes whose agterm-server starts at launch), Appearance (themes and the font) and Notifications. An appearance change previews on the
 /// terminals at once; OK keeps every change, Cancel and closing put back what was there when the window opened, as the
 /// macOS theme picker previews, commits and cancels.
 @MainActor
@@ -15,7 +15,7 @@ final class SettingsWindow {
         var points: Float
         var notifications: NotificationSettings
         var general: GeneralSettings
-        /// serverAtLaunch are the distributions ticked to start their agterm-server at launch.
+        /// serverAtLaunch are the remotes ticked to start their agterm-server at launch.
         var serverAtLaunch: Set<String> = []
     }
 
@@ -162,10 +162,10 @@ final class SettingsWindow {
         _ = add("STATIC", "Start agterm-server at launch in", 0, 28, 318, 464, 18)
         // two a row, as many as the page holds; the menu starts any of them
         let serverBoxes = distributions.prefix(12).enumerated().map { index, distribution in
-            add("BUTTON", "WSL \(distribution)", checkbox, 28 + Int32(index % 2) * 244, 340 + Int32(index / 2) * 26, 220, 22,
+            add("BUTTON", distribution, checkbox, 28 + Int32(index % 2) * 244, 340 + Int32(index / 2) * 26, 220, 22,
                 id: Self.distributionBase + Int32(index))
         }
-        if distributions.isEmpty { _ = add("STATIC", "WSL lists no distributions.", 0, 28, 340, 464, 18) }
+        if distributions.isEmpty { _ = add("STATIC", "remote.properties defines no remotes.", 0, 28, 340, 464, 18) }
 
         page = 1
         _ = add("STATIC", "Theme", 0, 28, 48, 220, 18)
