@@ -297,6 +297,13 @@ extension NativeShell {
         return true
     }
 
+    /// onSidebarDivider is whether a child's WM_NCHITTEST point is in the sidebar divider's grab zone.
+    func onSidebarDivider(screen lParam: LPARAM) -> Bool {
+        var point = POINT(x: Int32(Int16(truncatingIfNeeded: lParam)), y: Int32(Int16(truncatingIfNeeded: lParam >> 16)))
+        ScreenToClient(window, &point)
+        return point.y >= titleBar.contentTop && onSidebarDivider(x: point.x)
+    }
+
     /// dividerCursor shows the resize arrows over a divider and while dragging one.
     func dividerCursor() -> Bool {
         var cursor = POINT()
