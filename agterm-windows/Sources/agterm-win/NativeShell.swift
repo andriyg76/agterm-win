@@ -2323,7 +2323,7 @@ final class NativeShell {
         case .toggleFlaggedView: (glyph, checked) = (0xE7C1, activeStore.sidebarMode == .flagged)
         default: return false
         }
-        nt_sidebar_button_paint(notification, dpi, glyph, checked ? 1 : 0)
+        nt_sidebar_button_paint(Int(notification), dpi, glyph, checked ? 1 : 0)
         return true
     }
 
