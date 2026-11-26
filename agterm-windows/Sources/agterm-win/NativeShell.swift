@@ -172,13 +172,11 @@ final class NativeShell {
             if case .local = self { true } else { false }
         }
     }
-    // Positive tree tags address sessions. Negative tags address the launch and selection targets of group rows.
+    // Positive tree tags address sessions. Negative tags address group rows, which take no selection.
     private var tagged: [Foundation.UUID] = []
     private var sidebarGroups: [(destination: SidebarDestination, item: UnsafeMutableRawPointer)] = []
-    private var selectedSidebarGroup: SidebarDestination?
     private var footerButtons: [NativeMenu.Command: HWND] = [:]
     private var dimmed: [UInt8] = []
-    private var launchableGroups: [UInt8] = []
     private var items: [Foundation.UUID: UnsafeMutableRawPointer] = [:]
     var darkBrush = CreateSolidBrush(0x262525)
     var dpi: UInt32 = 96
@@ -1024,7 +1022,7 @@ final class NativeShell {
     }
 
     private var activeSidebarDestination: SidebarDestination {
-        selectedSidebarGroup ?? selected.map(sidebarDestination(for:)) ?? .local(workspace: nil)
+        selected.map(sidebarDestination(for:)) ?? .local(workspace: nil)
     }
 
     private func sidebarGroup(_ tag: Int64) -> SidebarDestination? {
@@ -1290,8 +1288,7 @@ final class NativeShell {
         case .quickTerminal: toggleQuick()
         case .dashboard: toggleDashboard()
         case _ where command.isStructure:
-            let destination = activeSidebarDestination
-            runStructure(command, session: selectedSidebarGroup == nil ? selected : nil, destination: destination)
+            runStructure(command, session: selected, destination: activeSidebarDestination)
         default: visibleTerminal.perform(command)
         }
     }
@@ -1367,7 +1364,7 @@ final class NativeShell {
     }
 
     private var activeStructure: NativeMenu.Structure {
-        structureState(session: selectedSidebarGroup == nil ? selected : nil, destination: activeSidebarDestination)
+        structureState(session: selected, destination: activeSidebarDestination)
     }
 
     /// structureMenu is the sidebar menu's workspace section for the clicked row.
@@ -2071,7 +2068,6 @@ final class NativeShell {
         dimmed = []
         items = [:]
         sidebarGroups = []
-        launchableGroups = []
         var blinks = false
         func add(_ item: SessionSidebar.Item, under parent: UnsafeMutableRawPointer?, server: Server? = nil) {
             let destination: SidebarDestination?
@@ -2088,7 +2084,6 @@ final class NativeShell {
             guard let node = nt_tree_add(tree, parent, Array(item.title.utf16) + [0], tag, item.expanded ? 1 : 0) else { return }
             if let destination {
                 sidebarGroups.append((destination, node))
-                launchableGroups.append(canLaunchInSidebar(destination) ? 1 : 0)
             } else {
                 items[item.id] = node
                 decorate(node, item)
@@ -2099,9 +2094,6 @@ final class NativeShell {
         local.forEach { add($0, under: nil) }
         for server in servers {
             add(SessionSidebar.server(id: server.group, label: server.label, store: server.remote.store, unseen: unseen), under: nil, server: server)
-        }
-        if let selectedSidebarGroup, !sidebarGroups.contains(where: { $0.destination == selectedSidebarGroup }) {
-            self.selectedSidebarGroup = nil
         }
         syncSidebarSelection()
         updateBlink(blinks)
@@ -2138,8 +2130,7 @@ final class NativeShell {
 
     private func syncSidebarSelection() {
         guard let tree else { return }
-        let group = selectedSidebarGroup.flatMap { destination in sidebarGroups.first { $0.destination == destination }?.item }
-        nt_tree_select(tree, group ?? selected.flatMap { items[$0] })
+        nt_tree_select(tree, selected.flatMap { items[$0] })
     }
 
     /// decorate draws an agent's status glyph and info line on a session row, as a Mac's sidebar shows them.
@@ -2170,27 +2161,14 @@ final class NativeShell {
 
     fileprivate func customDraw(_ notification: LPARAM) -> LRESULT? {
         let result = dimmed.withUnsafeBufferPointer { sessions in
-            launchableGroups.withUnsafeBufferPointer { groups in
-                nt_tree_custom_draw(Int(notification), sessions.baseAddress, Int64(sessions.count), groups.baseAddress, Int64(groups.count))
-            }
+            nt_tree_custom_draw(Int(notification), sessions.baseAddress, Int64(sessions.count))
         }
         return result < 0 ? nil : LRESULT(result)
     }
 
-    fileprivate func sidebarLaunch(_ tag: Int64) {
-        guard let destination = sidebarGroup(tag), canLaunchInSidebar(destination) else { return }
-        launchInSidebar(destination)
-    }
-
     fileprivate func userSelected(_ tag: Int64) {
         guard requestedSidebarRename == nil else { return }
-        if let destination = sidebarGroup(tag) {
-            selectedSidebarGroup = destination
-            refreshSidebarFooter()
-            return
-        }
         guard tag > 0, Int(tag) <= tagged.count else { return }
-        selectedSidebarGroup = nil
         select(tagged[Int(tag) - 1])
         focus()
     }
@@ -2198,7 +2176,6 @@ final class NativeShell {
     func select(_ id: Foundation.UUID) {
         if dashboard != nil { closeDashboard(refocus: false) }
         let previous = selected
-        if selected != id { selectedSidebarGroup = nil }
         selected = id
         if localStore.session(withID: id) != nil, localStore.selectedSessionID != id { _ = localStore.selectSession(id) }
         // an --auto-reset status ends on the session entered and the one left, as a Mac's selection does
@@ -2979,6 +2956,11 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
                 }
             }
             var tag: Int64 = 0
+            if nt_tree_selection_changing(Int(lParam), &tag) != 0 {
+                // the tree is still in its notification; selecting rebuilds it
+                if tag > 0 { DispatchQueue.main.async { MainActor.assumeIsolated { shell.userSelected(tag) } } }
+                return 1
+            }
             if nt_tree_selection_changed(Int(lParam), &tag) != 0 { shell.userSelected(tag) }
             return 0
         case UINT(WM_NCCALCSIZE):
@@ -3036,9 +3018,6 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             return 0
         case UINT(NT_PALETTE_CLOSE):
             shell.closePalette(refocus: wParam == 0)
-            return 0
-        case UINT(NT_TREE_LAUNCH):
-            shell.sidebarLaunch(Int64(lParam))
             return 0
         case UINT(NT_FIND_NEXT):
             shell.findNext(newer: wParam != 0)

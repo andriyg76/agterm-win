@@ -101,37 +101,6 @@ int64_t itemTag(HWND tree, HTREEITEM node) {
     return SendMessageW(tree, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&item)) ? item.lParam : 0;
 }
 
-bool launchButtonRect(HWND tree, HTREEITEM item, RECT &rect) {
-    RECT client{};
-    if (!GetClientRect(tree, &client) || !TreeView_GetItemRect(tree, item, &rect, FALSE)) return false;
-    rect.right = client.right - MulDiv(4, GetDpiForWindow(tree), 96);
-    rect.left = rect.right - (rect.bottom - rect.top);
-    return rect.left >= 0;
-}
-
-int64_t launchButtonAt(HWND tree, POINT point) {
-    for (auto item = TreeView_GetFirstVisible(tree); item; item = TreeView_GetNextVisible(tree, item)) {
-        RECT rect{};
-        if (!launchButtonRect(tree, item, rect) || point.y < rect.top) break;
-        if (point.y < rect.bottom) {
-            auto tag = itemTag(tree, item);
-            return tag < 0 && PtInRect(&rect, point) ? tag : 0;
-        }
-    }
-    return 0;
-}
-
-LRESULT CALLBACK treeProcedure(HWND tree, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) {
-    if (message == WM_LBUTTONDOWN || message == WM_LBUTTONUP || message == WM_LBUTTONDBLCLK) {
-        if (auto tag = launchButtonAt(tree, POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)})) {
-            if (message == WM_LBUTTONDOWN) SendMessageW(GetParent(tree), NT_TREE_LAUNCH, 0, static_cast<LPARAM>(tag));
-            return 0;
-        }
-    }
-    if (message == WM_NCDESTROY) RemoveWindowSubclass(tree, treeProcedure, 1);
-    return DefSubclassProc(tree, message, wParam, lParam);
-}
-
 }  // namespace
 
 extern "C" void *nt_tree_create(void *parent, uint32_t dpi) {
@@ -142,7 +111,6 @@ extern "C" void *nt_tree_create(void *parent, uint32_t dpi) {
                                     TVS_SHOWSELALWAYS | TVS_FULLROWSELECT | TVS_EDITLABELS,
                                 0, 0, 100, 100, static_cast<HWND>(parent), nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!tree) return nullptr;
-    SetWindowSubclass(tree, treeProcedure, 1, 0);
     TreeView_SetExtendedStyle(tree, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
     nt_tree_apply_colors(tree);
     nt_tree_set_dpi(tree, dpi);
@@ -233,35 +201,39 @@ extern "C" int32_t nt_tree_selection_changed(intptr_t notification, int64_t *tag
     return 1;
 }
 
+extern "C" int32_t nt_tree_selection_changing(intptr_t notification, int64_t *tag) {
+    auto header = reinterpret_cast<const NMHDR *>(notification);
+    if (header->code != TVN_SELCHANGINGW) return 0;
+    auto change = reinterpret_cast<const NMTREEVIEWW *>(notification);
+    if (change->action == TVC_UNKNOWN || change->itemNew.lParam >= 0) return 0;
+    *tag = 0;
+    const auto tree = header->hwndFrom;
+    // Left from a session reaches its group, which stays put; other keys step over it the same way
+    if (change->action != TVC_BYKEYBOARD || !change->itemOld.hItem ||
+        TreeView_GetParent(tree, change->itemOld.hItem) == change->itemNew.hItem) return 1;
+    RECT from{}, to{};
+    TreeView_GetItemRect(tree, change->itemOld.hItem, &from, FALSE);
+    TreeView_GetItemRect(tree, change->itemNew.hItem, &to, FALSE);
+    const bool down = to.top > from.top;
+    for (auto item = change->itemNew.hItem; (item = down ? TreeView_GetNextVisible(tree, item) : TreeView_GetPrevVisible(tree, item));) {
+        if (auto next = itemTag(tree, item); next > 0) {
+            *tag = next;
+            break;
+        }
+    }
+    return 1;
+}
+
 extern "C" int32_t nt_track_menu(void *menu, void *owner, int32_t x, int32_t y) {
     // TPM_RETURNCMD puts the command in the BOOL result, which Swift's WinSDK import narrows to Bool
     return TrackPopupMenu(static_cast<HMENU>(menu), TPM_RETURNCMD | TPM_RIGHTBUTTON, x, y, 0, static_cast<HWND>(owner), nullptr);
 }
 
-extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count,
-                                         const uint8_t *launchable, int64_t groupCount) {
+extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count) {
     auto draw = reinterpret_cast<NMTVCUSTOMDRAW *>(notification);
     if (draw->nmcd.hdr.code != NM_CUSTOMDRAW) return -1;
     if (draw->nmcd.dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
     int64_t tag = static_cast<int64_t>(draw->nmcd.lItemlParam);
-    const bool group = tag < 0 && tag >= -groupCount;
-    if (draw->nmcd.dwDrawStage == CDDS_ITEMPOSTPAINT && group) {
-        const auto tree = draw->nmcd.hdr.hwndFrom;
-        const auto item = reinterpret_cast<HTREEITEM>(draw->nmcd.dwItemSpec);
-        RECT rect{};
-        if (launchButtonRect(tree, item, rect)) {
-            const auto dc = draw->nmcd.hdc;
-            const auto oldMode = SetBkMode(dc, TRANSPARENT);
-            const auto oldColor = SetTextColor(dc, launchable[-tag - 1] ? nt_chrome_sb_text() : nt_chrome_sb_dim());
-            const auto brush = CreateSolidBrush(TreeView_GetSelection(tree) == item ? nt_chrome_sb_selected() : nt_chrome_sb_bg());
-            FillRect(dc, &rect, brush);
-            DeleteObject(brush);
-            DrawTextW(dc, L"+", 1, &rect, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
-            SetTextColor(dc, oldColor);
-            SetBkMode(dc, oldMode);
-        }
-        return CDRF_DODEFAULT;
-    }
     const auto handle = reinterpret_cast<HTREEITEM>(draw->nmcd.dwItemSpec);
     const Decoration *found = tag > 0 ? findDecoration(handle) : nullptr;
     bool dim = tag > 0 && tag <= count && dimmed[tag - 1];
@@ -279,7 +251,7 @@ extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *di
         draw->nmcd.uItemState &= ~(CDIS_SELECTED | CDIS_FOCUS);
     }
     if (found && found->info[0]) draw->clrText = draw->clrTextBk;
-    return group || found ? CDRF_NOTIFYPOSTPAINT : CDRF_DODEFAULT;
+    return found ? CDRF_NOTIFYPOSTPAINT : CDRF_DODEFAULT;
 }
 
 extern "C" int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y) {
@@ -299,7 +271,7 @@ extern "C" int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y) {
         hit.pt = {*x, *y};
         ScreenToClient(window, &hit.pt);
         item.hItem = TreeView_HitTest(window, &hit);
-        if (!item.hItem) return launchButtonAt(window, hit.pt);
+        if (!item.hItem) return 0;
     }
     return itemTag(window, item.hItem);
 }
