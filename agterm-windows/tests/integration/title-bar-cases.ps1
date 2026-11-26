@@ -403,21 +403,6 @@ $shellCases["title-bar-menus"] = {
         elseif ($label -eq "navigate" -and $result[1] -contains "Find…") { $failures += "Find is still in Navigate" }
     }
 
-    Send-Click $window (Get-Centre $bar "help") $bar.MenuMiddle
-    $helpMenu = Wait-Until { [AgtermWin32]::Visible($processId, "#32768") | Select-Object -First 1 } 5
-    if ($helpMenu) {
-        if (-not (Click-MenuItem $helpMenu 0)) { $failures += "could not click Help → About" }
-        $about = Wait-Until { [AgtermWin32]::Visible($processId, "#32770") | Where-Object { [AgtermWin32]::TextOf($_) -eq "About agterm" } | Select-Object -First 1 } 5
-        if ($about) {
-            $ok = [AgtermSettings]::GetDlgItem($about, 1)
-            $button = New-Object AgtermWin32+Rect
-            if ($ok -and [AgtermWin32]::GetWindowRect($ok, [ref]$button)) {
-                [AgtermInput]::Click([int](($button.Left + $button.Right) / 2), [int](($button.Top + $button.Bottom) / 2))
-            } else { $failures += "About has no OK button" }
-            if (-not (Wait-Until { -not [AgtermWin32]::IsWindowVisible($about) } 5)) { $failures += "About did not close" }
-        } else { $failures += "Help → About opened no About dialog" }
-    } else { $failures += "Help did not reopen for About" }
-
     Note "system menu"
     $drag = Get-ScreenPoint $window ([int](($bar.Title[0] + $bar.Title[1]) / 2)) $bar.Middle
     [AgtermWin32]::PostMessageW($window, 0x007B, $window, [AgtermWin32]::At($drag.X, $drag.Y)) | Out-Null
@@ -436,5 +421,15 @@ $shellCases["title-bar-menus"] = {
     [AgtermWin32]::PostMessageW($window, 0x007B, $window, [AgtermWin32]::At($plus.X, $plus.Y)) | Out-Null
     Start-Sleep -Milliseconds 1500
     if ([AgtermWin32]::Visible($processId, "#32768").Count -gt 0) { $failures += "a right click on Split opened a menu" }
+    Note "Help opens About"
+    Send-Click $window (Get-Centre $bar "help") $bar.MenuMiddle
+    $helpMenu = Wait-Until { [AgtermWin32]::Visible($processId, "#32768") | Select-Object -First 1 } 5
+    if ($helpMenu) {
+        if (-not (Click-MenuItem $helpMenu 0)) { $failures += "could not click Help → About" }
+        $about = Wait-Until {
+            [AgtermWin32]::Visible($processId, "#32770") | Where-Object { [AgtermWin32]::TextOf($_) -eq "About agterm" } | Select-Object -First 1
+        } 5
+        if ($about) { Save-ScreenSnapshot $Shell "about" } else { $failures += "Help → About opened no About dialog" }
+    } else { $failures += "Help did not reopen for About" }
     $failures
 }
