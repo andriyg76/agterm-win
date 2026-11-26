@@ -47,13 +47,31 @@ void drawDecoration(const NMTVCUSTOMDRAW *draw, HTREEITEM handle, const Decorati
     TreeView_GetItemRect(window, handle, &label, TRUE);
     const auto oldMode = SetBkMode(dc, TRANSPARENT);
     const auto oldColor = GetTextColor(dc);
-    SIZE glyphSize{};
-    int margin = MulDiv(8, GetDpiForWindow(window), 96);
+    int glyphWidth = 0;
+    const auto dpi = GetDpiForWindow(window);
+    const int margin = MulDiv(8, dpi, 96);
     if (decoration.glyph[0]) {
-        GetTextExtentPoint32W(dc, decoration.glyph, static_cast<int>(wcslen(decoration.glyph)), &glyphSize);
-        RECT at{row.right - margin - glyphSize.cx, row.top, row.right - margin, row.bottom};
-        SetTextColor(dc, decoration.blink && blinkDimmed ? nt_chrome_sb_dim() : decoration.color);
-        DrawTextW(dc, decoration.glyph, -1, &at, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        const auto color = decoration.blink && blinkDimmed ? nt_chrome_sb_dim() : decoration.color;
+        if (decoration.glyph[0] == L'\u25CF' && !decoration.glyph[1]) {
+            // The text font renders the filled circle much smaller than its glyph box.
+            glyphWidth = MulDiv(10, dpi, 96);
+            const int right = row.right - margin;
+            const int top = row.top + (row.bottom - row.top - glyphWidth) / 2;
+            const auto oldBrush = SelectObject(dc, GetStockObject(DC_BRUSH));
+            const auto oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
+            const auto oldBrushColor = SetDCBrushColor(dc, color);
+            Ellipse(dc, right - glyphWidth, top, right, top + glyphWidth);
+            SetDCBrushColor(dc, oldBrushColor);
+            SelectObject(dc, oldPen);
+            SelectObject(dc, oldBrush);
+        } else {
+            SIZE glyphSize{};
+            GetTextExtentPoint32W(dc, decoration.glyph, static_cast<int>(wcslen(decoration.glyph)), &glyphSize);
+            glyphWidth = glyphSize.cx;
+            RECT at{row.right - margin - glyphWidth, row.top, row.right - margin, row.bottom};
+            SetTextColor(dc, color);
+            DrawTextW(dc, decoration.glyph, -1, &at, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        }
     }
     if (decoration.info[0]) {
         wchar_t title[512] = {};
@@ -63,7 +81,7 @@ void drawDecoration(const NMTVCUSTOMDRAW *draw, HTREEITEM handle, const Decorati
         item.pszText = title;
         item.cchTextMax = 512;
         SendMessageW(window, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&item));
-        int right = row.right - margin - (glyphSize.cx ? glyphSize.cx + margin / 2 : 0);
+        int right = row.right - margin - (glyphWidth ? glyphWidth + margin / 2 : 0);
         int middle = (row.top + row.bottom) / 2;
         RECT top{label.left + 2, row.top, right, middle}, bottom{label.left + 2, middle, right, row.bottom};
         SetTextColor(dc, text);

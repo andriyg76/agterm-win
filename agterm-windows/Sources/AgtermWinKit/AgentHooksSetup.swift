@@ -101,7 +101,10 @@ public enum AgentHooksSetup {
             let text = lines.joined(separator: "\n")
             return .success((text, text != existing))
         }
-        if lines.contains(where: definesHooks) {
+        guard let definesHooks = try? AgentHooksInstall.codexConfigDefinesHooks(existing) else {
+            return .failure(Refusal(message: "config.toml is invalid TOML, left alone"))
+        }
+        if definesHooks {
             return .failure(Refusal(message: "config.toml already defines hooks; add agterm's by hand"))
         }
         var text = existing
@@ -110,6 +113,9 @@ public enum AgentHooksSetup {
             text += "\n"
         }
         text += ([codexBegin] + block + ["", codexEnd]).joined(separator: "\n") + "\n"
+        guard (try? AgentHooksInstall.codexConfigDefinesHooks(text)) == true else {
+            return .failure(Refusal(message: "config.toml cannot be extended with agterm hooks; add agterm's by hand"))
+        }
         return .success((text, true))
     }
 
@@ -119,12 +125,6 @@ public enum AgentHooksSetup {
                 .replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             return ["[[hooks.\(hook.event)]]", "[[hooks.\(hook.event).hooks]]", "type = \"command\"", "command = \"\(line)\"", ""]
         }.dropLast())
-    }
-
-    private static func definesHooks(_ line: String) -> Bool {
-        let text = line.trimmingCharacters(in: .whitespaces)
-        return text.hasPrefix("[hooks") || text.hasPrefix("[[hooks") || text.hasPrefix("hooks.") || text.hasPrefix("hooks =")
-            || text.hasPrefix("hooks=")
     }
 }
 

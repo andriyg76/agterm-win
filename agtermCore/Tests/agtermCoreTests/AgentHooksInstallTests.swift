@@ -445,6 +445,14 @@ struct AgentHooksInstallTests {
         #expect(AgentHooksInstall.mergeCodexConfig(existing: existing, scriptDir: scriptDir) == .hooksExist)
     }
 
+    @Test func mergeCodexConfigKeepsTrustForHooksFromHooksJSON() {
+        let existing = "[hooks.state.abc]\ntrusted = true\n"
+        let merged = mergedContents(AgentHooksInstall.mergeCodexConfig(existing: existing, scriptDir: scriptDir))
+        #expect(merged.hasPrefix(existing))
+        #expect(merged.contains("[[hooks.UserPromptSubmit]]"))
+        #expect(AgentHooksInstall.mergeCodexConfig(existing: merged, scriptDir: scriptDir) == .unchanged)
+    }
+
     @Test func mergeCodexConfigReportsUnparseable() {
         #expect(AgentHooksInstall.mergeCodexConfig(existing: "this = is = not = toml\n", scriptDir: scriptDir) == .unparseable)
     }
