@@ -13,13 +13,21 @@ struct NativeSettingsTests {
         settings.noticeBarPosition = .bottom
         settings.frame = .init(left: 10, top: 20, right: 1210, bottom: 820)
         settings.maximized = true
-        settings.localSessions = [.init(title: "build", customName: "api", commandLine: "cmd.exe", directory: #"C:\dev"#), .init(title: "WSL Ubuntu", commandLine: "wsl.exe -d Ubuntu --cd ~")]
-        settings.selectedLocal = 1
         settings.defaultProfile = "WSL Ubuntu"
         settings.serverLaunch = ["Ubuntu": .atLaunch, "Debian": .manual]
         try settings.save(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         #expect(NativeSettings.load(from: url) == settings)
+    }
+
+    @Test func legacyLocalSessionsLoadButAreNeverSavedAgain() throws {
+        try Data(#"{"localSessions": [{"title": "build", "commandLine": "cmd.exe"}], "selectedLocal": 0}"#.utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        var settings = NativeSettings.load(from: url)
+        #expect(settings.localSessions.count == 1 && settings.selectedLocal == 0)
+        try settings.save(to: url)
+        settings = NativeSettings.load(from: url)
+        #expect(settings.localSessions.isEmpty && settings.selectedLocal == nil)
     }
 
     @Test func aLocalSessionFromAnOlderBuildLoadsWithoutANameOrFolder() throws {

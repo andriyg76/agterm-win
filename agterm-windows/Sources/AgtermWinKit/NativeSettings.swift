@@ -66,10 +66,11 @@ public struct NativeSettings: Codable, Equatable, Sendable {
     /// frame is the window's restored (not maximized) rectangle in screen pixels.
     public var frame: Frame?
     public var maximized = false
+    /// localSessions and selectedLocal are what a build before workspaces saved, read once into the local window's tree
+    /// (`LocalWindow.load`) and never written.
     public var localSessions: [LocalSession] = []
     /// defaultProfile names the launch profile New Session's shortcut starts; nil is the first.
     public var defaultProfile: String?
-    /// selectedLocal indexes `localSessions` when one was in view at quit; nil leaves the selection to the server's.
     public var selectedLocal: Int?
     /// serverLaunch is the choice made for each WSL distribution's agterm-server, by distribution name.
     public var serverLaunch: [String: ServerLaunch] = [:]
@@ -126,8 +127,6 @@ public struct NativeSettings: Codable, Equatable, Sendable {
         try container.encode(general, forKey: .general)
         try container.encodeIfPresent(frame, forKey: .frame)
         try container.encode(maximized, forKey: .maximized)
-        try container.encode(localSessions, forKey: .localSessions)
-        try container.encodeIfPresent(selectedLocal, forKey: .selectedLocal)
         try container.encodeIfPresent(defaultProfile, forKey: .defaultProfile)
         try container.encode(serverLaunch, forKey: .serverLaunch)
         try container.encode(sidebarWidthPoints, forKey: .sidebarWidthPoints)

@@ -105,6 +105,8 @@ int32_t nt_tree_selection_changed(intptr_t notification, int64_t *tag);
 // ended with the new name in `text`, 3 it was cancelled, 0 any other notification; `tag` is the item's.
 int32_t nt_tree_label_edit(intptr_t notification, int64_t *tag, uint16_t *text, int32_t capacity);
 void nt_tree_edit(void *tree, void *item);
+// nt_tree_expanded reads a WM_NOTIFY lParam: 1 with the item's tag and its new state after a row was folded or unfolded.
+int32_t nt_tree_expanded(intptr_t notification, int64_t *tag, int32_t *expanded);
 // nt_tree_set_edit_text replaces the text an in-place edit starts from (the label without its marks).
 void nt_tree_set_edit_text(void *tree, const uint16_t *text);
 // nt_tree_item_at returns the row's tag, or 0 off any row. For a keyboard menu it moves the point to the caret row.

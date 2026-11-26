@@ -31,7 +31,8 @@ extension NativeShell {
         return NativeMenu.View(canSplit: session != nil && dashboard == nil, hasSplit: session?.splitTerminal != nil,
                                scratchShown: session?.scratchShown == true, quickShown: quickShown, canDashboard: !locals.isEmpty,
                                dashboardOpen: dashboard != nil, canToggleOverlay: selectedOverlayHidden != nil,
-                               overlayShown: selectedOverlayHidden == false)
+                               overlayShown: selectedOverlayHidden == false, flaggedView: activeStore.sidebarMode == .flagged,
+                               filtered: activeStore.focusEnabled)
     }
 
     /// enabled is whether a title bar button can act now; one that cannot stays in place, drawn dimmed.
@@ -119,9 +120,9 @@ extension NativeShell {
         if hadFocus || id == selected && GetFocus() != nil { focus() }
     }
 
-    func restoreSplit(_ id: Foundation.UUID, _ saved: NativeSettings.Split) {
+    func restoreSplit(_ id: Foundation.UUID, _ split: NativeSplit, directory: String?) {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
-        addSplit(index, saved.layout, directory: saved.directory ?? locals[index].directory)
+        addSplit(index, split, directory: directory ?? locals[index].directory)
     }
 
     private func addSplit(_ index: Int, _ split: NativeSplit, directory: String?) {

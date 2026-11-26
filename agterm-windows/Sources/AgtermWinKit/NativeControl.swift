@@ -5,6 +5,8 @@ import agtermCore
 /// workspaces, and the effects behind each command. Every session id is either a local session's or a server one's.
 @MainActor
 public protocol NativeControlHost: AnyObject {
+    /// localStore is the local window's tree; localSessions are what runs in its sessions, by id.
+    var localStore: AppStore { get }
     var localSessions: [NativeControl.Local] { get }
     var selectedSession: UUID? { get }
     /// serverWorkspaces is the catalog's tree, empty while no server is connected.
@@ -16,9 +18,17 @@ public protocol NativeControlHost: AnyObject {
     func serverOverlayState(for id: UUID) -> (overlay: NativeOverlay?, exitCode: Int?)?
     /// serverPageOverlay is the page the shell draws over a catalog session, nil for a program overlay or none.
     func serverPageOverlay(for id: UUID) -> (page: HtmlOverlay, hidden: Bool)?
-    /// newLocalSession starts in `cwd` when given, else in the user's home, as a Mac's `session.new` does.
-    func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> UUID?
-    func newServerSession() async -> ControlResponse
+    /// newSession is what a local `session.new` starts without options.
+    var newSession: NativeStructure.NewSession? { get }
+    /// remoteStore is the mirror of the connected server behind remote window `window`.
+    func remoteStore(_ window: UUID) -> AppStore?
+    /// structureChanged follows a command that changed `store`: terminals start or end for the sessions that came or
+    /// went, the sidebar is drawn again, and with `selectionMoved` the store's selection is shown.
+    func structureChanged(_ store: AppStore, selectionMoved: Bool)
+    /// performRemote sends `operation` to remote window `window`'s server, selecting a created row when `select`.
+    func performRemote(_ operation: RemoteOperation, window: UUID, select: Bool) async -> ControlResponse
+    /// navigationOrder is the session rows the sidebar shows, in order, which `session.go` steps through.
+    var navigationOrder: [UUID] { get }
     func closeSession(_ id: UUID) async -> ControlResponse
     func renameSession(_ id: UUID, to name: String) async -> ControlResponse
     func restartSession(_ id: UUID) async -> ControlResponse
@@ -160,18 +170,21 @@ public enum NativeControl {
         }
     }
 
-    /// localWorkspace is the id the Local group reports, fixed so a script can address it across launches.
-    public static let localWorkspace = UUID(uuidString: "00000000-0000-0000-0000-00000000000A")!
-    public static let localWorkspaceTarget = "local"
-
     public static func handle(_ request: ControlRequest, host: NativeControlHost, version: String) async -> ControlResponse {
+        if NativeStructure.commands.contains(request.cmd) { return await structure(request, host: host) }
         switch request.cmd {
         case .tree:
-            return ControlResponse(ok: true, result: ControlResult(tree: tree(host)))
+            switch window(request.args?.window, host: host) {
+            case .failure(let refusal): return failure(refusal.message)
+            case .success(nil): return ControlResponse(ok: true, result: ControlResult(tree: tree(host)))
+            case .success(let remote?):
+                guard let store = host.remoteStore(remote) else { return failure("remote window is not connected") }
+                return ControlResponse(ok: true, result: ControlResult(tree: store.controlTree(paneForeground: { _ in nil })))
+            }
         case .version:
             return ControlResponse(ok: true, result: ControlResult(app: AppIdentity(version: version)))
         case .sessionNew:
-            return await newSession(request.args, host: host)
+            return await structure(request, host: host)
         case .sessionClose, .sessionTerminate:
             return await withSession(request.target, host: host) { await host.closeSession($0) }
         case .sessionRename:
@@ -301,26 +314,8 @@ public enum NativeControl {
         }
     }
 
-    /// newSession starts a local session, running `command` or the default profile's, or one on the server when the
-    /// workspace names a server workspace; the server names its own sessions.
-    private static func newSession(_ args: ControlArgs?, host: NativeControlHost) async -> ControlResponse {
-        let workspace = args?.workspace
-        if let workspace, workspace.lowercased() != localWorkspaceTarget, workspace != localWorkspace.uuidString {
-            let ids = host.serverWorkspaces.compactMap { UUID(uuidString: $0.id) }
-            guard case .resolved = ControlResolve.resolve(workspace, candidates: ids, active: nil) else {
-                return failure("no such workspace: \(workspace)")
-            }
-            return await host.newServerSession()
-        }
-        guard args?.command?.isEmpty != true else { return failure("session.new command must not be blank") }
-        guard let id = host.newLocalSession(name: args?.name, command: args?.command, cwd: args?.cwd, select: args?.noSelect != true) else {
-            return failure("no launch profile to start a session from")
-        }
-        return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
-    }
-
     private static func go(_ to: String, host: NativeControlHost) -> ControlResponse {
-        let order = tree(host).workspaces.flatMap(\.sessions).compactMap { UUID(uuidString: $0.id) }
+        let order = host.navigationOrder
         guard let direction = SessionNavigation(wire: to) else { return failure("unknown direction: \(to)") }
         let next: UUID?
         switch direction {
@@ -335,10 +330,10 @@ public enum NativeControl {
         return ControlResponse(ok: true, result: ControlResult(id: next.uuidString))
     }
 
-    /// remoteWindows are the `remote.properties` remotes as remote windows: open while the server is started, with its
-    /// stream's state, under an id derived from the name.
+    /// remoteWindows are agterm-win's own window, then the `remote.properties` remotes as remote windows: open while the
+    /// server is started, with its stream's state, under an id derived from the name.
     static func remoteWindows(_ host: NativeControlHost) -> [ControlWindowNode] {
-        host.remoteServers.map { server in
+        [ControlWindowNode(id: LocalWindow.id.uuidString, name: "agterm", open: true, active: true)] + host.remoteServers.map { server in
             var node = ControlWindowNode(id: remoteWindowID(server.name).uuidString, name: server.name, open: server.started,
                                          active: false)
             node.remote = ControlRemoteWindow(host: server.name, catalogID: nil, state: server.state)
@@ -396,29 +391,37 @@ public enum NativeControl {
         }
     }
 
-    /// tree is the Local group, while it has sessions, ahead of the server's workspaces, as the sidebar shows them.
+    /// tree is the local window's, in the store's shape: its workspaces and the root, stored last, each session as it
+    /// runs here. The store's selection is `active`, as a Mac window keeps its own while another is in front.
     public static func tree(_ host: NativeControlHost) -> ControlTree {
-        let selected = host.selectedSession
-        let locals = host.localSessions.map { local in
-            ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: local.id == selected,
-                               split: local.split?.shown == true, hasSplit: local.split != nil, backedByZmx: nil,
-                               splitAxis: local.split?.axisName, splitRatio: local.split?.ratio, splitFocused: local.split?.focused,
-                               overlay: local.overlay != nil || local.htmlOverlay != nil,
-                               overlaySizePercent: local.overlay?.sizePercent ?? local.pageOverlaySizePercent,
-                               scratch: local.scratch, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
-                               unseen: local.unseen > 0 ? local.unseen : local.attention ? 1 : nil, fontSize: Double(host.fontPoints),
-                               splitCwd: local.split == nil ? nil : local.splitCwd, scratchCwd: local.scratchRunning ? local.scratchCwd : nil,
-                               htmlOverlays: local.htmlOverlay.map { [$0.controlNode(hidden: local.pageOverlayHidden)] },
-                               hiddenOverlays: local.pageOverlayHidden || local.overlay?.hidden == true ? ["session"] : nil)
+        let store = host.localStore
+        let shape = store.controlTree(paneForeground: { _ in nil })
+        let locals = Dictionary(host.localSessions.map { ($0.id.uuidString, $0) }) { first, _ in first }
+        let workspaces = shape.workspaces.map { workspace in
+            ControlWorkspaceNode(id: workspace.id, name: workspace.name, active: workspace.active, focused: workspace.focused,
+                                 collapsed: workspace.collapsed, tint: workspace.tint, tintOn: workspace.tintOn, root: workspace.root,
+                                 sessions: workspace.sessions.map { node in locals[node.id].map { sessionNode($0, shape: node, host: host) } ?? node })
         }
-        let local = locals.isEmpty ? [] : [ControlWorkspaceNode(id: localWorkspace.uuidString, name: "Local",
-                                                                active: locals.contains { $0.active }, sessions: locals)]
         let dashboard = host.dashboard
-        let tree = ControlTree(workspaces: local + host.serverWorkspaces, sidebarWidth: host.sidebarWidthPoints,
-                               quickVisible: host.quickShown, dashboardMembers: dashboard?.members.map(\.controlRef),
-                               dashboardHighlighted: dashboard?.highlighted?.controlRef, dashboardFontSize: dashboard?.fontSize,
-                               dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
-        return tree
+        return ControlTree(workspaces: workspaces, sidebarMode: shape.sidebarMode, flaggedOrder: shape.flaggedOrder,
+                           sidebarWidth: host.sidebarWidthPoints, workspaceFilter: shape.workspaceFilter, quickVisible: host.quickShown,
+                           dashboardMembers: dashboard?.members.map(\.controlRef), dashboardHighlighted: dashboard?.highlighted?.controlRef,
+                           dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
+    }
+
+    /// sessionNode is a local session as it runs here, with the store's flag, tint and companion fields.
+    private static func sessionNode(_ local: Local, shape: ControlSessionNode, host: NativeControlHost) -> ControlSessionNode {
+        ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: shape.active,
+                           split: local.split?.shown == true, hasSplit: local.split != nil, backedByZmx: nil,
+                           splitAxis: local.split?.axisName, splitRatio: local.split?.ratio, splitFocused: local.split?.focused,
+                           overlay: local.overlay != nil || local.htmlOverlay != nil,
+                           overlaySizePercent: local.overlay?.sizePercent ?? local.pageOverlaySizePercent,
+                           scratch: local.scratch, flagged: shape.flagged, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
+                           unseen: local.unseen > 0 ? local.unseen : local.attention ? 1 : nil, fontSize: Double(host.fontPoints),
+                           splitCwd: local.split == nil ? nil : local.splitCwd, scratchCwd: local.scratchRunning ? local.scratchCwd : nil,
+                           htmlOverlays: local.htmlOverlay.map { [$0.controlNode(hidden: local.pageOverlayHidden)] },
+                           hiddenOverlays: local.pageOverlayHidden || local.overlay?.hidden == true ? ["session"] : nil,
+                           tint: shape.tint, tintOn: shape.tintOn, parent: shape.parent, collapsed: shape.collapsed)
     }
 
     /// text is what `session.text` reads: the screen by default, every line with `all`, or the last `last` lines once

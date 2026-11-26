@@ -35,30 +35,39 @@ public enum Palette {
         }
     }
 
-    /// Local is a local session as the session palette reads it.
+    /// Local is a local session as the session palette reads it: `workspace` is its named workspace's name, empty at
+    /// the top level, and `parent` the session it is a companion of.
     public struct Local: Sendable {
         public let id: UUID
         public let name: String
         public let exited: Bool
         public let attention: Bool
         public let unseen: Int
+        public var workspace = ""
+        public var parent: UUID?
 
-        public init(id: UUID, name: String, exited: Bool, attention: Bool, unseen: Int = 0) {
+        public init(id: UUID, name: String, exited: Bool, attention: Bool, unseen: Int = 0, workspace: String = "", parent: UUID? = nil) {
             self.id = id
             self.name = name
             self.exited = exited
             self.attention = attention
             self.unseen = unseen
+            self.workspace = workspace
+            self.parent = parent
         }
     }
 
-    /// sessionRows lists every session in the window A→Z by label, local and every server's alike, each server session
+    /// sessionRows lists every session in the window A→Z by label, local and every server's alike, each session
     /// followed by its companions, titled `parent › companion`.
     @MainActor
     public static func sessionRows(locals: [Local], servers: [(label: String, workspaces: [Workspace])], unseen: [UUID: Int] = [:]) -> [Row] {
-        var groups: [[Row]] = locals.map { local in
-            [Row(title: local.name, subtitle: "Local", detail: state(exited: local.exited, ended: false, attention: local.attention, unseen: local.unseen),
-                 target: .session(local.id))]
+        let ids = Set(locals.map(\.id))
+        func row(_ local: Local, title: String) -> Row {
+            Row(title: title, subtitle: local.workspace,
+                detail: state(exited: local.exited, ended: false, attention: local.attention, unseen: local.unseen), target: .session(local.id))
+        }
+        var groups: [[Row]] = locals.filter { $0.parent.map(ids.contains) != true }.map { parent in
+            [row(parent, title: parent.name)] + locals.filter { $0.parent == parent.id }.map { row($0, title: "\(parent.name) › \($0.name)") }
         }
         for (serverLabel, server) in servers {
             groups += serverGroups(server, serverLabel: serverLabel, unseen: unseen)
