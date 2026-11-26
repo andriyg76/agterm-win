@@ -115,6 +115,12 @@ jobs:
           name: installer-${{ matrix.arch }}
           path: agterm-windows/build/publish
           if-no-files-found: error
+      # the stage is zipped unsigned: SignPath's artifact configuration signs only the installer
+      - uses: actions/upload-artifact@v7
+        with:
+          name: portable-${{ matrix.arch }}
+          path: agterm-windows/build/release/agterm-win-*-${{ matrix.arch }}-portable.zip
+          if-no-files-found: error
 
   chocolatey:
     needs: [version, publish]
@@ -202,6 +208,10 @@ jobs:
         with:
           pattern: installer-[ax]*
           path: publish
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: portable-*
+          path: publish
       - name: Publish GitHub release
         shell: pwsh
         env:
@@ -212,20 +222,23 @@ jobs:
         run: |
           $agterm = Get-Content agterm-windows/AGTERM_VERSION -TotalCount 1
           $signed = @(Get-ChildItem publish -Recurse -Filter signed).Count -eq 2
-          $assets = foreach ($setup in Get-ChildItem publish -Recurse -Filter "agterm-win-$env:VERSION-*-setup.exe") {
-            $hash = (Get-FileHash -Algorithm SHA256 $setup.FullName).Hash.ToLowerInvariant()
-            [IO.File]::WriteAllText("$($setup.FullName).sha256", "$hash  $($setup.Name)`n")
-            $setup.FullName
-            "$($setup.FullName).sha256"
+          $packages = @(Get-ChildItem publish -Recurse -Filter "agterm-win-$env:VERSION-*-setup.exe") +
+                      @(Get-ChildItem publish -Recurse -Filter "agterm-win-$env:VERSION-*-portable.zip")
+          $assets = foreach ($package in $packages) {
+            $hash = (Get-FileHash -Algorithm SHA256 $package.FullName).Hash.ToLowerInvariant()
+            [IO.File]::WriteAllText("$($package.FullName).sha256", "$hash  $($package.Name)`n")
+            $package.FullName
+            "$($package.FullName).sha256"
           }
-          if ($assets.Count -ne 4) { throw "expected the x64 and arm64 installers, got $($assets -join ', ')" }
+          if ($assets.Count -ne 8) { throw "expected the x64 and arm64 installers and portable zips, got $($assets -join ', ')" }
           $notesPath = "$env:RUNNER_TEMP/release-notes.md"
           ./agterm-windows/scripts/release-notes.ps1 -Version $env:VERSION -OutFile $notesPath
           Add-Content $notesPath @"
 
           ---
 
-          Windows 10 1809 or later, x64 or arm64, installs per user without admin.
+          Windows 10 1809 or later, x64 or arm64, installs per user without admin. The ``-portable.zip`` runs from any
+          extracted folder, without the Start menu entry or PATH change; it is unsigned.
           "@
           if ($signed) {
             Add-Content $notesPath "`nFree code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)."

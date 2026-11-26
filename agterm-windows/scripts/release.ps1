@@ -106,9 +106,14 @@ if ($signArguments) {
 & $iscc @defines (Join-Path $root "packaging\agterm.iss")
 if ($LASTEXITCODE) { throw "ISCC failed" }
 $setup = Join-Path $out "agterm-win-$Version-$Arch-setup.exe"
-$hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
-[IO.File]::WriteAllText("$setup.sha256", "$hash  $(Split-Path -Leaf $setup)`n")
-"built $setup"
+# the portable zip is the signed stage itself, for running without installing
+$zip = Join-Path $out "agterm-win-$Version-$Arch-portable.zip"
+& (Join-Path $PSScriptRoot "portable-zip.ps1") -Stage $stage -Output $zip
+foreach ($asset in $setup, $zip) {
+    $hash = (Get-FileHash -Algorithm SHA256 $asset).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText("$asset.sha256", "$hash  $(Split-Path -Leaf $asset)`n")
+}
+"built $setup and $zip"
 
 # ── publish ──────────────────────────────────────────────────────────────────
 if (-not $Publish) { exit 0 }
@@ -116,7 +121,7 @@ $repo = (git -C $root remote get-url origin) -replace '^https://github\.com/', '
 # the other architecture's run adds its installer to the release the first one created
 gh release view "v$Version" --repo $repo *> $null
 if (-not $LASTEXITCODE) {
-    gh release upload "v$Version" $setup "$setup.sha256" --repo $repo
+    gh release upload "v$Version" $setup "$setup.sha256" $zip "$zip.sha256" --repo $repo
     if ($LASTEXITCODE) { throw "gh release upload failed" }
     exit 0
 }
@@ -126,8 +131,8 @@ Add-Content $notesPath @"
 
 ---
 
-Windows 10 1809 or later, x64 or arm64. Installs per user, no admin.
+Windows 10 1809 or later, x64 or arm64. Installs per user, no admin; the portable zip runs from any folder.
 "@
 if (-not $signArguments) { Add-Content $notesPath "`nUNSIGNED: SmartScreen warns on first run." }
-gh release create "v$Version" $setup "$setup.sha256" --repo $repo --title "agterm-win $Version" --notes-file $notesPath
+gh release create "v$Version" $setup "$setup.sha256" $zip "$zip.sha256" --repo $repo --title "agterm-win $Version" --notes-file $notesPath
 if ($LASTEXITCODE) { throw "gh release create failed" }

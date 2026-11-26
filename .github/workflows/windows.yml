@@ -67,7 +67,7 @@ jobs:
           AGTERM_WEBVIEW2_ARCH: ${{ matrix.arch }}
       - name: Inno Setup
         run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
-      - name: Package unsigned installer and MSIX
+      - name: Package unsigned installer, portable zip and MSIX
         run: |
           $agterm = Get-Content AGTERM_VERSION -TotalCount 1
           ./scripts/package-ci.ps1 -Version "$agterm.0" -Arch ${{ matrix.arch }} -Output "$env:RUNNER_TEMP\ci-packages"
@@ -114,6 +114,12 @@ jobs:
         with:
           name: ci-installer-${{ matrix.arch }}
           path: ${{ runner.temp }}/ci-packages/agterm-win-*-${{ matrix.arch }}-setup.exe
+          if-no-files-found: error
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-portable-${{ matrix.arch }}
+          path: ${{ runner.temp }}/ci-packages/agterm-win-*-${{ matrix.arch }}-portable.zip
           if-no-files-found: error
       - if: always()
         uses: actions/upload-artifact@v7
