@@ -5,9 +5,15 @@ import agtermCore
 /// the ☰ menu's commands. Rows match their title and subtitle; an empty query keeps the source order.
 public enum Palette {
     public enum Mode: Equatable, Sendable {
-        case sessions, commands
+        case sessions, commands, attention
 
-        public var cue: String { self == .sessions ? "Go to session" : "Run a command" }
+        public var cue: String {
+            switch self {
+            case .sessions: "Go to session"
+            case .commands: "Run a command"
+            case .attention: "Go to attention"
+            }
+        }
     }
 
     public enum Target: Equatable, Sendable {
@@ -98,6 +104,16 @@ public enum Palette {
         if unseen > 0 { return "● \(NotificationRules.countLabel(unseen))" }
         if attention { return "●" }
         return exited ? "exited" : ended ? "ended" : ""
+    }
+
+    /// Match macOS Attention order across the supplied local and server sessions.
+    public static func attentionRows(_ sessions: [(id: UUID, title: String, subtitle: String, status: AgentStatus, changedAt: Date?)]) -> [Row] {
+        sessions.filter { $0.status != .idle }.sorted { lhs, rhs in
+            if lhs.status != rhs.status { return lhs.status.attentionRank < rhs.status.attentionRank }
+            return (lhs.changedAt ?? .distantPast) > (rhs.changedAt ?? .distantPast)
+        }.map { session in
+            Row(title: session.title, subtitle: session.subtitle, detail: session.status.rawValue.capitalized, target: .session(session.id))
+        }
     }
 
     /// commandRows is the ☰ menu flattened A→Z: a submenu's entries titled `submenu › entry`, disabled entries kept

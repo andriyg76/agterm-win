@@ -8,7 +8,7 @@ public enum NativeMenu {
              editKeymap, reloadKeymap, settings, sessionPalette, commandPalette, toggleSplit, toggleHorizontalSplit, closeSplit, swapPanes,
              focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard, toggleOverlay, newWorkspace, renameWorkspace,
              deleteWorkspace, toggleFlag, toggleFlaggedView, focusWorkspace, toggleWorkspaceFilter, previousWorkspace, nextWorkspace,
-             newCompanion, convertCompanion
+             newCompanion, convertCompanion, attentionPalette, selectTheme, about
 
         public var title: String {
             switch self {
@@ -31,8 +31,11 @@ public enum NativeMenu {
             case .editKeymap: "Edit Keymap…"
             case .reloadKeymap: "Reload Keymap"
             case .settings: "Settings…"
+            case .selectTheme: "Select Theme…"
+            case .about: "About"
             case .sessionPalette: "Go to Session…"
             case .commandPalette: "Command Palette…"
+            case .attentionPalette: "Go to Attention…"
             case .toggleSplit: "Split Side by Side"
             case .toggleHorizontalSplit: "Split Top and Bottom"
             case .closeSplit: "Close Split"
@@ -69,7 +72,9 @@ public enum NativeMenu {
         /// shortcut is the shipped chord's label; the keymap's own come in as `Shortcuts`.
         public var shortcut: String {
             if let action = WindowsKeymap.actions.first(where: { $0.command == self })?.action {
-                return action.windowsDefaultChord.map(WindowsKeymap.label) ?? ""
+                guard let chord = action.windowsDefaultChord else { return "" }
+                let label = WindowsKeymap.label(chord)
+                return self == .closeSession ? "\(label) / \(WindowsKeymap.label(WindowsKeymap.closeSessionAlias))" : label
             }
             switch self {
             case .copy: return "Ctrl+Shift+C / Ctrl+Insert"
@@ -156,9 +161,15 @@ public enum NativeMenu {
     public typealias Shortcuts = [Command: String]
 
     public static func terminal(hasSelection: Bool, canPaste: Bool, shortcuts: Shortcuts = [:]) -> [Entry] {
-        [.command(.copy, enabled: hasSelection), .command(.paste, enabled: canPaste), .command(.selectAll),
-         .command(.clearScrollback), .separator, .command(.fontBigger, shortcuts), .command(.fontSmaller, shortcuts),
-         .command(.fontReset, shortcuts)]
+        edit(hasSelection: hasSelection, canPaste: canPaste) + [.separator] + fontSizing(shortcuts)
+    }
+
+    public static func edit(hasSelection: Bool, canPaste: Bool) -> [Entry] {
+        [.command(.copy, enabled: hasSelection), .command(.paste, enabled: canPaste), .command(.selectAll), .command(.clearScrollback)]
+    }
+
+    private static func fontSizing(_ shortcuts: Shortcuts) -> [Entry] {
+        [.command(.fontBigger, shortcuts), .command(.fontSmaller, shortcuts), .command(.fontReset, shortcuts)]
     }
 
     /// defaultProfile is the index of the profile named `name`, the one New Session's shortcut starts; the first profile
@@ -205,7 +216,7 @@ public enum NativeMenu {
         var elsewhere: [Entry] = []
         if destination == nil {
             menu += [localProfiles, Entry(title: "Default Local Profile", shortcut: "", pick: nil, enabled: !defaults.isEmpty,
-                                          children: defaults), .command(.settings, shortcuts)]
+                                          children: defaults)]
         } else if !local.isEmpty {
             elsewhere.append(localProfiles)
         }
@@ -232,7 +243,7 @@ public enum NativeMenu {
     /// a session on each started server, enabled while it is connected, and Start agterm-server in, which lists every
     /// server, enabled until it is started; Default Profile picks that default.
     public static func sessions(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
-                                sessionCount: Int, canRenameSession: Bool = false, canRestartSession: Bool = false,
+                                canRenameSession: Bool = false, canRestartSession: Bool = false, structure: Structure = Structure(),
                                 localDefaultShortcut: Bool = true, shortcuts: Shortcuts = [:]) -> [Entry] {
         let newSessionShortcut = shortcuts[.newSession] ?? Command.newSession.shortcut
         var launches = profiles.enumerated().map { index, profile in
@@ -257,8 +268,9 @@ public enum NativeMenu {
         return [Entry(title: Command.newSession.title, shortcut: "", pick: nil, enabled: !launches.isEmpty, children: launches),
                 Entry(title: "Default Profile", shortcut: "", pick: nil, enabled: !defaults.isEmpty, children: defaults),
                 .command(.renameSession, enabled: canRenameSession, shortcuts), .command(.restartSession, enabled: canRestartSession),
-                .command(.closeSession, enabled: canCloseSession, shortcuts),
-                .command(.nextSession, enabled: sessionCount > 1, shortcuts), .command(.previousSession, enabled: sessionCount > 1, shortcuts)]
+                .command(.newCompanion, enabled: structure.flagged != nil, shortcuts),
+                .command(.convertCompanion, enabled: structure.canConvert, shortcuts),
+                .command(.closeSession, enabled: canCloseSession, shortcuts)]
     }
 
     /// View is what the View submenu reads from the window: what the selected session can do and what is shown.
@@ -272,12 +284,9 @@ public enum NativeMenu {
         public var dashboardOpen = false
         public var canToggleOverlay = false
         public var overlayShown = false
-        public var flaggedView = false
-        public var filtered = false
 
         public init(canSplit: Bool = false, hasSplit: Bool = false, scratchShown: Bool = false, quickShown: Bool = false,
-                    canDashboard: Bool = false, dashboardOpen: Bool = false, canToggleOverlay: Bool = false, overlayShown: Bool = false,
-                    flaggedView: Bool = false, filtered: Bool = false) {
+                    canDashboard: Bool = false, dashboardOpen: Bool = false, canToggleOverlay: Bool = false, overlayShown: Bool = false) {
             self.canSplit = canSplit
             self.hasSplit = hasSplit
             self.scratchShown = scratchShown
@@ -286,45 +295,44 @@ public enum NativeMenu {
             self.dashboardOpen = dashboardOpen
             self.canToggleOverlay = canToggleOverlay
             self.overlayShown = overlayShown
-            self.flaggedView = flaggedView
-            self.filtered = filtered
         }
     }
 
-    /// view is the View submenu: the selected session's panes and scratch, the quick terminal and the dashboard.
-    public static func view(_ view: View, shortcuts: Shortcuts = [:]) -> [Entry] {
-        var scratch = Entry.command(.toggleScratch, enabled: view.canSplit, shortcuts)
-        scratch.checked = view.scratchShown
-        var overlay = Entry.command(.toggleOverlay, enabled: view.canToggleOverlay, shortcuts)
-        overlay.checked = view.overlayShown
-        var quick = Entry.command(.quickTerminal, shortcuts)
-        quick.checked = view.quickShown
-        var dashboard = Entry.command(.dashboard, enabled: view.canDashboard || view.dashboardOpen, shortcuts)
-        dashboard.checked = view.dashboardOpen
-        var flagged = Entry.command(.toggleFlaggedView, shortcuts)
-        flagged.checked = view.flaggedView
-        var filter = Entry.command(.toggleWorkspaceFilter, shortcuts)
-        filter.checked = view.filtered
-        return [.command(.toggleSplit, enabled: view.canSplit, shortcuts), .command(.toggleHorizontalSplit, enabled: view.canSplit, shortcuts),
-                .command(.focusLeftPane, enabled: view.hasSplit, shortcuts), .command(.focusRightPane, enabled: view.hasSplit, shortcuts),
-                .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), .separator, scratch, overlay, quick, dashboard,
-                .separator, flagged, filter]
+    public static func view(_ view: View, structure: Structure = Structure(), shortcuts: Shortcuts = [:]) -> [Entry] {
+        let scratch = toggle(.toggleScratch, checked: view.scratchShown, enabled: view.canSplit, shortcuts)
+        let overlay = toggle(.toggleOverlay, checked: view.overlayShown, enabled: view.canToggleOverlay, shortcuts)
+        let quick = toggle(.quickTerminal, checked: view.quickShown, enabled: true, shortcuts)
+        let flag = toggle(.toggleFlag, checked: structure.flagged == true, enabled: structure.flagged != nil, shortcuts)
+        let focus = toggle(.focusWorkspace, checked: structure.focused, enabled: structure.workspace == true, shortcuts)
+        return fontSizing(shortcuts) + [.separator, .command(.selectTheme), .separator, flaggedView(structure, shortcuts), flag,
+                .separator, focus, workspaceFilter(structure, shortcuts), .separator,
+                .command(.toggleSplit, enabled: view.canSplit, shortcuts), .command(.toggleHorizontalSplit, enabled: view.canSplit, shortcuts),
+                .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), scratch, overlay,
+                .separator, .command(.find, shortcuts), quick]
     }
 
-    /// file is the File menu: sessions and the terminal's edit commands.
+    /// File groups workspace and session actions, followed by configuration.
     public static func file(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
-                            sessionCount: Int, canRenameSession: Bool = false, canRestartSession: Bool = false, hasSelection: Bool,
-                            canPaste: Bool, localDefaultShortcut: Bool = true, shortcuts: Shortcuts = [:]) -> [Entry] {
-        sessions(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession,
-                 sessionCount: sessionCount, canRenameSession: canRenameSession, canRestartSession: canRestartSession,
-                 localDefaultShortcut: localDefaultShortcut, shortcuts: shortcuts)
-            + [.command(.newWorkspace, shortcuts), .separator] + terminal(hasSelection: hasSelection, canPaste: canPaste, shortcuts: shortcuts)
+                            canRenameSession: Bool = false, canRestartSession: Bool = false, structure: Structure = Structure(),
+                            localDefaultShortcut: Bool = true, shortcuts: Shortcuts = [:]) -> [Entry] {
+        let named = structure.workspace == true
+        let settings = Entry(title: "Settings", shortcut: "", pick: nil, enabled: true,
+                             children: [.command(.settings), .command(.editKeymap), .command(.reloadKeymap)])
+        return [.command(.newWorkspace, shortcuts), .command(.renameWorkspace, enabled: named, shortcuts),
+                .command(.deleteWorkspace, enabled: named, shortcuts), .separator]
+            + sessions(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession,
+                       canRenameSession: canRenameSession, canRestartSession: canRestartSession, structure: structure,
+                       localDefaultShortcut: localDefaultShortcut, shortcuts: shortcuts)
+            + [.separator, settings]
     }
 
-    /// navigate is the Navigate menu: the palettes and Find.
-    public static func navigate(shortcuts: Shortcuts = [:]) -> [Entry] {
-        [.command(.sessionPalette, shortcuts), .command(.commandPalette, shortcuts), .command(.find, shortcuts), .separator,
-         .command(.previousWorkspace, shortcuts), .command(.nextWorkspace, shortcuts)]
+    public static func navigate(_ view: View, sessionCount: Int, shortcuts: Shortcuts = [:]) -> [Entry] {
+        let dashboard = toggle(.dashboard, checked: view.dashboardOpen, enabled: view.canDashboard || view.dashboardOpen, shortcuts)
+        return [.command(.sessionPalette, shortcuts), .command(.commandPalette, shortcuts), .command(.attentionPalette, shortcuts), dashboard,
+                .separator, .command(.previousSession, enabled: sessionCount > 1, shortcuts),
+                .command(.nextSession, enabled: sessionCount > 1, shortcuts), .separator,
+                .command(.previousWorkspace, shortcuts), .command(.nextWorkspace, shortcuts), .separator,
+                .command(.focusLeftPane, enabled: view.hasSplit, shortcuts), .command(.focusRightPane, enabled: view.hasSplit, shortcuts)]
     }
 
     /// Structure is what the sidebar's workspace section acts on: a workspace row (`workspace` not nil, true for a named
@@ -337,6 +345,8 @@ public enum NativeMenu {
         public var moveTargets: [String] = []
         public var flaggedView = false
         public var filtered = false
+        public var canToggleFlaggedView = true
+        public var canFilter = true
 
         public init(workspace: Bool? = nil, focused: Bool = false, flagged: Bool? = nil, canConvert: Bool = false, moveTargets: [String] = [],
                     flaggedView: Bool = false, filtered: Bool = false) {
@@ -368,29 +378,36 @@ public enum NativeMenu {
             menu += [flag, .command(.newCompanion, shortcuts), .command(.convertCompanion, enabled: structure.canConvert, shortcuts),
                      Entry(title: "Move to", shortcut: "", pick: nil, enabled: !targets.isEmpty, children: targets)]
         }
-        var flaggedView = Entry.command(.toggleFlaggedView, shortcuts)
-        flaggedView.checked = structure.flaggedView
-        var filter = Entry.command(.toggleWorkspaceFilter, shortcuts)
-        filter.checked = structure.filtered
-        return menu + [.separator, flaggedView, filter]
+        return menu + [.separator, flaggedView(structure, shortcuts), workspaceFilter(structure, shortcuts)]
     }
 
-    /// help is the Help menu: settings, the keymap, and Quit.
-    public static func help(shortcuts: Shortcuts = [:]) -> [Entry] {
-        [.command(.settings), .command(.editKeymap), .command(.reloadKeymap), .separator, .command(.quit)]
+    private static func toggle(_ command: Command, checked: Bool, enabled: Bool, _ shortcuts: Shortcuts) -> Entry {
+        var entry = Entry.command(command, enabled: enabled, shortcuts)
+        entry.checked = checked
+        return entry
     }
 
-    /// window is every menu tab flattened, which the command palette lists.
+    private static func flaggedView(_ structure: Structure, _ shortcuts: Shortcuts) -> Entry {
+        toggle(.toggleFlaggedView, checked: structure.flaggedView, enabled: structure.canToggleFlaggedView, shortcuts)
+    }
+
+    private static func workspaceFilter(_ structure: Structure, _ shortcuts: Shortcuts) -> Entry {
+        toggle(.toggleWorkspaceFilter, checked: structure.filtered, enabled: structure.canFilter, shortcuts)
+    }
+
+    public static func help() -> [Entry] { [.command(.about)] }
+
+    /// The command palette lists the same actions as the menu bar, plus native Quit.
     public static func window(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
                               sessionCount: Int, canRenameSession: Bool = false, canRestartSession: Bool = false, hasSelection: Bool,
-                              canPaste: Bool, view: View = View(), localDefaultShortcut: Bool = true,
+                              canPaste: Bool, view: View = View(), structure: Structure = Structure(), localDefaultShortcut: Bool = true,
                               shortcuts: Shortcuts = [:]) -> [Entry] {
-        file(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession, sessionCount: sessionCount,
-             canRenameSession: canRenameSession, canRestartSession: canRestartSession, hasSelection: hasSelection, canPaste: canPaste,
+        file(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession,
+             canRenameSession: canRenameSession, canRestartSession: canRestartSession, structure: structure,
              localDefaultShortcut: localDefaultShortcut, shortcuts: shortcuts)
-            + [.separator] + navigate(shortcuts: shortcuts)
-            + [Entry(title: "View", shortcut: "", pick: nil, enabled: true, children: Self.view(view, shortcuts: shortcuts))]
-            + [.separator] + help(shortcuts: shortcuts)
+            + edit(hasSelection: hasSelection, canPaste: canPaste)
+            + [Entry(title: "View", shortcut: "", pick: nil, enabled: true, children: Self.view(view, structure: structure, shortcuts: shortcuts))]
+            + navigate(view, sessionCount: sessionCount, shortcuts: shortcuts) + help() + [.command(.quit)]
     }
 
     /// closeQuestion is what closing an agterm-server session asks: it ends that session's programs on the server.

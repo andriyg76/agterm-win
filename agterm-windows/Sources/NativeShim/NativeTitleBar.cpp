@@ -31,13 +31,13 @@ void loadFonts(uint32_t dpi) {
 COLORREF fill(const nt_title_button &button) {
     bool close = button.kind == 2;
     if (button.state == 2) return nt_chrome_title_pressed(close);
-    if (button.state == 1) return nt_chrome_title_hover(close);
+    if (button.state == 1 || button.state == 4) return nt_chrome_title_hover(close);
     return nt_chrome_title_bg();
 }
 
 }  // namespace
 
-extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, int32_t icon_width, int32_t icon_lit,
+extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, int32_t menu_bottom, int32_t icon_width, int32_t icon_lit,
                                    const uint16_t *text, int32_t title_left, int32_t title_right, const nt_title_button *buttons,
                                    int32_t count, int32_t active, const nt_menu_tab *tabs, int32_t tab_count) {
     auto hwnd = static_cast<HWND>(window);
@@ -45,7 +45,7 @@ extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, i
     HDC dc = BeginPaint(hwnd, &paint);
     RECT client;
     GetClientRect(hwnd, &client);
-    RECT bar{0, 0, client.right, height};
+    RECT bar{0, 0, client.right, menu_bottom};
     const COLORREF barBg = nt_chrome_title_bg();
     HBRUSH backgroundBrush = CreateSolidBrush(barBg);
 
@@ -83,7 +83,7 @@ extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, i
         for (int32_t i = 0; i < count; ++i) {
             const nt_title_button &button = buttons[i];
             RECT rect{button.left, 0, button.right, height};
-            if (button.state == 1 || button.state == 2) {
+            if (button.state == 1 || button.state == 2 || button.state == 4) {
                 HBRUSH brush = CreateSolidBrush(fill(button));
                 FillRect(memory, &rect, brush);
                 DeleteObject(brush);
@@ -99,7 +99,7 @@ extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, i
         for (int32_t i = 0; i < tab_count; ++i) {
             const nt_menu_tab &tab = tabs[i];
             if (tab.right <= tab.left) continue;
-            RECT rect{tab.left, 0, tab.right, height};
+            RECT rect{tab.left, height, tab.right, menu_bottom};
             if (tab.lit) {
                 HBRUSH brush = CreateSolidBrush(nt_chrome_title_hover(0));
                 FillRect(memory, &rect, brush);
@@ -136,6 +136,41 @@ extern "C" void *nt_tooltip_create(void *parent) {
                                GetModuleHandleW(nullptr), nullptr);
     if (tip) SetWindowTheme(tip, L"DarkMode_Explorer", nullptr);
     return tip;
+}
+
+extern "C" void nt_sidebar_button_paint(intptr_t notification, uint32_t dpi, uint16_t glyph, int32_t checked) {
+    const auto &item = *reinterpret_cast<const DRAWITEMSTRUCT *>(notification);
+    const bool disabled = (item.itemState & ODS_DISABLED) != 0;
+    const bool pressed = (item.itemState & ODS_SELECTED) != 0;
+    const auto color = checked ? nt_chrome_sb_selected() : pressed ? nt_chrome_sb_highlight() : nt_chrome_sb_bg();
+    HBRUSH brush = CreateSolidBrush(color);
+    FillRect(item.hDC, &item.rcItem, brush);
+    DeleteObject(brush);
+
+    loadFonts(dpi);
+    int saved = SaveDC(item.hDC);
+    SelectObject(item.hDC, fonts.icons);
+    SetBkMode(item.hDC, TRANSPARENT);
+    SetTextColor(item.hDC, disabled ? nt_chrome_sb_dim() : nt_chrome_sb_text());
+    RECT rect = item.rcItem;
+    const wchar_t character = static_cast<wchar_t>(glyph);
+    DrawTextW(item.hDC, &character, 1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    if (item.itemState & ODS_FOCUS) DrawFocusRect(item.hDC, &rect);
+    RestoreDC(item.hDC, saved);
+}
+
+extern "C" void nt_tooltip_for_control(void *tip, void *parent, void *control, const uint16_t *text) {
+    if (!tip || !control) return;
+    TTTOOLINFOW info{};
+    info.cbSize = TTTOOLINFOW_V2_SIZE;
+    info.hwnd = static_cast<HWND>(parent);
+    info.uId = reinterpret_cast<UINT_PTR>(control);
+    const auto window = static_cast<HWND>(tip);
+    const auto arg = reinterpret_cast<LPARAM>(&info);
+    const bool known = SendMessageW(window, TTM_GETTOOLINFOW, 0, arg) != 0;
+    info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    info.lpszText = const_cast<wchar_t *>(reinterpret_cast<const wchar_t *>(text));
+    SendMessageW(window, known ? TTM_UPDATETIPTEXTW : TTM_ADDTOOLW, 0, arg);
 }
 
 // The V2 size is what both comctl32 5 and 6 accept; the full struct's lpReserved makes version 5 refuse the tool.

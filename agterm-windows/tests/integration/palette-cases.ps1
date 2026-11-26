@@ -33,7 +33,8 @@ public static class AgtermInput {
     // SendChord is Chord for a window Windows will not put in front: attached to its thread, the case holds Ctrl (and
     // Shift) in their shared key state and sends the key to the window with focus, whose own GetKeyState then reads
     // the chord, so the keymap is what turns it into a command.
-    public static void SendChord(IntPtr window, byte key, bool shift) {
+    public static void SendChord(IntPtr window, byte key, bool shift) { SendChord(window, key, shift, false); }
+    public static void SendChord(IntPtr window, byte key, bool shift, bool alt) {
         uint mine = GetCurrentThreadId(), theirs = GetWindowThreadProcessId(window, IntPtr.Zero);
         bool attached = AttachThreadInput(mine, theirs, true);
         try {
@@ -41,6 +42,7 @@ public static class AgtermInput {
             GetKeyboardState(state);
             state[0x11] = state[0xA2] = 0x80;
             if (shift) state[0x10] = state[0xA0] = 0x80;
+            if (alt) state[0x12] = state[0xA4] = 0x80;
             SetKeyboardState(state);
             var info = new GuiThreadInfo();
             info.Size = Marshal.SizeOf(info);
@@ -49,6 +51,7 @@ public static class AgtermInput {
             SendMessageW(target, 0x0100, (IntPtr)key, (IntPtr)1);
             SendMessageW(target, 0x0101, (IntPtr)key, (IntPtr)unchecked((int)0xC0000001));
             state[0x11] = state[0xA2] = state[0x10] = state[0xA0] = 0;
+            if (alt) state[0x12] = state[0xA4] = 0;
             SetKeyboardState(state);
         } finally {
             if (attached) AttachThreadInput(mine, theirs, false);
@@ -67,11 +70,13 @@ public static class AgtermInput {
     [DllImport("user32.dll")] static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
     // Chord presses `key` with Ctrl, and Shift when asked, as the keyboard does.
-    public static void Chord(byte key, bool shift) {
+    public static void Chord(byte key, bool shift, bool alt) {
         keybd_event(0x11, 0, 0, UIntPtr.Zero);
         if (shift) keybd_event(0x10, 0, 0, UIntPtr.Zero);
+        if (alt) keybd_event(0x12, 0, 0, UIntPtr.Zero);
         keybd_event(key, 0, 0, UIntPtr.Zero);
         keybd_event(key, 0, 2, UIntPtr.Zero);
+        if (alt) keybd_event(0x12, 0, 2, UIntPtr.Zero);
         if (shift) keybd_event(0x10, 0, 2, UIntPtr.Zero);
         keybd_event(0x11, 0, 2, UIntPtr.Zero);
     }
@@ -154,8 +159,8 @@ function Bring-Front([IntPtr]$Window) {
 # its thread (SendChord, FocusOn) while a Windows flyout keeps the foreground.
 $script:InFront = $true
 
-function Send-Chord([IntPtr]$Window, [byte]$Key, [bool]$Shift) {
-    if ($script:InFront) { [AgtermInput]::Chord($Key, $Shift) } else { [AgtermInput]::SendChord($Window, $Key, $Shift) }
+function Send-Chord([IntPtr]$Window, [byte]$Key, [bool]$Shift, [bool]$Alt = $false) {
+    if ($script:InFront) { [AgtermInput]::Chord($Key, $Shift, $Alt) } else { [AgtermInput]::SendChord($Window, $Key, $Shift, $Alt) }
 }
 
 # Open-Palette presses the chord and waits for the panel.
@@ -238,7 +243,7 @@ $shellCases["palettes"] = {
     if (-not $palette) { return $failures + @("Ctrl+Shift+P opened no palette") }
     Wait-Until { @(Get-Rows $palette).Count -gt 5 } 5 | Out-Null
     $rows = Get-Rows $palette
-    foreach ($title in @("Find…", "Quit", "Go to Session…", "New Session › Windows PowerShell")) {
+    foreach ($title in @("View › Find…", "Quit", "Go to Session…", "New Session › Windows PowerShell")) {
         if ($rows -notcontains $title) { $failures += "Ctrl+Shift+P lacks '$title'" }
     }
     if ($rows -contains "Command Palette…") { $failures += "Ctrl+Shift+P lists itself" }
@@ -270,4 +275,46 @@ $shellCases["palettes"] = {
         if (-not $sessions -or -not (Get-Palette $window)) { $failures += "Go to Session… from the command palette did not leave the session palette open" }
     } else { $failures += "Ctrl+Shift+P did not open the palette again" }
     $failures
+}
+
+$shellCases["attention-close-shortcuts"] = {
+    param($Shell)
+    [AgtermWin32]::SetThreadDpiAwarenessContext([IntPtr](-4)) | Out-Null
+    $window = Get-ShellWindow $Shell
+    if (-not $window) { return @("no visible agterm-shell window") }
+    $state = $Shell.State
+    $blocked = Invoke-Ctl $state @("session", "new", "--name", "waiting", "--command", "cmd.exe /d /k")
+    $idle = Invoke-Ctl $state @("session", "new", "--name", "idle", "--command", "cmd.exe /d /k")
+    if (-not $blocked.ok -or -not $idle.ok) { return @("could not create test sessions") }
+    $status = Invoke-Ctl $state @("session", "status", "blocked", "--target", $blocked.result.id)
+    if (-not $status.ok) { return @("could not set the waiting session's status") }
+    $script:InFront = Bring-Front $window
+    $terminal = [AgtermWin32]::VisibleChildren($window, "agterm-native") | Select-Object -First 1
+    if (-not $terminal) { return @("no visible terminal") }
+    [AgtermInput]::FocusOn($terminal)
+    Send-Chord $window 0x49 $false $true
+    $palette = Wait-Until { Get-Palette $window } 5
+    if (-not $palette) { return @("Ctrl+Alt+I opened no Attention palette") }
+    if (-not (Wait-Until { ((Get-Rows $palette) -join "|") -eq "waiting" } 5)) { return @("Attention did not list only the blocked session") }
+    Send-Key $palette.Edit 0x0D
+    if (-not (Wait-Until { (Get-Active $state).id -eq $blocked.result.id } 5)) { return @("Attention did not select the waiting session") }
+
+    # Exercise the real message loop with the tree focused when the desktop grants foreground access.
+    if ($script:InFront) {
+        $tree = [AgtermWin32]::VisibleChildren($window, "SysTreeView32") | Select-Object -First 1
+        if (-not $tree) { return @("no sidebar tree") }
+        [AgtermInput]::FocusOn($tree)
+        Send-Chord $window 0x49 $false $true
+        $palette = Wait-Until { Get-Palette $window } 5
+        if (-not $palette) { return @("Ctrl+Alt+I from the sidebar opened no Attention palette") }
+        Send-Key $palette.Edit 0x1B
+        if (-not (Wait-Until { -not (Get-Palette $window) } 5)) { return @("Escape did not close Attention") }
+        [AgtermInput]::FocusOn($tree)
+    }
+    Send-Chord $window 0x73 $false
+    if (-not (Wait-Until { $null -eq (Get-SessionNodes $state | Where-Object { $_.id -eq $blocked.result.id }) } 5)) {
+        return @("Ctrl+F4 did not close the selected session")
+    }
+    if (-not (Get-SessionNodes $state | Where-Object { $_.id -eq $idle.result.id })) { return @("Ctrl+F4 also closed the other session") }
+    @()
 }

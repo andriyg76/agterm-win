@@ -368,8 +368,10 @@ $shellCases["notice-bar"] = {
     $barRect = Get-ScreenRect $bar
     $height = $barRect.Bottom - $barRect.Top
     $dpi = [AgtermWin32]::GetDpiForWindow($window)
+    $contentTop = (Get-Bar $window).ContentTop
+    $topLimit = $topEdge + $contentTop + [int](8 * $dpi / 96)
     if ($height -ne [int][Math]::Floor((34 * $dpi + 48) / 96)) { $failures += "the bar is $height px at $dpi dpi" }
-    if ($barRect.Top -gt $topEdge + [int](48 * $dpi / 96)) { $failures += "the bar is not under the title bar: it starts $($barRect.Top - $topEdge) px down" }
+    if ($barRect.Top -gt $topLimit) { $failures += "the bar is not under the title bar: it starts $($barRect.Top - $topEdge) px down" }
     if ((Get-ScreenRect $terminal).Top -lt $barRect.Bottom) { $failures += "the terminal starts above the bar's bottom at the top" }
     $stripe = Get-BarPixel $window $bar 1 ([int]($height / 2))
     $background = Get-BarPixel $window $bar ([int](8 * $dpi / 96)) 3
@@ -392,7 +394,7 @@ $shellCases["notice-bar"] = {
     if ($barRect.Bottom -ne $bottomEdge) { $failures += "the bar ends at $($barRect.Bottom), not the window's bottom $bottomEdge" }
     $terminalRect = Get-ScreenRect $terminal
     if ($terminalRect.Bottom -gt $barRect.Top) { $failures += "the terminal runs under the bar at the bottom" }
-    if ($terminalRect.Top -ge $barRect.Top -or $terminalRect.Top -gt (Get-ScreenPoint $window 0 ([int](48 * $dpi / 96))).Y) {
+    if ($terminalRect.Top -ge $barRect.Top -or $terminalRect.Top -gt $topLimit) {
         $failures += "the terminal did not move up to the title bar"
     }
     if ((Get-Saved $state).noticeBarPosition -ne "bottom") { $failures += "native.json keeps '$((Get-Saved $state).noticeBarPosition)'" }
@@ -412,7 +414,7 @@ $shellCases["notice-bar"] = {
     }
     Start-Sleep -Milliseconds 300
     if ((Get-Saved $state).noticeBarPosition -ne "top") { $failures += "native.json keeps '$((Get-Saved $state).noticeBarPosition)' after the drag to the top" }
-    if ((Get-ScreenRect $bar).Top -gt $topEdge + [int](48 * $dpi / 96)) { $failures += "the bar did not return under the title bar" }
+    if ((Get-ScreenRect $bar).Top -gt $topLimit) { $failures += "the bar did not return under the title bar" }
     if ((Get-ScreenRect $terminal).Top -lt (Get-ScreenRect $bar).Bottom) { $failures += "the terminal starts above the bar after the drag to the top" }
     Save-Snapshot $Shell "notice-top-light"
 
@@ -432,7 +434,7 @@ $shellCases["notice-bar"] = {
     $barRect = Get-ScreenRect $bar
     Click-Bar $bar ($barRect.Right - $barRect.Left - [int](12 * $dpi / 96)) ([int]($height / 2))
     if (-not (Wait-Until { -not [AgtermWin32]::IsWindowVisible($bar) } 5)) { $failures += "the bar stays on screen with its only notice dismissed" }
-    if ((Get-ScreenRect $terminal).Top -gt (Get-ScreenPoint $window 0 ([int](48 * $dpi / 96))).Y) { $failures += "the terminal did not take the bar's place" }
+    if ((Get-ScreenRect $terminal).Top -gt $topLimit) { $failures += "the terminal did not take the bar's place" }
     Save-Snapshot $Shell "notice-dismissed"
     $failures
 }

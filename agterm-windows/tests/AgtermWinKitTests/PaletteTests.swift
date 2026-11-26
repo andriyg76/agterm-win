@@ -57,7 +57,7 @@ struct PaletteTests {
         #expect(titles.contains("New Session › Windows PowerShell") && titles.contains("Default Profile › Windows PowerShell"))
         #expect(titles.contains("Go to Session…") && !titles.contains("Command Palette…"))
         #expect(rows.first { $0.title == "Close Session" }?.enabled == false)
-        #expect(rows.first { $0.title == "Find…" }?.detail == "Ctrl+F")
+        #expect(rows.first { $0.title == "View › Find…" }?.detail == "Ctrl+F")
         #expect(rows.first { $0.title == "Quit" }?.target == .pick(.command(.quit)))
     }
 
@@ -85,5 +85,18 @@ struct PaletteTests {
         let menu = NativeMenu.window(profiles: [], canCloseSession: false, sessionCount: 0, hasSelection: false, canPaste: false)
         #expect(menu.first { $0.pick == .command(.sessionPalette) }?.shortcut == "Ctrl+P")
         #expect(menu.first { $0.pick == .command(.commandPalette) }?.shortcut == "Ctrl+Shift+P")
+        #expect(menu.first { $0.pick == .command(.attentionPalette) }?.shortcut == "Ctrl+Alt+I")
+    }
+
+    @Test func attentionOmitsIdleAndSortsByStatusThenRecency() {
+        let time = Date(timeIntervalSince1970: 100)
+        let rows = Palette.attentionRows([
+            (UUID(), "idle", "", .idle, time),
+            (UUID(), "old blocked", "", .blocked, nil),
+            (UUID(), "active", "", .active, time),
+            (UUID(), "new blocked", "", .blocked, time),
+            (UUID(), "completed", "", .completed, time),
+        ])
+        #expect(rows.map(\.title) == ["new blocked", "old blocked", "active", "completed"])
     }
 }

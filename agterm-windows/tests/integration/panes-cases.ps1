@@ -147,12 +147,11 @@ $shellCases["panes-ui"] = {
     if (-not (Wait-Until { -not (Invoke-Ctl $state @("tree")).result.tree.dashboardMembers } 5)) { $failures += "a click on a cell did not close the dashboard" }
     elseif (-not (Get-Node $state $id).splitFocused) { $failures += "a click on the split's cell did not focus the split" }
 
-    Note "settings button"
-    Send-Click $window (Get-Centre $bar "settings") $bar.Middle
-    $settings = Wait-Until { [AgtermWin32]::Visible($Shell.Process.Id, "agterm-settings") | Select-Object -First 1 } 10
-    if (-not $settings) { $failures += "the settings button did not open Settings" }
+    Note "settings action"
+    $settings = Open-Settings $Shell $window
+    if (-not $settings) { $failures += "the settings action did not open Settings" }
     else {
-        Save-Snapshot $Shell "settings-button"
+        Save-Snapshot $Shell "settings-action"
         [AgtermWin32]::PostMessageW($settings, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
     }
     $failures
