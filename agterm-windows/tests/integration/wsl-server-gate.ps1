@@ -9,10 +9,18 @@ param(
 $ErrorActionPreference = "Stop"
 $exe = Join-Path (Resolve-Path $App) "agterm-win.exe"
 if (-not (Test-Path $exe)) { throw "no agterm-win.exe in $App" }
-$list = & wsl.exe -l -q 2>&1 | Out-String
+# wsl.exe lists in UTF-16, which PowerShell 5.1 reads with a NUL after every character
+$list = (& wsl.exe -l -q 2>&1 | Out-String) -replace "`0", ""
 if ($list -notmatch [regex]::Escape($Distribution)) { throw "WSL distribution '$Distribution' is not installed" }
-# the server's own reply, as the app's probe reads it: systemctl can lose the user bus under WSL
-$version = (& wsl.exe -d $Distribution -e /bin/sh -c '"$HOME/.local/bin/agtermctl" version --json' 2>&1 | Out-String)
+# the server's own reply, as the app's probe reads it: systemctl can lose the user bus under WSL; a distribution WSL
+# had stopped boots on this call and its user manager starts the server a few seconds later
+$ErrorActionPreference = "Continue"
+for ($try = 0; $try -lt 20; $try++) {
+    $version = (& wsl.exe -d $Distribution -e /bin/sh -c '"$HOME/.local/bin/agtermctl" version --json' 2>&1 | Out-String)
+    if ($version -match '"server"') { break }
+    Start-Sleep -Seconds 1
+}
+$ErrorActionPreference = "Stop"
 if ($version -notmatch '"server"') { throw "agterm-server does not answer in $Distribution ($($version.Trim())); install it first" }
 
 New-Item -ItemType Directory -Force $Results | Out-Null
@@ -46,10 +54,11 @@ $shellCases["wsl-ensure-live"] = {
     if ($node.remoteHost -ne $Distribution) { $failures += "the new session reads remoteHost '$($node.remoteHost)'" }
     $id = $created.result.id
     Invoke-Ctl $state @("session", "select", "--target", $id) | Out-Null
-    $marker = "gate-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
-    # the shell's arithmetic, so the typed line itself cannot match
-    Invoke-Ctl $state @("session", "type", "--target", $id, "echo $marker-`$((6*7))`r") | Out-Null
-    $ran = Wait-Until { "$((Invoke-Ctl $state @("session", "text", "--target", $id)).result.text)" -match "$marker-42" } 30
+    # the shell's own arithmetic into a file read back through wsl.exe: a window started minimized has a 1x1 grid
+    $marker = "/tmp/agterm-gate-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    Invoke-Ctl $state @("session", "type", "--target", $id, "echo `$((6*7)) > $marker`r") | Out-Null
+    $ran = Wait-Until { (& wsl.exe -d $Distribution -e cat $marker 2>$null | Out-String).Trim() -eq "42" } 30
+    & wsl.exe -d $Distribution -e rm -f $marker
     if (-not $ran) { $failures += "the new session never ran a command at its prompt: $((Invoke-Ctl $state @("session", "text", "--target", $id)).result.text)" }
     Save-Snapshot $Shell "live-connected"
     Invoke-Ctl $state @("session", "close", "--target", $id) | Out-Null

@@ -66,7 +66,7 @@ struct RemoteCommandsTests {
         #expect(RemoteCommands.outputText(Data("sh: агент: not found\n".utf8)) == "sh: агент: not found\n")
     }
 
-    private let wsl =RemoteCommands.parse("Ubuntu = wsl.exe -d Ubuntu -e\n").commands
+    private let wsl = RemoteCommands.parse("Ubuntu = wsl.exe -d Ubuntu -e\n").commands
 
     @Test func aDefinedNameRunsItsCommandWithTheSameShellScript() throws {
         let ssh = try RemoteSession.catalogCommand(host: "studio", controlPath: "/tmp/p", remotes: wsl)
@@ -82,12 +82,12 @@ struct RemoteCommandsTests {
     @Test func aDefinedControlCommandCarriesTheChainUnquoted() throws {
         let argv = try RemoteSession.controlCommand(host: "Ubuntu", arguments: ["window", "list"], remotes: wsl)
         #expect(Array(argv.prefix(6)) == ["wsl.exe", "-d", "Ubuntu", "-e", "/bin/sh", "-c"])
-        #expect(argv.last?.hasSuffix("agtermctl window list --json") == true)
+        #expect(argv.last?.hasSuffix("agtermctl 'window' 'list' '--json'") == true)
     }
 
     @Test func aDefinedAttachHasNoSshKeepaliveOrMasterWait() throws {
         let endpoint = ControlZmxEndpoint(executable: "/usr/local/bin/zmx", socketDirectory: "/run/zmx")
-        let line = try RemoteSession.attachPaneCommand(host: "Ubuntu", endpoint: endpoint, daemon: "d1", session: "s", pane: .left,
+        let line = try RemoteSession.attachPaneCommand(host: "Ubuntu", endpoint: endpoint, daemon: ZmxSupport.daemonName(for: UUID()), session: "s", pane: .left,
                                                        controlPath: "/tmp/p", remotes: wsl)
         #expect(line.contains("wsl.exe"))
         #expect(!line.contains("ServerAliveInterval"))
