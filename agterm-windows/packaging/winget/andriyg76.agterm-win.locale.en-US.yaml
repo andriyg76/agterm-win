@@ -9,7 +9,7 @@ Author: Umputun
 PackageName: agterm
 PackageUrl: https://github.com/andriyg76/agterm-win
 License: MIT
-LicenseUrl: https://github.com/andriyg76/agterm-win/blob/windows-port/LICENSE
+LicenseUrl: https://github.com/andriyg76/agterm-win/blob/v{{Version}}/LICENSE
 ShortDescription: Windows port of agterm, a simply good terminal with a full control API.
 Description: |-
   agterm-win is the Windows port of agterm: a native terminal built on libghostty with a workspace-to-session

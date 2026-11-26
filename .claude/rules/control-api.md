@@ -258,8 +258,11 @@ runs its command's words followed by the same `/bin/sh -c SCRIPT` ssh would carr
 `/usr/bin/env … zmx attach`), so the command must run its arguments as a program, and any other name stays an ssh
 destination. A defined remote gets no ControlMaster pool (`SshConnectionPool.ready` answers true and starts none),
 no `ssh -G` keepalive, no BatchMode/ConnectTimeout, and no `-L` forward: `forwardCommand` throws `definedRemote` and
-a loopback page or link opens at its own port, which WSL2 shares with Windows. Its pty is the pane's own, the one
-ssh's `-tt` would have asked for. No command or field is added: `window.remote.open`, `session.remote.new`,
+a loopback page or link opens at its own port, which WSL2 shares with Windows and a container does not. Its pty is
+the pane's own, the one ssh's `-tt` would have asked for, so the command must carry a console stdin into a remote pty
+and pipes as pipes: `wsl.exe` does, while `docker exec` needs `-t` for the one and refuses it for the other, which
+the `docker-remote` integration case's launcher adds only on a console. The command also supplies the login
+environment ssh's PAM would: `docker exec` sets no `XDG_RUNTIME_DIR`, without which `systemctl --user` fails. No command or field is added: `window.remote.open`, `session.remote.new`,
 `server install` and `window.list` take and report the name. The app reads `RemoteCommands.current`, pointed at
 the config directory by `SettingsModel` (a notification on bad lines) or agterm-win's `main.swift`; the CLI calls
 `useConfigured`. agterm-win reaches nothing else: its `NativeControl` answers `window.list` with each defined name as
@@ -2548,6 +2551,8 @@ a remote window, refuses an undefined one, and writes the file from `wsl -l -q` 
 
 - agterm-server (`AgtermServerKit`, product `agterm-server`) keeps a windowless `AppStore` on Linux.
   Every pane is a zmx daemon in a systemd user scope of its own, so a server restart or crash keeps it.
+  The scope is chosen per pane (`ServerPlacement.detect`): WSL can mount its own `/run/user/<uid>` over the
+  user manager's after the server started, and a pane started then runs unscoped rather than failing.
 - `ServerCommandPolicy.served` is default-deny: a protocol command reaches the server's store only once it
   is listed there, and `HeadlessCommandPolicy` gives the physical-window reason for the rest.
 - The Linux rendezvous is `ControlResolve.defaultStateDirectory`: `$XDG_STATE_HOME/agterm` (absolute only)

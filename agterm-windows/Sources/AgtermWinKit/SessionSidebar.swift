@@ -11,37 +11,43 @@ public enum SessionSidebar {
         public let isWorkspace: Bool
         public let ended: Bool
         public let children: [Item]
+        /// status and info are what an agent reported: the glyph at the row's edge and the line under its title.
+        public let status: AgentIndicator
+        public let info: String?
         /// expanded is whether the row shows its children: a folded workspace or companion group does not.
         public var expanded = true
 
-        public init(id: UUID, title: String, isWorkspace: Bool, ended: Bool, children: [Item], expanded: Bool = true) {
+        public init(id: UUID, title: String, isWorkspace: Bool, ended: Bool, children: [Item], status: AgentIndicator = AgentIndicator(),
+                    info: String? = nil, expanded: Bool = true) {
             self.id = id
             self.title = title
             self.isWorkspace = isWorkspace
             self.ended = ended
             self.children = children
+            self.status = status
+            self.info = info
             self.expanded = expanded
         }
     }
 
-    /// Label is how a row reads: its title and whether its program ended.
-    public typealias Label = (title: String, ended: Bool)
+    /// Label is how a row reads: its title, whether its program ended, and its agent's status and info line.
+    public typealias Label = (title: String, ended: Bool, status: AgentIndicator, info: String?)
 
     /// items lays out `store` as a Mac's sidebar does: in the tree, the root's sessions at the top level and each
     /// workspace the focus filter shows as a row, companions under their session, folds kept; in the flagged view,
     /// the flagged sessions alone, in their saved order. `label` names a session, the server catalog's way when nil.
     public static func items(_ store: AppStore, unseen: [UUID: Int] = [:], label: ((Session) -> Label)? = nil) -> [Item] {
-        let name = label ?? { session in (catalogTitle(session, unseen: unseen), session.ended) }
+        let name = label ?? { session in
+            (catalogTitle(session, unseen: unseen), session.ended, session.agentIndicator, StatusGlyph.infoText(session.effectiveInfo))
+        }
         if store.sidebarMode == .flagged {
-            return store.orderedFlaggedSessions.map { session in
-                let row = name(session)
-                return Item(id: session.id, title: row.title, isWorkspace: false, ended: row.ended, children: [])
-            }
+            return store.orderedFlaggedSessions.map { row($0, name($0), children: []) }
         }
         // the Mac fills a flagged row's icon; these rows have no icon, so the flag follows the name
         let marked: (Session) -> Label = { session in
-            let row = name(session)
-            return (session.flagged ? row.title + " ⚑" : row.title, row.ended)
+            var label = name(session)
+            if session.flagged { label.title += " ⚑" }
+            return label
         }
         return store.visibleWorkspaces.flatMap { workspace in
             let sessions = groupedItems(workspace.sessions, name: marked)
@@ -53,14 +59,14 @@ public enum SessionSidebar {
     private static func groupedItems(_ sessions: [Session], name: (Session) -> Label) -> [Item] {
         let ids = Set(sessions.map(\.id))
         return sessions.filter { $0.parentID.map { !ids.contains($0) } ?? true }.map { parent in
-            let companions = sessions.filter { $0.parentID == parent.id }.map { companion in
-                let row = name(companion)
-                return Item(id: companion.id, title: row.title, isWorkspace: false, ended: row.ended, children: [])
-            }
-            let row = name(parent)
-            return Item(id: parent.id, title: row.title, isWorkspace: false, ended: row.ended, children: companions,
-                        expanded: parent.isExpanded)
+            let companions = sessions.filter { $0.parentID == parent.id }.map { row($0, name($0), children: []) }
+            return row(parent, name(parent), children: companions)
         }
+    }
+
+    private static func row(_ session: Session, _ label: Label, children: [Item]) -> Item {
+        Item(id: session.id, title: label.title, isWorkspace: false, ended: label.ended, children: children, status: label.status,
+             info: label.info, expanded: session.isExpanded)
     }
 
     private static func catalogTitle(_ session: Session, unseen: [UUID: Int]) -> String {
@@ -104,7 +110,8 @@ public enum SessionSidebar {
         let count = unseen[session.id] ?? 0
         let marker = count > 0 ? "● \(NotificationRules.countLabel(count)) " : ""
         return Item(id: session.id, title: marker + (session.ended ? "\(session.displayName) (ended)" : session.displayName),
-                    isWorkspace: false, ended: session.ended, children: children)
+                    isWorkspace: false, ended: session.ended, children: children, status: session.agentIndicator,
+                    info: StatusGlyph.infoText(session.effectiveInfo))
     }
 
     /// localTitle is a local session's sidebar label: ● while it wants attention (a bell or notification since it was

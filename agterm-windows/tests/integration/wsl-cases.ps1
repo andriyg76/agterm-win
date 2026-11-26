@@ -137,6 +137,39 @@ $shellCases["wsl-at-launch"] = {
     $failures
 }
 
+# Get-ListedDistribution is the first distribution `wsl -l -q` lists that can hold a server, nil without one.
+function Get-ListedDistribution {
+    $ErrorActionPreference = "Continue"
+    $listed = @((& wsl.exe -l -q 2>$null | Out-String) -replace "`0", "" -split "`r?`n" | % { $_.Trim() } | ? { $_ -and $_ -notlike "docker-desktop*" })
+    if ($LASTEXITCODE -eq 0) { $listed | Select-Object -First 1 }
+}
+
+# a first launch with a start-at-launch choice and no remote.properties writes the file before the start resolves the
+# name; on a machine with a distribution the start then finds it defined
+$atLaunchUnseeded = Get-ListedDistribution
+if (-not $atLaunchUnseeded) { $atLaunchUnseeded = $absent }
+$shellPreparations["wsl-at-launch-unseeded"] = {
+    param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$atLaunchUnseeded`": `"atLaunch`"}}"
+}
+$shellCases["wsl-at-launch-unseeded"] = {
+    param($Shell)
+    $state = $Shell.State
+    $failures = @()
+    $started = Wait-Until { $log = Get-AgtermWinLog $state; if ($log.Contains("starting agterm-server in $atLaunchUnseeded")) { $log } } 30
+    if (-not $started) { return @("$atLaunchUnseeded did not start") }
+    $wrote = $started.IndexOf("native shell: wrote ")
+    if ($wrote -lt 0 -or $wrote -gt $started.IndexOf("starting agterm-server in $atLaunchUnseeded")) {
+        $failures += "the start ran before remote.properties was written"
+    }
+    if ($atLaunchUnseeded -ne $absent) {
+        $null = Wait-Until { (Get-AgtermWinLog $state).Contains("remote ensure $atLaunchUnseeded") } 30
+        if ((Get-AgtermWinLog $state).Contains("not defined in remote.properties")) { $failures += "the start found $atLaunchUnseeded undefined" }
+        $notice = (Get-WSLBootstrapNotices $Shell) -join "`n"
+        if ($notice -match "not reachable|refuse|failed") { $failures += "the notice bar shows '$notice'" }
+    }
+    $failures
+}
+
 # --wsl starts that server, asking first while nothing is chosen; Don't ask again starts it and saves manual
 $shellPreparations["wsl-first-start"] = { param($state) Set-RemoteProperties $state @($absent) }
 $shellLaunches["wsl-first-start"] = @{ Arguments = "--wsl $absent"; CaseWaits = $true }
@@ -403,8 +436,6 @@ $shellCases["notice-bar"] = {
     $failures
 }
 
-$localWorkspace = "00000000-0000-0000-0000-00000000000A"
-
 $shellPreparations["overlay-server-program"] = {
     param($state)
     $dist = if ($env:AGTERM_WIN_GATE_WSL) { $env:AGTERM_WIN_GATE_WSL } else { $absent }
@@ -433,8 +464,8 @@ $shellCases["overlay-server-program"] = {
     $connected = Wait-Until { $s = Get-WSLServer $state $dist; if ($s.connected) { $s } } 120
     if (-not $connected) { return $failures + @("AGTERM_WIN_GATE_WSL=$dist never reached connected") }
 
-    $tree = (Invoke-Ctl $state @("tree")).result.tree
-    $workspace = @($tree.workspaces | Where-Object { $_.id -ne $localWorkspace } | Select-Object -First 1)
+    $tree = (Invoke-Ctl $state @("tree", "--window", $connected.id)).result.tree
+    $workspace = @($tree.workspaces | Select-Object -First 1)
     if (-not $workspace) { return $failures + @("no server workspace in tree") }
     $row = (Invoke-Ctl $state @("session", "new", "--workspace", $workspace.id))
     if (-not $row.ok) { return $failures + @("session new on server replied $($row | ConvertTo-Json -Compress)") }

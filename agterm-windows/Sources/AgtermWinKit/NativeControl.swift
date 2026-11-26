@@ -41,6 +41,13 @@ public protocol NativeControlHost: AnyObject {
     func screen(of id: UUID, pane: NativePane?) -> (lines: [String], rows: Int)?
     /// notify shows a `notify` for the session and returns why no banner was shown, nil when one was.
     func notify(_ id: UUID, title: String, body: String) -> String?
+    /// setStatus applies a `session.status` write to a local or server session; false for an `ifIdle` skip.
+    func setStatus(_ id: UUID, _ update: ControlSessionStatusUpdate) -> Bool
+    /// setContext and setInfo set or, with nil, clear the title-bar context and the sidebar info line.
+    func setContext(_ id: UUID, _ context: String?)
+    func setInfo(_ id: UUID, _ info: SessionInfo?)
+    /// markSeen clears the session's unseen badge without selecting it.
+    func markSeen(_ id: UUID)
     var fontPoints: Float { get }
     func setFontPoints(_ points: Float)
     var keymap: ControlKeymap { get }
@@ -124,6 +131,10 @@ public enum NativeControl {
         public var scratch = false
         public var scratchRunning = false
         public var scratchCwd: String?
+        public var activity = AgentActivity()
+        /// context is the title-bar context (`session.context`), info the sidebar info line (`session.info`).
+        public var context: String?
+        public var info: SessionInfo?
 
         public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, unseen: Int = 0, cwd: String = "",
                     title: String? = nil, overlay: NativeOverlay? = nil, overlayExitCode: Int? = nil, htmlOverlay: HtmlOverlay? = nil) {
@@ -221,6 +232,42 @@ public enum NativeControl {
             return await withSession(request.target, host: host) { id in
                 let note = host.notify(id, title: request.args?.title ?? "", body: body)
                 return ControlResponse(ok: true, result: ControlResult(id: id.uuidString, text: note))
+            }
+        case .sessionStatus:
+            let update: ControlSessionStatusUpdate
+            switch ControlSessionMetadata.status(request.args) {
+            case .failure(let rejection): return failure(rejection.message)
+            case .success(let parsed): update = parsed
+            }
+            if let sound = update.sound, !sound.isEmpty, !StatusGlyph.acceptsSound(sound) {
+                return failure("unknown sound: \(sound) (use 'default', 'beep', or one of: \(StatusGlyph.macSoundNames.joined(separator: ", ")))")
+            }
+            return await withSession(request.target, host: host) { id in
+                _ = host.setStatus(id, update)
+                return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+            }
+        case .sessionContext:
+            switch ControlSessionMetadata.context(request.args) {
+            case .failure(let rejection): return failure(rejection.message)
+            case .success(let context):
+                return await withSession(request.target, host: host) { id in
+                    host.setContext(id, context)
+                    return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+                }
+            }
+        case .sessionInfo:
+            switch ControlSessionMetadata.info(request.args) {
+            case .failure(let rejection): return failure(rejection.message)
+            case .success(let info):
+                return await withSession(request.target, host: host) { id in
+                    host.setInfo(id, info)
+                    return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+                }
+            }
+        case .sessionSeen:
+            return await withSession(request.target, host: host) { id in
+                host.markSeen(id)
+                return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
             }
         case .fontInc, .fontDec, .fontReset:
             let command: NativeMenu.Command = request.cmd == .fontInc ? .fontBigger : request.cmd == .fontDec ? .fontSmaller : .fontReset
@@ -411,17 +458,24 @@ public enum NativeControl {
 
     /// sessionNode is a local session as it runs here, with the store's flag, tint and companion fields.
     private static func sessionNode(_ local: Local, shape: ControlSessionNode, host: NativeControlHost) -> ControlSessionNode {
-        ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: shape.active,
+        let indicator = local.activity.indicator
+        let shown = indicator.status != .idle
+        return ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: shape.active,
                            split: local.split?.shown == true, hasSplit: local.split != nil, backedByZmx: nil,
                            splitAxis: local.split?.axisName, splitRatio: local.split?.ratio, splitFocused: local.split?.focused,
                            overlay: local.overlay != nil || local.htmlOverlay != nil,
                            overlaySizePercent: local.overlay?.sizePercent ?? local.pageOverlaySizePercent,
                            scratch: local.scratch, flagged: shape.flagged, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
+                           status: shown ? indicator.status.rawValue : nil, statusPane: shown ? indicator.statusPane?.rawValue : nil,
+                           statusBlink: shown && indicator.blink ? true : nil, statusColor: shown ? indicator.color : nil,
+                           statusShape: shown ? indicator.shape?.rawValue : nil,
+                           statusChangedAt: local.activity.changedAt?.timeIntervalSince1970, activePanes: local.activity.activePanes,
                            unseen: local.unseen > 0 ? local.unseen : local.attention ? 1 : nil, fontSize: Double(host.fontPoints),
+                           context: local.context,
                            splitCwd: local.split == nil ? nil : local.splitCwd, scratchCwd: local.scratchRunning ? local.scratchCwd : nil,
                            htmlOverlays: local.htmlOverlay.map { [$0.controlNode(hidden: local.pageOverlayHidden)] },
                            hiddenOverlays: local.pageOverlayHidden || local.overlay?.hidden == true ? ["session"] : nil,
-                           tint: shape.tint, tintOn: shape.tintOn, parent: shape.parent, collapsed: shape.collapsed)
+                           tint: shape.tint, tintOn: shape.tintOn, parent: shape.parent, collapsed: shape.collapsed, info: local.info)
     }
 
     /// text is what `session.text` reads: the screen by default, every line with `all`, or the last `last` lines once

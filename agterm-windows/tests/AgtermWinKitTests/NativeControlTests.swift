@@ -104,6 +104,15 @@ private final class FakeHost: NativeControlHost {
         notified.append(id)
         return bannersOff ? ControlNotify.bannersOffNote : nil
     }
+    func setStatus(_ id: UUID, _ update: ControlSessionStatusUpdate) -> Bool {
+        var applied = false
+        editLocal(id) { applied = $0.activity.apply(update, hasSplit: $0.split != nil) }
+        return applied
+    }
+    func setContext(_ id: UUID, _ context: String?) { editLocal(id) { $0.context = context } }
+    func setInfo(_ id: UUID, _ info: SessionInfo?) { editLocal(id) { $0.info = info } }
+    var seen: [UUID] = []
+    func markSeen(_ id: UUID) { seen.append(id) }
     func setFontPoints(_ points: Float) { fontPoints = points }
     var keymap = WindowsKeymap(text: "map ctrl+alt+t new_session").control
     var reloads = 0
@@ -731,5 +740,58 @@ struct NativeControlTests {
         #expect(await handle(ControlRequest(cmd: .dashboard), host).error == "dashboard requires at least one session id")
         #expect(await handle(ControlRequest(cmd: .dashboard, args: ControlArgs(targets: ["x:up"])), host).error
             == "dashboard: invalid session id 'x:up' — use <id>, <id>:left, or <id>:right")
+    }
+
+    @Test func statusReadsBackWhileShownAndOmitsIdle() async {
+        let host = FakeHost()
+        let id = host.add("a")
+        let set = ControlArgs(pane: "split", status: "blocked", blink: true, color: "#112233", shape: "star")
+        #expect(await handle(ControlRequest(cmd: .sessionStatus, target: id.uuidString, args: set), host).ok)
+        var node = NativeControl.tree(host).workspaces[0].sessions[0]
+        #expect(node.status == "blocked" && node.statusBlink == true && node.statusColor == "#112233" && node.statusShape == "star")
+        #expect(node.statusPane == "left" && node.statusChangedAt != nil)
+        #expect(await handle(ControlRequest(cmd: .sessionStatus, target: id.uuidString, args: ControlArgs(status: "idle")), host).ok)
+        node = NativeControl.tree(host).workspaces[0].sessions[0]
+        #expect(node.status == nil && node.statusBlink == nil && node.statusColor == nil && node.statusPane == nil)
+        #expect(node.statusChangedAt != nil && node.activePanes == [])
+    }
+
+    @Test func statusRefusesWhatAMacRefuses() async {
+        let host = FakeHost()
+        host.selectedSession = host.add("a")
+        #expect(await handle(ControlRequest(cmd: .sessionStatus, args: ControlArgs(status: "busy")), host).error == "invalid status")
+        #expect(await handle(ControlRequest(cmd: .sessionStatus, args: ControlArgs(status: "active", color: "red")), host).error
+            == "invalid color (expected #rrggbb)")
+        #expect(await handle(ControlRequest(cmd: .sessionStatus, args: ControlArgs(pane: "middle", status: "active")), host).error
+            == "--pane must be left, right, or scratch")
+        #expect(await handle(ControlRequest(cmd: .sessionStatus, args: ControlArgs(status: "active", sound: "Gong")), host).error?
+            .hasPrefix("unknown sound: Gong (use 'default', 'beep', or one of: Basso,") == true)
+        #expect(NativeControl.tree(host).workspaces[0].sessions[0].statusChangedAt == nil)
+        #expect(await handle(ControlRequest(cmd: .sessionStatus, args: ControlArgs(status: "active", sound: "Glass")), host).ok)
+    }
+
+    @Test func contextAndInfoSetAndClear() async {
+        let host = FakeHost()
+        let id = host.add("a")
+        let target = id.uuidString
+        #expect(await handle(ControlRequest(cmd: .sessionContext, target: target, args: ControlArgs(text: " PR 12 ", mode: "set")), host).ok)
+        let infoReply = await handle(ControlRequest(cmd: .sessionInfo, target: target, args: ControlArgs(text: "**3** tests", mode: "set",
+                                                                                                        markdown: true)), host)
+        #expect(infoReply.error == nil)
+        var node = NativeControl.tree(host).workspaces[0].sessions[0]
+        #expect(node.context == "PR 12" && node.info == "**3** tests" && node.infoMarkdown == true && node.infoHideAfter == 0)
+        #expect(StatusGlyph.infoText(host.localSessions[0].info) == "3 tests")
+        #expect(await handle(ControlRequest(cmd: .sessionContext, target: target, args: ControlArgs(mode: "set")), host).error
+            == "session.context set requires text")
+        #expect(await handle(ControlRequest(cmd: .sessionContext, target: target, args: ControlArgs(mode: "clear")), host).ok)
+        #expect(await handle(ControlRequest(cmd: .sessionInfo, target: target, args: ControlArgs(mode: "clear")), host).ok)
+        node = NativeControl.tree(host).workspaces[0].sessions[0]
+        #expect(node.context == nil && node.info == nil && node.infoMarkdown == nil)
+    }
+
+    @Test func seenReachesTheHost() async {
+        let host = FakeHost()
+        let id = host.add("a")
+        #expect(await handle(ControlRequest(cmd: .sessionSeen, target: id.uuidString), host).ok && host.seen == [id])
     }
 }

@@ -38,6 +38,9 @@ whole desktop after a `notify` to show its banner; CI uploads them in the `integ
 `panes-cases.ps1` drives split panes, the scratch, the quick terminal and the dashboard with agtermctl, the title bar's
 buttons and the keymap's chords, and reads back the tree, each pane's text and which terminals are on screen.
 
+`agent-status-cases.ps1` sets agent status, context and info and reads them back through the tree and the title bar,
+then runs the staged Claude Code and Codex adapters with a hook's JSON on stdin, as the agents run them.
+
 `title-bar-cases.ps1` sends the window the messages Windows sends its title bar (hit tests, clicks, presses on
 minimize, maximize and close), then reads the outcome back and checks the pixels the bar painted.
 
@@ -64,12 +67,24 @@ installing its client. Each case leaves `screen.txt`, its state directory (`agte
 `wsl-cases.ps1` start a distribution no machine has, so they need no WSL and run in Sandbox and on CI too: they read
 back what was started, asked and saved, and how WSL auto-ensure probes and reports failures. Cases `wsl-ensure-probe`,
 `wsl-ensure-reprobe`, and `wsl-install-unreachable` pin that behaviour; only a live install connects. Each seeds
-`config\remote.properties` with `agterm-test-absent = wsl.exe -d agterm-test-absent -e`, except `wsl-not-at-launch`,
-which checks the file agterm writes from `wsl -l -q`. They read a remote through `window list` as its remote window,
+`config\remote.properties` with `agterm-test-absent = wsl.exe -d agterm-test-absent -e`, except `wsl-not-at-launch`
+and `wsl-at-launch-unseeded`, which check the file agterm writes from `wsl -l -q`, the second before a start at launch
+resolves its name (the first listed distribution, `agterm-test-absent` with none). They read a remote through `window list` as its remote window,
 open it with `window remote open`, try `session new --remote`, and change its start at launch in Settings ▸ General;
 `wsl-install-unreachable` also runs `agtermctl server install` and expects the reason the notice showed. `notice-bar` uses
 that failure to drag the notice bar to the bottom and back, check the terminal reflows and the bar follows the theme,
 press Retry, and close it, reading the bar's text, position and pixels.
+
+`docker-remote-cases.ps1` builds `docker-remote\Dockerfile` (Ubuntu LTS, systemd as pid 1, a lingering user, since
+agterm-server runs only as a systemd user unit), starts it under a unique name with no published port, and defines it in
+`remote.properties` as `agterm-docker`, reached by `docker exec` through `docker-tty.exe`, which the case compiles from
+`DockerTty.cs` and which adds `-t` only when stdin is a console. With the window minimized it runs `agtermctl server
+install`, opens the remote window, makes a session and reads its prompt, types a command and reads it back with the
+pane's pty and size, closes the session and checks its daemons ended, stops the container and checks the remote
+disconnects, then starts it and checks it reconnects and makes a session again. It records, rather than asserts, that the
+container's loopback is not reachable from Windows: a defined remote gets no `-L` forward. The container and image are
+removed whether the case passed or not. It needs Docker running Linux containers and skips without them, as on CI; run
+it alone with `-Case docker-remote`.
 
 On a machine with a working agterm-server in WSL, run the optional gate (not part of CI):
 

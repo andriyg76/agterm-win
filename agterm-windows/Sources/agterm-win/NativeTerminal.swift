@@ -2,6 +2,7 @@ import AgtermWinKit
 import Foundation
 import NativeShim
 import WinSDK
+import agtermCore
 
 private let nativeOutputMessage = UINT(WM_APP + 11)
 private let nativeExitMessage = UINT(WM_APP + 12)
@@ -58,6 +59,8 @@ final class NativeTerminal {
     var onFontSize: ((Float) -> Void)?
     /// onFocus runs when the terminal takes the keyboard, so a split session knows which pane has it.
     var onFocus: (() -> Void)?
+    /// onKeystroke runs for each key typed and each `session.type`, which clear an agent's status as a Mac's do.
+    var onKeystroke: ((StatusKeystroke) -> Void)?
 
     /// open runs `commandLine` in a top-level terminal window.
     static func open(commandLine: String) {
@@ -526,6 +529,7 @@ final class NativeTerminal {
         guard let mapped, let sequence = TerminalInput.sequence(for: mapped, modifiers: modifiers, applicationCursor: applicationCursor)
         else { return false }
         send(sequence)
+        onKeystroke?(.other)
         return true
     }
 
@@ -538,7 +542,9 @@ final class NativeTerminal {
         }
         let units = highSurrogate.map { (0xDC00..<0xE000).contains(unit) ? [$0, unit] : [unit] } ?? [unit]
         highSurrogate = nil
-        send(TerminalInput.character(String(decoding: units, as: UTF16.self), alt: alt))
+        let text = String(decoding: units, as: UTF16.self)
+        send(TerminalInput.character(text, alt: alt))
+        if let keystroke = AgentActivity.keystroke(text) { onKeystroke?(alt ? .other : keystroke) }
     }
 
     private func paste() {
@@ -568,6 +574,7 @@ final class NativeTerminal {
     func type(_ text: String) -> Bool {
         guard console != nil else { return false }
         send(TerminalInput.paste(text, bracketed: false))
+        if let keystroke = AgentActivity.keystroke(text) { onKeystroke?(keystroke) }
         return true
     }
 
@@ -596,13 +603,14 @@ final class NativeTerminal {
     }
 
     /// screen is every line of the scrollback and screen, oldest first, and how many of the last ones are the screen.
+    /// A never-written cell's rune is 0; it reads as a space, so blank rows and line ends trim as they do on a Mac.
     var screen: (lines: [String], rows: Int)? {
         guard let terminal else { return nil }
         let lines = (0..<nt_line_count(terminal)).map { line in
             let count = nt_line_runes(terminal, line, nil, 0)
             var runes = [UInt32](repeating: 0, count: Int(count))
             nt_line_runes(terminal, line, &runes, count)
-            return String(String.UnicodeScalarView(runes.compactMap(Unicode.Scalar.init)))
+            return String(String.UnicodeScalarView(runes.compactMap { Unicode.Scalar($0 == 0 ? 0x20 : $0) }))
         }
         return (lines, Int(grid.rows))
     }

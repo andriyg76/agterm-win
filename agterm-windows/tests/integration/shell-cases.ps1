@@ -97,8 +97,9 @@ function Start-Shell([string]$Name, [scriptblock]$Prepare, $Launch) {
     if ($Prepare) { & $Prepare $state }
     $env:AGTERM_WIN_STATE_DIR = $state
     try {
-        $process = if ($Launch.Arguments) { Start-Process -FilePath $exe -ArgumentList $Launch.Arguments -PassThru }
-                   else { Start-Process -FilePath $exe -PassThru }
+        $style = if ($Launch.Minimized) { "Minimized" } else { "Normal" }
+        $process = if ($Launch.Arguments) { Start-Process -FilePath $exe -ArgumentList $Launch.Arguments -WindowStyle $style -PassThru }
+                   else { Start-Process -FilePath $exe -WindowStyle $style -PassThru }
     } finally { Remove-Item Env:AGTERM_WIN_STATE_DIR }
     $ready = if ($Launch.CaseWaits) { $true } else { Wait-Until { (Invoke-Ctl $state @("tree")).ok } 30 }
     $shell = [pscustomobject]@{ Dir = $dir; State = $state; Process = $process; Ready = [bool]$ready; Step = 0 }
@@ -114,10 +115,17 @@ function Stop-Shell($Shell) {
     cmd.exe /d /c del /f /q "$(Join-Path $Shell.State 'agterm.sock')" 2>$null
 }
 
+# Get-Node finds a session in the local window's tree, else in a server window's, which bare tree leaves out.
 function Get-Node([string]$State, [string]$Id) {
     $tree = Invoke-Ctl $State @("tree")
     if (-not $tree.ok) { return $null }
-    $tree.result.tree.workspaces | % { $_.sessions } | ? { $_.id -eq $Id } | Select-Object -First 1
+    $node = $tree.result.tree.workspaces | % { $_.sessions } | ? { $_.id -eq $Id } | Select-Object -First 1
+    if ($node) { return $node }
+    foreach ($window in @((Invoke-Ctl $State @("window", "list")).result.windows | ? { $_.remote })) {
+        $node = (Invoke-Ctl $State @("tree", "--window", $window.id)).result.tree.workspaces | % { $_.sessions } | ? { $_.id -eq $Id } |
+            Select-Object -First 1
+        if ($node) { return $node }
+    }
 }
 
 function New-PowerShellSession([string]$State, [string[]]$Extra = @()) {
@@ -354,6 +362,7 @@ $shellCases = [ordered]@{
 . (Join-Path $PSScriptRoot "palette-cases.ps1")
 . (Join-Path $PSScriptRoot "settings-cases.ps1")
 . (Join-Path $PSScriptRoot "panes-cases.ps1")
+. (Join-Path $PSScriptRoot "agent-status-cases.ps1")
 
 # seeds a case's state directory before its window starts; a keymap problem at launch would open a message box
 $shellPreparations = @{
@@ -366,8 +375,12 @@ $shellPreparations = @{
 }
 # what a case's window is started with, when not the bare window
 $shellLaunches = @{}
+# a case's own time limit, when not $ShellCaseSeconds, and what it removes after its window stops, whether it ran or not
+$shellCaseLimits = @{}
+$shellTeardowns = @{}
 
 . (Join-Path $PSScriptRoot "wsl-cases.ps1")
+. (Join-Path $PSScriptRoot "docker-remote-cases.ps1")
 
 # Note marks a step in the log, so a case that stops shows where.
 function Note([string]$Text) { Write-Host ("  {0:HH:mm:ss} {1}" -f (Get-Date), $Text) }
@@ -379,8 +392,9 @@ $ShellCaseSeconds = 180
 function Invoke-ShellCase([string]$Name) {
     $shell = Start-Shell $Name $shellPreparations[$Name] $shellLaunches[$Name]
     Note "$Name started"
+    $limit = if ($shellCaseLimits[$Name]) { $shellCaseLimits[$Name] } else { $ShellCaseSeconds }
     $watchdog = Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -PassThru -ArgumentList @("-NoProfile", "-Command",
-        "Start-Sleep -Seconds $ShellCaseSeconds; Stop-Process -Id $($shell.Process.Id) -Force -ErrorAction SilentlyContinue")
+        "Start-Sleep -Seconds $limit; Stop-Process -Id $($shell.Process.Id) -Force -ErrorAction SilentlyContinue")
     $started = Get-Date
     try {
         $failures = if ($shell.Ready) { @(& $shellCases[$Name] $shell) } else { @("the control socket did not answer within 30 s") }
@@ -391,8 +405,9 @@ function Invoke-ShellCase([string]$Name) {
         Save-Snapshot $shell "final"
         Stop-Process -Id $watchdog.Id -Force -ErrorAction SilentlyContinue
         Stop-Shell $shell
+        if ($shellTeardowns[$Name]) { & $shellTeardowns[$Name] $shell }
     }
-    if (((Get-Date) - $started).TotalSeconds -ge $ShellCaseSeconds) { $failures += "the case did not finish within $ShellCaseSeconds s; the window was stopped" }
+    if (((Get-Date) - $started).TotalSeconds -ge $limit) { $failures += "the case did not finish within $limit s; the window was stopped" }
     if (@($failures | ? { $_ }).Count -gt 0) {
         # the app's own account of the case, since CI's uploaded results are not always at hand
         $logFile = Join-Path $shell.State "agterm-win.log"

@@ -147,6 +147,11 @@ public enum AgentHooksInstall {
         ("Stop", "stop"),
     ]
 
+    /// claudeHookStates and codexHookActions are the tables above for agterm-win's installer, which wires the same
+    /// events to its PowerShell adapters.
+    public static var claudeHookStates: [(event: String, matcher: String?, state: String)] { claudeHooks }
+    public static var codexHookActions: [(event: String, action: String)] { codexHooks }
+
     /// The destination directory for Pi's auto-discovered global extensions.
     static func piExtensionDirectory(home: String) -> String {
         home + "/.pi/agent/extensions"

@@ -132,3 +132,12 @@ public struct TitleBar: Equatable, Sendable {
         return nil
     }
 }
+
+extension TitleBar {
+    /// caption is the bar's text: the session's name, then the context an agent set for it, as a Mac's title bar shows it.
+    public static func caption(name: String?, context: String?) -> String {
+        guard let name else { return "agterm" }
+        guard let context, !context.isEmpty else { return name }
+        return "\(name) \u{2014} \(context)"
+    }
+}

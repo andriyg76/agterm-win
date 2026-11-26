@@ -42,6 +42,10 @@ final class NativeShell {
         var scratch: NativeTerminal?
         var scratchShown = false
         var scratchDirectory: String?
+        /// activity, context and info are what agents report over `session.status`, `.context` and `.info`.
+        var activity = AgentActivity()
+        var context: String?
+        var info: SessionInfo?
 
         /// name follows the focused pane's title and folder, as a Mac's split session's does.
         var name: String {
@@ -255,6 +259,13 @@ final class NativeShell {
         remoteTerminal.onNotification = { [unowned self] title, body in
             if let running { deliver(running, title: title, body: body, source: .terminal) }
         }
+        // it attaches the session's main pane; the store forwards the clear to the server, as a Mac's bridged row does
+        remoteTerminal.onKeystroke = { [unowned self] keystroke in
+            guard let running, let store = server(of: running)?.remote.store, let session = store.session(withID: running) else { return }
+            let before = session.agentIndicator
+            store.clearStatus(by: keystroke, pane: .left, reset: .firstKey, forSession: running)
+            if session.agentIndicator != before { rebuild() }
+        }
         PickRegistry.shared.register(shellWindowID, controller: pickController)
         control = ControlSocket.start(path: socketPath, host: self, version: version)
         startToasts()
@@ -272,19 +283,18 @@ final class NativeShell {
         restorePlacement()
         layout()
         restoreLocals()
-        discoverProfiles(then: requested)
-        catalogChanged()
         let starting = (requestedServer.map { [$0] } ?? []) + ServerLaunch.atLaunch(settings.serverLaunch).filter { $0 != requestedServer }
+        // after the window is up, so the question a first start asks has it to sit on, and after remote.properties is
+        // written on a first launch, since it defines the names they start
+        discoverProfiles(then: requested) { [self] in
+            for name in starting {
+                startServer(name, installing: installServer && name == requestedServer)
+            }
+        }
+        catalogChanged()
         if starting.isEmpty {
             remoteTerminal.show(notice: ServerLaunch.notStartedNotice)
             log("native shell: no agterm-server starts at launch")
-        } else {
-            // once the window is up, so the question a first start asks has it to sit on
-            DispatchQueue.main.async { [self] in
-                for name in starting {
-                    startServer(name, installing: installServer && name == requestedServer)
-                }
-            }
         }
     }
 
@@ -674,7 +684,7 @@ final class NativeShell {
 
     /// discoverProfiles adds the WSL distributions once `wsl.exe` lists them, off the UI thread: the first call can
     /// wait for the WSL service.
-    private func discoverProfiles(then requested: [String]) {
+    private func discoverProfiles(then requested: [String], startServers: @escaping @MainActor () -> Void) {
         let powerShell7 = Self.powerShell7()
         DispatchQueue.global().async {
             // without WSL, or with no distribution, wsl.exe prints why on stdout and fails; that text names none
@@ -692,6 +702,7 @@ final class NativeShell {
                     shell.refreshFallbacks()
                     shell.rebuild()
                     shell.seedRemoteCommands(LaunchProfiles.serverDistributions(distributions))
+                    startServers()
                     log("native shell: \(shell.profiles.count) launch profile(s): \(shell.profiles.map(\.name).joined(separator: ", "))")
                     for name in requested {
                         if let profile = LaunchProfiles.named(name, in: shell.profiles) {
@@ -794,11 +805,12 @@ final class NativeShell {
     private var socketPath: String { stateDirectory.appendingPathComponent("agterm.sock").path }
 
     /// sessionEnvironment is what a local session's programs inherit: the state directory, so agtermctl finds this
-    /// window's socket, the session's id, and agtermctl's folder on PATH.
-    func sessionEnvironment(_ id: Foundation.UUID) -> [String: String] {
+    /// window's socket, the session's id and pane, and agtermctl's folder on PATH.
+    func sessionEnvironment(_ id: Foundation.UUID, pane: StatusPane = .left) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         environment["AGTERM_STATE_DIR"] = stateDirectory.path
         environment["AGTERM_SESSION_ID"] = id.uuidString
+        environment["AGTERM_PANE"] = pane.rawValue
         if let folder = Bundle.main.executableURL?.deletingLastPathComponent().path {
             let key = environment.keys.first { $0.uppercased() == "PATH" } ?? "Path"
             environment[key] = folder + ";" + (environment[key] ?? "")
@@ -931,6 +943,11 @@ final class NativeShell {
     private var toastsReady = false
     // notifications each server session had out of view, kept here as a Mac keeps its own count for a remote row
     private var serverUnseen: [Foundation.UUID: Int] = [:]
+    private var blinking = false
+    fileprivate var blinkDimmed = false
+    fileprivate static let blinkTimer: UINT_PTR = 0xA6E7
+    /// infoRevisions counts each session's `session.info` writes, so only the latest one's `--hide-after` takes it down.
+    private var infoRevisions: [Foundation.UUID: Int] = [:]
 
     private func startToasts() {
         let icon = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).deletingLastPathComponent()
@@ -1932,10 +1949,34 @@ final class NativeShell {
         return overlay.terminal
     }
 
-    func layout() {
-        guard let window else { return }
+    /// clientRect is the client the panes are laid out in. A minimized window's client is empty, and panes laid out in
+    /// it shrank every pty to one cell, so while iconic it is the client of the window as it will restore.
+    var clientRect: RECT {
         var client = RECT()
-        GetClientRect(window, &client)
+        guard IsIconic(window) else {
+            GetClientRect(window, &client)
+            return client
+        }
+        var placement = WINDOWPLACEMENT()
+        placement.length = UINT(MemoryLayout<WINDOWPLACEMENT>.size)
+        guard GetWindowPlacement(window, &placement) else { return client }
+        var frame = placement.rcNormalPosition
+        // the client keeps the side and bottom frame (clientArea); a maximized one fills the work area
+        var border = Self.frameThickness(window)
+        if placement.flags & UINT(WPF_RESTORETOMAXIMIZED) != 0 {
+            var monitor = MONITORINFO()
+            monitor.cbSize = DWORD(MemoryLayout<MONITORINFO>.size)
+            if GetMonitorInfoW(MonitorFromWindow(window, DWORD(MONITOR_DEFAULTTONEAREST)), &monitor) {
+                frame = monitor.rcWork
+                border = 0
+            }
+        }
+        return RECT(left: 0, top: 0, right: max(frame.right - frame.left - 2 * border, 1), bottom: max(frame.bottom - frame.top - border, 1))
+    }
+
+    func layout() {
+        guard window != nil else { return }
+        let client = clientRect
         let width = sidebarWidth
         noticeWindow?.state.update(noticeMessages)
         let content = contentSpan
@@ -1964,11 +2005,7 @@ final class NativeShell {
     private func makeNoticeBar() {
         let bar = NoticeBarWindow(parent: window, position: settings.noticeBarPosition, dpi: dpi, tooltip: tooltip)
         bar.colors = { [unowned self] in NoticeBar.colors(chromePalette, theme: NativeTerminal.theme, severity: $0) }
-        bar.area = { [unowned self] in
-            var client = RECT()
-            GetClientRect(window, &client)
-            return (titleBar.height, client.bottom)
-        }
+        bar.area = { [unowned self] in (titleBar.height, clientRect.bottom) }
         bar.onAction = { [unowned self] in noticeAction($0, $1) }
         bar.onPosition = { [unowned self] in setNoticePosition($0) }
         bar.onDismiss = { [unowned self] in _ = dismissNotice() }
@@ -2005,9 +2042,9 @@ final class NativeShell {
         let counting = settings.notifications.unseenCount
         let runtimes = Dictionary(uniqueKeysWithValues: locals.map { ($0.id, $0) })
         let local = SessionSidebar.items(localStore) { session in
-            guard let run = runtimes[session.id] else { return (session.displayName, false) }
+            guard let run = runtimes[session.id] else { return (session.displayName, false, AgentIndicator(), nil) }
             return (SessionSidebar.localTitle(run.name, exited: run.exited, attention: run.attention || run.unseen > 0, unseen: counting ? run.unseen : 0),
-                    run.exited)
+                    run.exited, run.activity.indicator, StatusGlyph.infoText(run.info))
         }
         nt_tree_clear(tree)
         tagged = []
@@ -2015,6 +2052,7 @@ final class NativeShell {
         items = [:]
         sidebarGroups = []
         launchableGroups = []
+        var blinks = false
         func add(_ item: SessionSidebar.Item, under parent: UnsafeMutableRawPointer?, server: Server? = nil) {
             let destination: SidebarDestination?
             let tag: Int64
@@ -2033,6 +2071,8 @@ final class NativeShell {
                 launchableGroups.append(canLaunchInSidebar(destination) ? 1 : 0)
             } else {
                 items[item.id] = node
+                decorate(node, item)
+                blinks = blinks || (item.status.blink && item.status.status != .idle)
             }
             item.children.forEach { add($0, under: node, server: server) }
         }
@@ -2044,6 +2084,7 @@ final class NativeShell {
             self.selectedSidebarGroup = nil
         }
         syncSidebarSelection()
+        updateBlink(blinks)
         titleChanged()
     }
 
@@ -2080,6 +2121,32 @@ final class NativeShell {
         nt_tree_select(tree, group ?? selected.flatMap { items[$0] })
     }
 
+    /// decorate draws an agent's status glyph and info line on a session row, as a Mac's sidebar shows them.
+    private func decorate(_ node: UnsafeMutableRawPointer, _ item: SessionSidebar.Item) {
+        let rgb = StatusGlyph.rgb(item.status)
+        guard rgb != nil || item.info != nil, let tree else { return }
+        let glyph = rgb.map { _ in Array(StatusGlyph.character(item.status.shape ?? .circle).utf16) + [0] }
+        let info = item.info.map { Array($0.utf16) + [0] }
+        nt_tree_decorate(tree, node, glyph, rgb ?? 0, item.status.blink ? 1 : 0, info)
+    }
+
+    /// updateBlink runs the pulse timer only while some row's status blinks.
+    private func updateBlink(_ wanted: Bool) {
+        guard let window, wanted != blinking else { return }
+        blinking = wanted
+        if wanted {
+            SetTimer(window, NativeShell.blinkTimer, 600, nil)
+        } else {
+            KillTimer(window, NativeShell.blinkTimer)
+            if let tree { _ = nt_tree_blink(tree, 0) }
+        }
+    }
+
+    fileprivate func blinkTick() {
+        blinkDimmed.toggle()
+        if let tree { _ = nt_tree_blink(tree, blinkDimmed ? 1 : 0) }
+    }
+
     fileprivate func customDraw(_ notification: LPARAM) -> LRESULT? {
         let result = dimmed.withUnsafeBufferPointer { sessions in
             launchableGroups.withUnsafeBufferPointer { groups in
@@ -2108,9 +2175,12 @@ final class NativeShell {
 
     func select(_ id: Foundation.UUID) {
         if dashboard != nil { closeDashboard(refocus: false) }
+        let previous = selected
         if selected != id { selectedSidebarGroup = nil }
         selected = id
         if localStore.session(withID: id) != nil, localStore.selectedSessionID != id { _ = localStore.selectSession(id) }
+        // an --auto-reset status ends on the session entered and the one left, as a Mac's selection does
+        for visited in Set([previous, id].compactMap { $0 }) { statusVisited(visited) }
         recentSessions.removeAll { $0 == id }
         recentSessions.insert(id, at: 0)
         if let index = locals.firstIndex(where: { $0.id == id }), locals[index].attention || locals[index].unseen > 0 {
@@ -2307,9 +2377,7 @@ final class NativeShell {
 
     /// paletteFrame centres the palette over the terminal, under the title bar.
     private var paletteFrame: (Int32, Int32, Int32) {
-        var client = RECT()
-        GetClientRect(window, &client)
-        let area = max(client.right - sidebarWidth, 1)
+        let area = max(clientRect.right - sidebarWidth, 1)
         let width = max(min(scaled(640), area - scaled(32)), min(area, scaled(240)))
         return (sidebarWidth + (area - width) / 2, contentSpan.top + scaled(8), width)
     }
@@ -2406,9 +2474,10 @@ final class NativeShell {
         InvalidateRect(window, &rect, false)
     }
 
-    /// titleChanged shows the selected session's name in the title bar and on the taskbar.
+    /// titleChanged shows the selected session's name and agent context in the title bar and on the taskbar.
     private func titleChanged() {
-        let title = selected.flatMap(name(of:)) ?? "agterm"
+        let context = selected.flatMap { id in locals.first { $0.id == id }.map(\.context) ?? serverSession(id)?.effectiveContext }
+        let title = TitleBar.caption(name: selected.flatMap(name(of:)), context: context)
         guard let window, title != shownTitle else { return }
         shownTitle = title
         SetWindowTextW(window, Array(title.utf16) + [0])
@@ -2887,6 +2956,9 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
         case WinKeyHook.commandMessage:
             if let command = NativeMenu.Command(rawValue: Int(wParam)) { shell.windowCommand(command) }
             return 0
+        case UINT(WM_TIMER) where wParam == NativeShell.blinkTimer:
+            shell.blinkTick()
+            return 0
         case UINT(WM_DESTROY):
             WinKeyHook.remove()
             UnregisterHotKey(window, NativeShell.quickHotkey)
@@ -2914,7 +2986,84 @@ extension NativeShell: NativeControlHost {
             local.scratch = $0.scratchShown && $0.scratch != nil
             local.scratchRunning = $0.scratch != nil
             local.scratchCwd = $0.scratchDirectory
+            local.activity = $0.activity
+            local.context = $0.context
+            local.info = $0.info
             return local
+        }
+    }
+
+    func setStatus(_ id: Foundation.UUID, _ update: ControlSessionStatusUpdate) -> Bool {
+        if let index = locals.firstIndex(where: { $0.id == id }) {
+            guard locals[index].activity.apply(update, hasSplit: locals[index].splitTerminal != nil) else { return false }
+        } else if let store = server(of: id)?.remote.store, store.session(withID: id) != nil {
+            let indicator = AgentIndicator(status: update.status, blink: update.blink ?? false, autoReset: update.autoReset ?? false,
+                                           color: update.color, shape: update.shape, statusPane: update.pane)
+            guard store.applyControlStatus(indicator, forSession: id, ifIdle: update.ifIdle) != .skipped else { return false }
+        } else {
+            return false
+        }
+        // Windows has none of a Mac's named sounds and no blocked sound setting, so a named sound plays the alert
+        if let sound = update.sound, !sound.isEmpty { MessageBeep(UINT(MB_OK)) }
+        rebuild()
+        return true
+    }
+
+    func setContext(_ id: Foundation.UUID, _ context: String?) {
+        if let index = locals.firstIndex(where: { $0.id == id }) {
+            locals[index].context = context
+        } else {
+            _ = server(of: id)?.remote.store.setContext(context, forSession: id)
+        }
+        rebuild()
+    }
+
+    func setInfo(_ id: Foundation.UUID, _ info: SessionInfo?) {
+        if let index = locals.firstIndex(where: { $0.id == id }) {
+            locals[index].info = info
+        } else {
+            _ = server(of: id)?.remote.store.setInfo(info, forSession: id)
+        }
+        rebuild()
+        let revision = (infoRevisions[id] ?? 0) + 1
+        infoRevisions[id] = revision
+        if let seconds = info?.hideAfter, seconds > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                MainActor.assumeIsolated { self?.expireInfo(id, revision) }
+            }
+        }
+    }
+
+    fileprivate func statusVisited(_ id: Foundation.UUID) {
+        if let index = locals.firstIndex(where: { $0.id == id }) {
+            guard locals[index].activity.indicator.autoReset else { return }
+            locals[index].activity.visited()
+        } else if let store = server(of: id)?.remote.store, store.session(withID: id)?.agentIndicator.autoReset == true {
+            store.clearStatus(id, reason: .select)
+        } else {
+            return
+        }
+        rebuild()
+    }
+
+    /// expireInfo takes down a `--hide-after` info line, unless a later write replaced it.
+    private func expireInfo(_ id: Foundation.UUID, _ revision: Int) {
+        guard infoRevisions[id] == revision else { return }
+        if let index = locals.firstIndex(where: { $0.id == id }) {
+            locals[index].info = nil
+        } else {
+            _ = server(of: id)?.remote.store.setInfo(nil, forSession: id)
+        }
+        rebuild()
+    }
+
+    func markSeen(_ id: Foundation.UUID) {
+        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].attention || locals[index].unseen > 0 {
+            locals[index].attention = false
+            locals[index].unseen = 0
+            rebuild()
+        } else if serverUnseen.removeValue(forKey: id) != nil {
+            rebuild()
         }
     }
 
