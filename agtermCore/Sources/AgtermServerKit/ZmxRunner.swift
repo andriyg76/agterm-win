@@ -46,7 +46,8 @@ public enum ZmxRunnerError: Error, Equatable, CustomStringConvertible {
 
 /// ServerPlacement is where a new daemon lives: in a transient systemd scope of its own, outside the server
 /// unit's cgroup, so stopping, restarting or crashing the server signals no pane; or, with no user manager to
-/// ask, wherever zmx puts it.
+/// ask, wherever zmx puts it. It is detected for each daemon: WSL can mount a tmpfs of its own over
+/// `/run/user/<uid>` after the server started, hiding the manager's sockets from then on.
 public enum ServerPlacement: Equatable, Sendable {
     case direct
     case systemdScope(systemdRun: String)
@@ -81,20 +82,19 @@ public struct ProcessZmxRunner: ZmxRunner {
 
     let zmxPath: String
     let socketDirectory: String
-    let placement: ServerPlacement
     let baseEnvironment: [String: String]
 
-    public init(zmxPath: String, socketDirectory: String, placement: ServerPlacement, baseEnvironment: [String: String]) {
+    public init(zmxPath: String, socketDirectory: String, baseEnvironment: [String: String]) {
         self.zmxPath = zmxPath
         self.socketDirectory = socketDirectory
-        self.placement = placement
         self.baseEnvironment = baseEnvironment
     }
 
     public func create(_ launch: PaneLaunch) throws {
         try FileManager.default.createDirectory(atPath: socketDirectory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
-        let argv = placement.prefix(for: launch.name) + [zmxPath, "attach", "--detached", launch.name] + launch.argv
+        let argv = ServerPlacement.detect(environment: baseEnvironment).prefix(for: launch.name)
+            + [zmxPath, "attach", "--detached", launch.name] + launch.argv
         let output = try ServerProcess.run(argv, environment: launch.environment, directory: launch.directory,
                                            timeout: Self.timeout)
         guard output.status == 0 else {

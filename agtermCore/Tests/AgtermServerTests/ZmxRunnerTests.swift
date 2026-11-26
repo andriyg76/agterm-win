@@ -30,14 +30,32 @@ struct ZmxRunnerTests {
         #expect(placement.prefix(for: "agterm-abc")[5] != prefix[5])
     }
 
+    @Test func aUserManagerHiddenAfterTheServerStartedPlacesLaterDaemonsDirectly() throws {
+        let scratch = try ServerScratch()
+        defer { scratch.remove() }
+        let log = scratch.root + "/calls.log"
+        try FileManager.default.createDirectory(atPath: scratch.runtime + "/systemd", withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: scratch.runtime + "/systemd/private", contents: Data())
+        try writeExecutable(scratch.bin + "/systemd-run", "#!/bin/sh\necho scope >> \(log)\n")
+        let fake = scratch.bin + "/fake-zmx"
+        try writeExecutable(fake, "#!/bin/sh\necho \"zmx $3\" >> \(log)\n")
+        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime + "/zmx",
+                                      baseEnvironment: ["XDG_RUNTIME_DIR": scratch.runtime, "PATH": scratch.bin])
+
+        try runner.create(PaneLaunch(name: "agterm-a", argv: [], environment: [:], directory: scratch.root))
+        try FileManager.default.removeItem(atPath: scratch.runtime + "/systemd")
+        try runner.create(PaneLaunch(name: "agterm-b", argv: [], environment: [:], directory: scratch.root))
+
+        #expect(try String(contentsOfFile: log, encoding: .utf8) == "scope\nzmx agterm-b\n")
+    }
+
     @Test func aRunnerCreatesThroughAttachDetachedInTheLaunchDirectory() throws {
         let scratch = try ServerScratch()
         defer { scratch.remove() }
         let log = scratch.root + "/zmx.log"
         let fake = scratch.bin + "/fake-zmx"
         try writeExecutable(fake, "#!/bin/sh\necho \"$PWD|$ZMX_DIR|$*|$MARK\" >> \(log)\n")
-        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime + "/zmx", placement: .direct,
-                                      baseEnvironment: [:])
+        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime + "/zmx", baseEnvironment: [:])
 
         try runner.create(PaneLaunch(name: "agterm-p", argv: ["/bin/zsh", "-lic", "true"],
                                      environment: ["ZMX_DIR": scratch.runtime + "/zmx", "MARK": "m"], directory: scratch.root))
@@ -54,7 +72,7 @@ struct ZmxRunnerTests {
         defer { scratch.remove() }
         let fake = scratch.bin + "/fake-zmx"
         try writeExecutable(fake, "#!/bin/sh\necho 'error: session \"x\" exists' >&2\nexit 1\n")
-        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime, placement: .direct, baseEnvironment: [:])
+        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime, baseEnvironment: [:])
 
         #expect(throws: ZmxRunnerError.failed("error: session \"x\" exists")) {
             try runner.create(PaneLaunch(name: "x", argv: [], environment: [:], directory: scratch.root))
@@ -67,7 +85,7 @@ struct ZmxRunnerTests {
         defer { scratch.remove() }
         let fake = scratch.bin + "/fake-zmx"
         try writeExecutable(fake, "#!/bin/sh\n\(script)\n")
-        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime, placement: .direct, baseEnvironment: [:])
+        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime, baseEnvironment: [:])
 
         #expect(throws: (any Error).self) { try runner.list() }
     }
@@ -80,7 +98,7 @@ struct ZmxRunnerTests {
         FileManager.default.createFile(atPath: hold, contents: Data())
         let fake = scratch.bin + "/fake-zmx"
         try writeExecutable(fake, "#!/bin/sh\n(while [ -e \(hold) ]; do sleep 0.05; done; printf 'name=agterm-a\\tclients=0\\n') &\n")
-        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime, placement: .direct, baseEnvironment: [:])
+        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime, baseEnvironment: [:])
 
         #expect(throws: (any Error).self) { try runner.list() }
     }
@@ -92,7 +110,7 @@ struct ZmxRunnerTests {
         FileManager.default.createFile(atPath: hold, contents: Data())
         let fake = scratch.bin + "/fake-zmx"
         try writeExecutable(fake, "#!/bin/sh\nprintf '1 80 24 0 0 0\\npartial\\n'\n(while [ -e \(hold) ]; do sleep 0.05; done; echo rest) &\n")
-        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime, placement: .direct, baseEnvironment: [:])
+        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime, baseEnvironment: [:])
 
         #expect(runner.screen("agterm-a", all: false) == nil)
     }
@@ -102,7 +120,7 @@ struct ZmxRunnerTests {
         defer { scratch.remove() }
         let fake = scratch.bin + "/fake-zmx"
         try writeExecutable(fake, "#!/bin/sh\necho 'no sessions found' >&2\n")
-        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime, placement: .direct, baseEnvironment: [:])
+        let runner = ProcessZmxRunner(zmxPath: fake, socketDirectory: scratch.runtime, baseEnvironment: [:])
 
         #expect(try runner.list().isEmpty)
     }

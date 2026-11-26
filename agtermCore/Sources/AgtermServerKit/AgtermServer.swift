@@ -57,7 +57,6 @@ public final class AgtermServer {
         }
         let catalog = try CatalogRoot.load(directory: directory, name: configuration.catalogName)
         let runner = runner ?? ProcessZmxRunner(zmxPath: configuration.zmxPath, socketDirectory: configuration.zmxSocketDirectory,
-                                                placement: ServerPlacement.detect(environment: environment),
                                                 baseEnvironment: environment)
         let panes = ServerPanes(configuration: configuration, runner: runner, shellPath: configuration.loginShell,
                                 catalogID: catalog.id, programVersion: identity.version, environment: environment)

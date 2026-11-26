@@ -259,19 +259,18 @@ final class NativeShell {
         restorePlacement()
         layout()
         restoreLocals()
-        discoverProfiles(then: requested)
-        catalogChanged()
         let starting = (requestedServer.map { [$0] } ?? []) + ServerLaunch.atLaunch(settings.serverLaunch).filter { $0 != requestedServer }
+        // after the window is up, so the question a first start asks has it to sit on, and after remote.properties is
+        // written on a first launch, since it defines the names they start
+        discoverProfiles(then: requested) { [self] in
+            for name in starting {
+                startServer(name, installing: installServer && name == requestedServer)
+            }
+        }
+        catalogChanged()
         if starting.isEmpty {
             remoteTerminal.show(notice: ServerLaunch.notStartedNotice)
             log("native shell: no agterm-server starts at launch")
-        } else {
-            // once the window is up, so the question a first start asks has it to sit on
-            DispatchQueue.main.async { [self] in
-                for name in starting {
-                    startServer(name, installing: installServer && name == requestedServer)
-                }
-            }
         }
     }
 
@@ -666,7 +665,7 @@ final class NativeShell {
 
     /// discoverProfiles adds the WSL distributions once `wsl.exe` lists them, off the UI thread: the first call can
     /// wait for the WSL service.
-    private func discoverProfiles(then requested: [String]) {
+    private func discoverProfiles(then requested: [String], startServers: @escaping @MainActor () -> Void) {
         let powerShell7 = Self.powerShell7()
         DispatchQueue.global().async {
             // without WSL, or with no distribution, wsl.exe prints why on stdout and fails; that text names none
@@ -682,6 +681,7 @@ final class NativeShell {
                 MainActor.assumeIsolated {
                     shell.profiles = LaunchProfiles.available(wslDistributions: distributions, powerShell7: powerShell7)
                     shell.seedRemoteCommands(LaunchProfiles.serverDistributions(distributions))
+                    startServers()
                     log("native shell: \(shell.profiles.count) launch profile(s): \(shell.profiles.map(\.name).joined(separator: ", "))")
                     for name in requested {
                         if let profile = LaunchProfiles.named(name, in: shell.profiles) {
