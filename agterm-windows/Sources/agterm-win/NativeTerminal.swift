@@ -603,13 +603,14 @@ final class NativeTerminal {
     }
 
     /// screen is every line of the scrollback and screen, oldest first, and how many of the last ones are the screen.
+    /// A never-written cell's rune is 0; it reads as a space, so blank rows and line ends trim as they do on a Mac.
     var screen: (lines: [String], rows: Int)? {
         guard let terminal else { return nil }
         let lines = (0..<nt_line_count(terminal)).map { line in
             let count = nt_line_runes(terminal, line, nil, 0)
             var runes = [UInt32](repeating: 0, count: Int(count))
             nt_line_runes(terminal, line, &runes, count)
-            return String(String.UnicodeScalarView(runes.compactMap(Unicode.Scalar.init)))
+            return String(String.UnicodeScalarView(runes.compactMap { Unicode.Scalar($0 == 0 ? 0x20 : $0) }))
         }
         return (lines, Int(grid.rows))
     }
