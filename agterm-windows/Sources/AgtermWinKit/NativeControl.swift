@@ -96,6 +96,8 @@ public protocol NativeControlHost: AnyObject {
     var recentSessions: [UUID] { get }
     /// sidebarWidthPoints is the stored divider position echoed by `sidebar.width`.
     var sidebarWidthPoints: Double { get }
+    var sidebarVisible: Bool { get }
+    func setSidebarVisible(_ visible: Bool)
     func setSidebarWidth(points: Double)
     func openDashboard(_ members: [DashboardMember], fontMode: DashboardFontMode)
     func closeDashboard()
@@ -303,6 +305,12 @@ public enum NativeControl {
             return quick(request, host: host)
         case .dashboard:
             return dashboard(request, host: host)
+        case .sidebar:
+            guard let mode = ControlToggleMode.parse(request.args?.mode, on: "show", off: "hide") else {
+                return failure("invalid sidebar mode: \(request.args?.mode ?? "toggle")")
+            }
+            host.setSidebarVisible(mode.desiredValue(current: host.sidebarVisible))
+            return ControlResponse(ok: true)
         case .sidebarWidth:
             guard let points = request.args?.sidebarWidth, points.isFinite else {
                 return failure("sidebar.width requires a width in points")
@@ -450,8 +458,8 @@ public enum NativeControl {
                                  sessions: workspace.sessions.map { node in locals[node.id].map { sessionNode($0, shape: node, host: host) } ?? node })
         }
         let dashboard = host.dashboard
-        return ControlTree(workspaces: workspaces, sidebarMode: shape.sidebarMode, flaggedOrder: shape.flaggedOrder,
-                           sidebarWidth: host.sidebarWidthPoints, workspaceFilter: shape.workspaceFilter, quickVisible: host.quickShown,
+        return ControlTree(workspaces: workspaces, sidebarVisible: host.sidebarVisible, sidebarMode: shape.sidebarMode,
+                           flaggedOrder: shape.flaggedOrder, sidebarWidth: host.sidebarWidthPoints, workspaceFilter: shape.workspaceFilter, quickVisible: host.quickShown,
                            dashboardMembers: dashboard?.members.map(\.controlRef), dashboardHighlighted: dashboard?.highlighted?.controlRef,
                            dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
     }

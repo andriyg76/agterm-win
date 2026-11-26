@@ -35,6 +35,22 @@ COLORREF fill(const nt_title_button &button) {
     return nt_chrome_title_bg();
 }
 
+LRESULT CALLBACK sidebarButtonProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+                                   UINT_PTR subclass, DWORD_PTR data) {
+    if (message == WM_MOUSEMOVE && !data) {
+        SetWindowSubclass(window, sidebarButtonProc, subclass, 1);
+        TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
+        TrackMouseEvent(&tracking);
+        InvalidateRect(window, nullptr, FALSE);
+    } else if (message == WM_MOUSELEAVE || message == WM_ENABLE) {
+        SetWindowSubclass(window, sidebarButtonProc, subclass, 0);
+        InvalidateRect(window, nullptr, FALSE);
+    } else if (message == WM_NCDESTROY) {
+        RemoveWindowSubclass(window, sidebarButtonProc, subclass);
+    }
+    return DefSubclassProc(window, message, wParam, lParam);
+}
+
 }  // namespace
 
 extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, int32_t menu_bottom, int32_t icon_width, int32_t icon_lit,
@@ -99,7 +115,7 @@ extern "C" void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, i
         for (int32_t i = 0; i < tab_count; ++i) {
             const nt_menu_tab &tab = tabs[i];
             if (tab.right <= tab.left) continue;
-            RECT rect{tab.left, height, tab.right, menu_bottom};
+            RECT rect{tab.left, 0, tab.right, height};
             if (tab.lit) {
                 HBRUSH brush = CreateSolidBrush(nt_chrome_title_hover(0));
                 FillRect(memory, &rect, brush);
@@ -138,11 +154,18 @@ extern "C" void *nt_tooltip_create(void *parent) {
     return tip;
 }
 
+extern "C" void nt_sidebar_button_track(void *window) {
+    SetWindowSubclass(static_cast<HWND>(window), sidebarButtonProc, 1, 0);
+}
+
 extern "C" void nt_sidebar_button_paint(intptr_t notification, uint32_t dpi, uint16_t glyph, int32_t checked) {
     const auto &item = *reinterpret_cast<const DRAWITEMSTRUCT *>(notification);
     const bool disabled = (item.itemState & ODS_DISABLED) != 0;
     const bool pressed = (item.itemState & ODS_SELECTED) != 0;
-    const auto color = checked ? nt_chrome_sb_selected() : pressed ? nt_chrome_sb_highlight() : nt_chrome_sb_bg();
+    DWORD_PTR hovered = 0;
+    GetWindowSubclass(item.hwndItem, sidebarButtonProc, 1, &hovered);
+    const auto color = !disabled && (pressed || hovered) ? nt_chrome_sb_highlight()
+                                                       : checked ? nt_chrome_sb_selected() : nt_chrome_sb_bg();
     HBRUSH brush = CreateSolidBrush(color);
     FillRect(item.hDC, &item.rcItem, brush);
     DeleteObject(brush);

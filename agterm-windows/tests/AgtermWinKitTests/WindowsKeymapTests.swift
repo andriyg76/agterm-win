@@ -69,12 +69,18 @@ struct WindowsKeymapTests {
         #expect(keymap.diagnostics.map(\.message).contains("ctrl+shift+c for 'new_session' is Copy's on Windows"))
     }
 
+    @Test func sidebarToggleCanBeBoundThroughTheKeymap() {
+        var keymap = WindowsKeymap(text: "map ctrl+alt+d toggle_sidebar")
+        #expect(keymap.diagnostics.allSatisfy { !$0.message.contains("toggle_sidebar") })
+        #expect(press(&keymap, "d", control: true, alt: true) == .command(.toggleSidebar))
+    }
+
     @Test func whatWindowsLacksIsReported() {
-        let keymap = WindowsKeymap(text: "map ctrl+alt+d toggle_sidebar\ncommand \"git\" ctrl+alt+g lazygit")
+        let keymap = WindowsKeymap(text: "map ctrl+alt+d toggle_fullscreen\ncommand \"git\" ctrl+alt+g lazygit")
         let messages = keymap.diagnostics.map(\.message)
-        #expect(messages.contains("'toggle_sidebar' is not available on Windows"))
+        #expect(messages.contains("'toggle_fullscreen' is not available on Windows"))
         #expect(messages.contains("custom commands are not supported on Windows yet; 1 skipped"))
-        #expect(keymap.control.actions.allSatisfy { $0.action != "toggle_sidebar" } && keymap.control.commands.isEmpty)
+        #expect(keymap.control.actions.allSatisfy { $0.action != "toggle_fullscreen" } && keymap.control.commands.isEmpty)
     }
 
     @Test func aGlobalHotkeyBecomesRegisterHotKeysChord() {

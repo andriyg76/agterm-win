@@ -1236,10 +1236,13 @@ final class NativeShell {
     func windowCommand(_ command: NativeMenu.Command) {
         log("native shell: \(command)")
         if command == .attentionPalette, pickPalette != nil { return }
-        if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .selectTheme, .about, .quit, .editKeymap, .reloadKeymap, .commandPalette].contains(command) {
+        if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .selectTheme, .about, .quit, .editKeymap, .reloadKeymap, .commandPalette, .toggleSidebar].contains(command) {
             closeDashboard()
         }
         switch command {
+        case .toggleSidebar:
+            setSidebarVisible(!settings.sidebarVisible)
+            focus()
         case .newSession: launchInSidebar(activeSidebarDestination)
         case .newServerSession: newServerSession(on: currentServer)
         case .renameSession: startRename(selected)
@@ -1265,7 +1268,7 @@ final class NativeShell {
         case .settings: showSettings()
         case .selectTheme: showSettings(tab: .appearance)
         case .about:
-            let description = "agterm for Windows\nVersion \(version)"
+            let description = appBuildInfo(serverVersion: version).aboutText
             MessageBoxW(window, Array(description.utf16) + [0], Array("About agterm".utf16) + [0], UINT(MB_OK | MB_ICONINFORMATION))
         case .editKeymap: Keys.edit(owner: window)
         case .reloadKeymap: Keys.reload(owner: window)
@@ -1987,6 +1990,9 @@ final class NativeShell {
         guard window != nil else { return }
         let client = clientRect
         let width = sidebarWidth
+        let sidebarVisibility = settings.sidebarVisible ? SW_SHOW : SW_HIDE
+        ShowWindow(tree?.assumingMemoryBound(to: HWND__.self), sidebarVisibility)
+        for button in footerButtons.values { ShowWindow(button, sidebarVisibility) }
         noticeWindow?.state.update(noticeMessages)
         let content = contentSpan
         noticeWindow?.place(y: noticeWindow?.state.position == .bottom ? content.bottom : titleBar.contentTop, width: client.right)
@@ -2290,6 +2296,7 @@ final class NativeShell {
                                                DWORD(WS_CHILD) | DWORD(WS_VISIBLE) | DWORD(BS_OWNERDRAW),
                                                0, 0, 0, 0, window, HMENU(bitPattern: command.rawValue), GetModuleHandleW(nil), nil) else { continue }
             footerButtons[command] = button
+            nt_sidebar_button_track(UnsafeMutableRawPointer(button))
         }
     }
 
@@ -2931,6 +2938,7 @@ private extension TitleBar.Button {
 
     func glyph(maximized: Bool) -> UInt16 {
         switch self {
+        case .sidebar: 0xE700
         case .scratch: 0xE737
         case .overlays: 0xE8A7
         case .quick: 0xE756

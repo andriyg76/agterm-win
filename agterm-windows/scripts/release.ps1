@@ -86,7 +86,7 @@ try {
     Remove-Item Env:AGTERM_WEBVIEW2_ARCH -ErrorAction SilentlyContinue
 }
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
-& (Join-Path $PSScriptRoot "stage.ps1") -Configuration release -Output $stage
+& (Join-Path $PSScriptRoot "stage.ps1") -Configuration release -Output $stage -Version $Version
 $zmxRev = Get-Content (Join-Path $stage "zmx\current") -TotalCount 1 -ErrorAction SilentlyContinue
 if (-not $zmxRev) { throw "the stage has no zmx" }
 

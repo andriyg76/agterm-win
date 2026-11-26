@@ -1,7 +1,7 @@
-/// Caption controls and the application menu strip in client pixels.
+/// Application menu, sidebar toggle and caption controls sharing one title row in client pixels.
 public struct TitleBar: Equatable, Sendable {
     public enum Button: Int, CaseIterable, Sendable {
-        case minimize, maximize, close, scratch, split, overlays, dashboard, quick
+        case minimize, maximize, close, scratch, split, overlays, dashboard, quick, sidebar
 
         /// trailing are the action buttons before the caption buttons, left to right.
         public static let trailing: [Button] = [.scratch, .split, .overlays, .dashboard, .quick]
@@ -13,6 +13,7 @@ public struct TitleBar: Equatable, Sendable {
         /// command is what an action button runs.
         public var command: NativeMenu.Command? {
             switch self {
+            case .sidebar: .toggleSidebar
             case .scratch: .toggleScratch
             case .overlays: .toggleOverlay
             case .quick: .quickTerminal
@@ -69,7 +70,7 @@ public struct TitleBar: Equatable, Sendable {
         self.sidebarWidth = sidebarWidth
         self.dpi = dpi
         height = scaled(40)
-        contentTop = height + scaled(26)
+        contentTop = height
         actionWidth = scaled(40)
         captionWidth = scaled(46)
     }
@@ -84,35 +85,40 @@ public struct TitleBar: Equatable, Sendable {
             return Span(left: right - actionWidth, right: right)
         }
         switch button {
+        case .sidebar: return Span(left: appIcon.right, right: appIcon.right + actionWidth)
         case .minimize: return Span(left: width - 3 * captionWidth, right: width - 2 * captionWidth)
         case .maximize: return Span(left: width - 2 * captionWidth, right: width - captionWidth)
         default: return Span(left: width - captionWidth, right: width)
         }
     }
 
-    /// The session name starts at the terminal's leading edge, clear of the application icon.
+    /// Keep the session name clear of the menu and aligned with the terminal when space permits.
     public var title: Span {
         let gap = actionWidth / 4
-        return Span(left: max(sidebarWidth, appIcon.right) + gap, right: span(of: .scratch).left - gap)
+        let menuEnd = menuSpans.last?.span.right ?? span(of: .sidebar).right
+        return Span(left: max(sidebarWidth, menuEnd) + gap, right: span(of: .scratch).left - gap)
     }
 
     public var menuSpans: [(index: Int, span: Span)] {
-        MenuBarLayout.menuSpans(origin: actionWidth / 4, limit: width, dpi: dpi)
+        MenuBarLayout.menuSpans(origin: span(of: .sidebar).right + actionWidth / 4,
+                                limit: span(of: .scratch).left - actionWidth / 4, dpi: dpi)
     }
 
     public func menuTab(x: Int32, y: Int32) -> Int? {
-        guard height <= y, y < contentTop else { return nil }
+        guard y >= 0, y < height else { return nil }
         return menuSpans.first { x >= $0.span.left && x < $0.span.right }?.index
     }
 
     public func hit(x: Int32, y: Int32, topBorder: Int32) -> Hit {
         guard y >= 0, x >= 0, x < width else { return .outside }
-        if let index = menuTab(x: x, y: y) { return .menuTab(index) }
         guard y < height else { return .outside }
         if y < topBorder { return .top }
         let caption: [Button] = [.close, .maximize, .minimize]
         if let button = caption.first(where: { x >= span(of: $0).left && x < span(of: $0).right }) { return .button(button) }
         if x < appIcon.right { return .appIcon }
+        let sidebar = span(of: .sidebar)
+        if x >= sidebar.left, x < sidebar.right { return .button(.sidebar) }
+        if let index = menuTab(x: x, y: y) { return .menuTab(index) }
         if let button = Button.trailing.first(where: { x >= span(of: $0).left && x < span(of: $0).right }) { return .button(button) }
         return .caption
     }

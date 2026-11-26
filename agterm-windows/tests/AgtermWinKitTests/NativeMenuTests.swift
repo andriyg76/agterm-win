@@ -81,7 +81,7 @@ struct NativeMenuTests {
                                                                                       .toggleHorizontalSplit, .closeSplit, .swapPanes, .toggleScratch,
                                                                                       .newWorkspace, .renameWorkspace, .deleteWorkspace, .toggleFlag, .toggleFlaggedView,
                                                                                       .focusWorkspace, .toggleWorkspaceFilter, .previousWorkspace, .nextWorkspace,
-                                                                                      .newCompanion, .convertCompanion, .selectTheme, .about])
+                                                                                      .newCompanion, .convertCompanion, .selectTheme, .about, .toggleSidebar])
     }
 
     @Test func viewOwnsDisplayActionsAndNavigateOwnsSessionAndPaneMovement() {
@@ -90,6 +90,8 @@ struct NativeMenuTests {
         #expect(view.first { $0.pick == .command(.toggleSplit) }?.shortcut == "Ctrl+Shift+D")
         #expect(view.first { $0.pick == .command(.toggleScratch) }?.checked == true)
         #expect(view.contains { $0.pick == .command(.find) })
+        #expect(view.first { $0.pick == .command(.toggleSidebar) }?.checked == true)
+        #expect(NativeMenu.view(.init(sidebarVisible: false)).first { $0.pick == .command(.toggleSidebar) }?.checked == false)
         #expect(view.contains { $0.pick == .command(.selectTheme) })
         #expect(!view.contains { $0.pick == .command(.dashboard) || $0.pick == .command(.focusRightPane) })
         let nav = NativeMenu.navigate(state, sessionCount: 2)
