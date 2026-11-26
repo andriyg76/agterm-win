@@ -22,6 +22,14 @@ the window, to watch a case run. (`run.ps1` keeps the filter in `$casePatterns`;
 while `-Case` is set — PowerShell treats `$Case` and `$case` as the same variable.)
 
 CI runs the same cases on the runner desktop (`.github/workflows/windows.yml`).
+
+`-Case sidebar-resize` reproduces #62 with real mouse input through Windows hit testing. It grabs the divider
+from the sidebar and terminal sides, enlarges and shrinks it, checks the minimum clamp and the actual child-window
+positions, then verifies the saved width after an app restart. The case runs in the normal x64 and arm64 CI matrix,
+without WSL or an architecture skip. Screenshots are saved before the drag, after each release, and after restart.
+The expected drag behavior follows upstream agterm's `sidebarDivider` at `3dc9f06a7ffd6cfbdbfec3ecea3cecfede39186e`:
+a wider grab handle, absolute pointer position, shared width limits, and persistence on release.
+
 Or in Windows Sandbox, which keeps the host desktop free and starts from a clean machine with no network or WSL:
 
 ```powershell

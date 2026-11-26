@@ -111,6 +111,21 @@ public static class AgtermInput {
         keybd_event(key, 0, 2, UIntPtr.Zero);
     }
 
+    // Real mouse input lets Windows select the child window under the pointer, unlike SendMessage to a parent.
+    public static void Drag(int fromX, int fromY, int toX, int toY) {
+        SetCursorPos(fromX, fromY);
+        System.Threading.Thread.Sleep(80);
+        mouse_event(0x02, 0, 0, 0, UIntPtr.Zero);
+        try {
+            for (int step = 1; step <= 16; step++) {
+                SetCursorPos(fromX + (toX - fromX) * step / 16, fromY + (toY - fromY) * step / 16);
+                System.Threading.Thread.Sleep(20);
+            }
+        } finally {
+            mouse_event(0x04, 0, 0, 0, UIntPtr.Zero);
+        }
+    }
+
     public static void Click(int x, int y) {
         SetCursorPos(x, y);
         mouse_event(0x02, 0, 0, 0, UIntPtr.Zero);
