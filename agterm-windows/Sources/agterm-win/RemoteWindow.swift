@@ -49,13 +49,16 @@ final class RemoteWindow: RemoteCatalogEffects {
                          paneFinalizer: nil)
         mirror = RemoteCatalogMirror(host: host.name, store: store, effects: self,
                                      viewState: RemoteWindowViewState())
-        mirror.onCatalogMoved = { [weak self] whole in
-            log("catalog moved (snapshot: \(whole)), \(self?.store.workspaces.count ?? 0) workspace(s)")
-            self?.changed()
-        }
         client = RemoteCatalogClient(mirror: mirror, transport: transport, runner: transport.runner)
         actions = RemoteCatalogActions(mirror: mirror, runner: transport.runner)
         store.remoteActions = actions
+        // RemoteCatalogActions installs its own hook; chain it, or deltas never redraw the sidebar
+        let actionsMoved = mirror.onCatalogMoved
+        mirror.onCatalogMoved = { [weak self] whole in
+            actionsMoved?(whole)
+            log("catalog moved (snapshot: \(whole)), \(self?.store.workspaces.count ?? 0) workspace(s)")
+            self?.changed()
+        }
     }
 
     var connected: Bool { mirror.state == .connected }

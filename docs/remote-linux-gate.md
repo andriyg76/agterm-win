@@ -118,11 +118,10 @@ multiplexing, so the pool now removes it before starting one.
 # WSL catalog overlay gate (agterm-win)
 
 CI integration case `overlay-server-disconnected` always runs the disconnected smoke (`agterm-test-absent` started,
-`overlay-server-program` and `overlay-server-html` are skipped without `AGTERM_WIN_GATE_WSL`). Former case
-`overlay-server-program` always ran a disconnected smoke (`agterm-test-absent` started,
-`session.overlay.open` on an unknown id returns `no such session`, `tree` still answers). For the full ctl overlay gate
-on a catalog row, set `AGTERM_WIN_GATE_WSL` to a distribution that starts agterm-server and connects (the case seeds it
-in `remote.properties` as `wsl.exe -d <name> -e`), then run
+`session.overlay.open` on an unknown id returns `no such session`, `tree` still answers). Cases `overlay-server-program` and `overlay-server-html` are skipped
+without `AGTERM_WIN_GATE_WSL`. For the full ctl overlay gate on a catalog row, set `AGTERM_WIN_GATE_WSL` to a
+distribution that starts agterm-server and connects (the case seeds it in `remote.properties` as
+`wsl.exe -d <name> -e`), then run
 `agterm-windows/tests/integration/run.ps1` on a staged build:
 
 ```powershell

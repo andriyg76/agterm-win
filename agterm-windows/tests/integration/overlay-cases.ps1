@@ -154,8 +154,17 @@ $shellCases["overlay-local-html"] = {
     Save-Snapshot $Shell "overlay-html"
     $noRead = Invoke-Ctl $state @("session", "overlay", "text", "--target", $id)
     if ($noRead.error -ne "no overlay to read: the slot holds an html page") { $failures += "overlay text replied $($noRead | ConvertTo-Json -Compress)" }
-    Invoke-Ctl $state @("session", "overlay", "close", "--target", $id) | Out-Null
-    if (-not (Wait-Until { -not (Get-Node $state $id).overlay } 10)) { $failures += "overlay stayed on tree after close" }
+    $Shell.Process.Refresh()
+    $frame = [AgtermWin32]::VisibleChildren($Shell.Process.MainWindowHandle, "agterm-page-overlay") | Select-Object -First 1
+    if (-not $frame) { return $failures + @("no visible WebView2 overlay frame") }
+    $button = [AgtermWin32]::VisibleChildren($frame, "Button") | Where-Object {
+        [AgtermWin32]::TextOf($_) -eq [string][char]0x00D7
+    } | Select-Object -First 1
+    if (-not $button) { return $failures + @("no visible WebView2 dismiss button") }
+    [AgtermWin32]::PostMessageW($button, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    if (-not (Wait-Until { -not (Get-Node $state $id).htmlOverlays } 10)) { $failures += "dismiss button left the HTML overlay in tree" }
+    if ([AgtermWin32]::IsWindowVisible($frame)) { $failures += "dismiss button left the WebView2 frame visible" }
+    if (-not (Get-Node $state $id)) { $failures += "dismiss button closed the session under the overlay" }
     $failures
 }
 
