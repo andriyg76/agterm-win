@@ -26,6 +26,7 @@ public static class AgtermWin32 {
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window, ref Point point);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
@@ -326,18 +327,18 @@ $shellCases["title-bar"] = {
     $sample = Get-ScreenPoint $window 0 0
     $sampleX = $buttonRect.Left - $sample.X + 2
     $sampleY = $buttonRect.Top - $sample.Y + 2
-    [AgtermWin32]::SendMessageW($footer, 0x02A3, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    [AgtermWin32]::SetCursorPos(($sample.X + $dragX), ($sample.Y + $bar.Middle)) | Out-Null
     Start-Sleep -Milliseconds 100
     $normal = Get-Shot $window
     try { $normalColor = $normal.Bitmap.GetPixel($sampleX + $normal.X, $sampleY + $normal.Y).ToArgb() }
     finally { $normal.Bitmap.Dispose() }
-    [AgtermWin32]::SendMessageW($footer, 0x0200, [IntPtr]::Zero, [AgtermWin32]::At(2, 2)) | Out-Null
+    [AgtermWin32]::SetCursorPos(($buttonRect.Left + 2), ($buttonRect.Top + 2)) | Out-Null
     Start-Sleep -Milliseconds 100
     $hover = Get-Shot $window
     try { $hoverColor = $hover.Bitmap.GetPixel($sampleX + $hover.X, $sampleY + $hover.Y).ToArgb() }
     finally { $hover.Bitmap.Dispose() }
     if ($normalColor -eq $hoverColor) { $failures += "the footer button has no hover background" }
-    [AgtermWin32]::SendMessageW($footer, 0x02A3, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    [AgtermWin32]::SetCursorPos(($sample.X + $dragX), ($sample.Y + $bar.Middle)) | Out-Null
     Start-Sleep -Milliseconds 100
     $left = Get-Shot $window
     try {
