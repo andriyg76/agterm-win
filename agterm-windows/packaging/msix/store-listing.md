@@ -84,7 +84,9 @@ coding agents
 
 ## Restricted capabilities (Submission ▸ Properties)
 
-Partner Center asks why the package declares each restricted capability in `AppxManifest.xml`.
+Partner Center asks why the package declares each restricted capability in `AppxManifest.xml`. See
+[STORE-SUBMISSION.md](STORE-SUBMISSION.md) for submission checklist; production manifest declares **runFullTrust** only
+(Store policy 10.6.3, no `unvirtualizedResources`).
 
 ### runFullTrust
 
@@ -94,18 +96,8 @@ Prompt and WSL distributions under a Windows pseudoconsole (CreatePseudoConsole 
 input and output, and starts and stops them as the user opens and closes sessions. It runs wsl.exe to connect to
 its companion server inside WSL, and runs curl.exe only when the user asks it to install that server. It also
 ships agtermctl, a console command exposed as an execution alias. Scripts use it to control the terminal over a
-local socket in the user's AppData. All of this needs the full-trust desktop model: an AppContainer process cannot
-create pseudoconsoles or launch arbitrary user programs with the user's normal rights. agterm collects no data
-and makes no network connections of its own beyond that install, which the user starts.
-
-### unvirtualizedResources
-
-agterm turns off file-system and registry write virtualization (desktop6:FileSystemWriteVirtualization and
-RegistryWriteVirtualization disabled) because the programs it runs are the user's own tools, not part of the
-package. When a user runs git, npm, pip, ssh, an editor or a coding agent in agterm, those tools write their
-configuration, credentials and caches to the user's real AppData and HKCU, for example %APPDATA%\npm,
-.gitconfig-related settings or PowerShell profiles. With virtualization on, those writes would land in a private
-package copy. The same tools run from any other terminal would not see them, and uninstalling agterm would
-silently delete the user's work. Turning virtualization off makes a program behave exactly as it does in Windows
-Terminal or a console window. agterm's own settings are stored in %LOCALAPPDATA%\agterm-win. Nothing is written
-outside the user's profile, and no elevated access is requested.
+local socket in the app's MSIX data folder (the same redirected profile agterm uses for settings). All of this needs
+the full-trust desktop model: an AppContainer process cannot create pseudoconsoles or launch arbitrary user
+programs with the user's normal rights. User programs started inside a session (PowerShell, cmd, WSL shells) keep
+their normal profile and AppData; only agterm's own files use the packaged store. agterm collects no data and makes
+no network connections of its own beyond the optional agterm-server install the user starts.

@@ -38,6 +38,9 @@ function ShellCaseSkipReason([string]$Name) {
     if ($Name -eq "remote-exit-buffer" -and -not $env:AGTERM_WIN_GATE_WSL) {
         return "set AGTERM_WIN_GATE_WSL for the remote exit-buffer GUI gate"
     }
+    if ($Name -in @("overlay-server-program", "overlay-server-html", "presentation-surfaces") -and -not $env:AGTERM_WIN_GATE_WSL) {
+        return "CI runs overlay-server-disconnected; set AGTERM_WIN_GATE_WSL for full WSL catalog overlay/presentation gates"
+    }
     return $null
 }
 

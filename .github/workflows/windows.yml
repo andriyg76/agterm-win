@@ -4,7 +4,7 @@ on:
   push:
     branches: [windows-port, feature/agwinterm-chrome]
   pull_request:
-    branches: [windows-port, feature/presentation-ui, feature/agwinterm-chrome]
+    branches: [windows-port, feature/presentation-ui, feature/agwinterm-chrome, feature/msix-virtualized-test]
     paths: ["agterm-windows/**", "agtermCore/**", ".github/workflows/windows.yml"]
   workflow_dispatch:
 
@@ -49,7 +49,7 @@ jobs:
           # not .build: its debug link comes back from the cache unreadable, and stage.ps1 copies through it
           path: agterm-windows/vendor
           key: app-vendor-${{ matrix.arch }}-${{ env.SWIFT_BUILD }}-${{ hashFiles('agterm-windows/Package.swift', 'agtermCore/Package.swift', 'agtermCore/Package.resolved', 'agterm-windows/scripts/fetch-*.ps1') }}
-      - run: ./scripts/fetch-server.ps1; ./scripts/fetch-ghostty-vt.ps1 -Arch ${{ matrix.arch }}; ./scripts/fetch-webview2.ps1 -Arch ${{ matrix.arch }}
+      - run: ./scripts/fetch-server.ps1; ./scripts/fetch-ghostty-vt.ps1 -Arch ${{ matrix.arch }}; ./scripts/fetch-webview2.ps1 -Arch ${{ matrix.arch }}; ./scripts/fetch-zmx.ps1 -Arch ${{ matrix.arch }}
       - run: swift build --build-tests
         env:
           AGTERM_WEBVIEW2_ARCH: ${{ matrix.arch }}
@@ -59,8 +59,19 @@ jobs:
       - run: swift test --skip-build
         env:
           AGTERM_WEBVIEW2_ARCH: ${{ matrix.arch }}
+      - name: Release build for packages
+        run: |
+          swift build -c release
+          swift build -c release --product agtermctl
+        env:
+          AGTERM_WEBVIEW2_ARCH: ${{ matrix.arch }}
+      - name: Inno Setup
+        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Package unsigned installer and MSIX
+        run: |
+          $agterm = Get-Content AGTERM_VERSION -TotalCount 1
+          ./scripts/package-ci.ps1 -Version "$agterm.0" -Arch ${{ matrix.arch }} -Output "$env:RUNNER_TEMP\ci-packages"
       - run: ./scripts/stage.ps1 -Output "$env:RUNNER_TEMP\agterm-win"
-      - run: ./scripts/msix.ps1 -Version "$(Get-Content AGTERM_VERSION -TotalCount 1).0" -Arch ${{ matrix.arch }} -Stage "$env:RUNNER_TEMP\agterm-win" -Output "$env:RUNNER_TEMP\msix"
       - name: Silence the privacy settings screen
         # windows-11-arm raises "Choose privacy settings for your device" over the desktop, where screen snapshots
         # catch it. The runner is SYSTEM, so the policy goes to every loaded profile, not only its own HKCU
@@ -98,6 +109,24 @@ jobs:
             Remove-Job $sweeper -Force
           }
           exit $code
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-installer-${{ matrix.arch }}
+          path: ${{ runner.temp }}/ci-packages/agterm-win-*-${{ matrix.arch }}-setup.exe
+          if-no-files-found: error
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-msix-${{ matrix.arch }}
+          path: ${{ runner.temp }}/ci-packages/agterm-win-*-${{ matrix.arch }}.msix
+          if-no-files-found: error
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: msix-store-layout-${{ matrix.arch }}
+          path: ${{ runner.temp }}/ci-packages/msix
+          if-no-files-found: error
       - if: always()
         uses: actions/upload-artifact@v7
         with:

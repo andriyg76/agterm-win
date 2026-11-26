@@ -17,7 +17,8 @@ Run on the current desktop (windows open and close on their own; leave them be):
 powershell -ExecutionPolicy Bypass -File tests\integration\run.ps1 -App $env:TEMP\agterm-win-stage -Results $env:TEMP\agterm-results
 ```
 
-`-Case overlay*` runs only the cases whose names match, and `-StepSeconds 2` pauses after every step that changes
+Overlay cases live in `overlay-cases.ps1` (local program/html, WSL catalog program/html). Run them with
+`-Case overlay*` (legacy names `overlay` and `overlay-html` still match). `-StepSeconds 2` pauses after every step that changes
 the window, to watch a case run. (`run.ps1` keeps the filter in `$casePatterns`; do not name a loop variable `$case`
 while `-Case` is set — PowerShell treats `$Case` and `$case` as the same variable.)
 
@@ -58,8 +59,17 @@ passed and are recorded in `cases.json` under `skipped`.
 | Case | Where | Issue |
 |------|--------|--------|
 | `overlay-keys` | native **ARM64** (`windows-11-arm`) | After `SendChord` sends Ctrl+W to the overlay terminal, the session under the overlay is closed instead of dismissing the overlay only. The same case passes on x64. Suspect focus / duplicate Close Session delivery on the arm64 runner. Track in PR/overlay work; remove the skip when arm64 matches x64. |
-| `overlay-server-program` | — | CI runs the disconnected smoke (`$absent`, `no such session`, tree still answers). Set `AGTERM_WIN_GATE_WSL` to a live distribution with agterm-server for the full ctl overlay gate (see `docs/remote-linux-gate.md`). |
-| `presentation-surfaces` | — | Same disconnected smoke as `overlay-server-program`; live ask/pick/HUD checks are manual (`docs/remote-linux-gate.md`). |
+| `overlay-server-program`, `overlay-server-html`, `presentation-surfaces` | CI without `AGTERM_WIN_GATE_WSL` | **SKIP** (smoke runs in `overlay-server-disconnected`). Set `AGTERM_WIN_GATE_WSL` for full WSL catalog gates (`docs/remote-linux-gate.md`). |
+
+| Case | Scope | CI |
+|------|--------|-----|
+| `overlay-local-refusals` | local ctl errors | always |
+| `overlay-local-program` | local program overlay lifecycle | always (`overlay` alias) |
+| `overlay-local-html` | local WebView2 `--html` | always (`overlay-html` alias) |
+| `overlay-keys` | local keyboard / Close Session | x64 (arm64 skip) |
+| `overlay-server-disconnected` | WSL smoke, overlay on unknown id | always |
+| `overlay-server-program` | WSL catalog program overlay | skip unless `AGTERM_WIN_GATE_WSL` |
+| `overlay-server-html` | WSL catalog `--html` | skip unless `AGTERM_WIN_GATE_WSL` |
 
 Sandbox needs the `Containers-DisposableClientVM` feature, a restart, and one manual start from Start to finish
 installing its client. Each case leaves `screen.txt`, its state directory (`agterm-win.log`, `crash.log`) and

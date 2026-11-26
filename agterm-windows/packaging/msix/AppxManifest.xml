@@ -12,9 +12,8 @@
     <DisplayName>agterm</DisplayName>
     <PublisherDisplayName>{{PublisherDisplayName}}</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
-    <!-- a terminal's shells must write the real AppData and registry, as outside the package -->
-    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
-    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+    <!-- Store policy 10.6.3: default MSIX file and registry virtualization; no unvirtualizedResources. -->
+    <!-- agterm state and agtermctl use the package redirected profile; user shells keep their normal AppData. -->
   </Properties>
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.18362.0" MaxVersionTested="10.0.26100.0" />
@@ -40,6 +39,5 @@
   </Applications>
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
-    <rescap:Capability Name="unvirtualizedResources" />
   </Capabilities>
 </Package>
