@@ -1754,10 +1754,34 @@ final class NativeShell {
         return overlay.terminal
     }
 
-    func layout() {
-        guard let window else { return }
+    /// clientRect is the client the panes are laid out in. A minimized window's client is empty, and panes laid out in
+    /// it shrank every pty to one cell, so while iconic it is the client of the window as it will restore.
+    var clientRect: RECT {
         var client = RECT()
-        GetClientRect(window, &client)
+        guard IsIconic(window) else {
+            GetClientRect(window, &client)
+            return client
+        }
+        var placement = WINDOWPLACEMENT()
+        placement.length = UINT(MemoryLayout<WINDOWPLACEMENT>.size)
+        guard GetWindowPlacement(window, &placement) else { return client }
+        var frame = placement.rcNormalPosition
+        // the client keeps the side and bottom frame (clientArea); a maximized one fills the work area
+        var border = Self.frameThickness(window)
+        if placement.flags & UINT(WPF_RESTORETOMAXIMIZED) != 0 {
+            var monitor = MONITORINFO()
+            monitor.cbSize = DWORD(MemoryLayout<MONITORINFO>.size)
+            if GetMonitorInfoW(MonitorFromWindow(window, DWORD(MONITOR_DEFAULTTONEAREST)), &monitor) {
+                frame = monitor.rcWork
+                border = 0
+            }
+        }
+        return RECT(left: 0, top: 0, right: max(frame.right - frame.left - 2 * border, 1), bottom: max(frame.bottom - frame.top - border, 1))
+    }
+
+    func layout() {
+        guard window != nil else { return }
+        let client = clientRect
         let width = sidebarWidth
         noticeWindow?.state.update(noticeMessages)
         let content = contentSpan
@@ -1786,11 +1810,7 @@ final class NativeShell {
     private func makeNoticeBar() {
         let bar = NoticeBarWindow(parent: window, position: settings.noticeBarPosition, dpi: dpi, tooltip: tooltip)
         bar.colors = { [unowned self] in NoticeBar.colors(chromePalette, theme: NativeTerminal.theme, severity: $0) }
-        bar.area = { [unowned self] in
-            var client = RECT()
-            GetClientRect(window, &client)
-            return (titleBar.height, client.bottom)
-        }
+        bar.area = { [unowned self] in (titleBar.height, clientRect.bottom) }
         bar.onAction = { [unowned self] in noticeAction($0, $1) }
         bar.onPosition = { [unowned self] in setNoticePosition($0) }
         bar.onDismiss = { [unowned self] in _ = dismissNotice() }
@@ -2090,9 +2110,7 @@ final class NativeShell {
 
     /// paletteFrame centres the palette over the terminal, under the title bar.
     private var paletteFrame: (Int32, Int32, Int32) {
-        var client = RECT()
-        GetClientRect(window, &client)
-        let area = max(client.right - sidebarWidth, 1)
+        let area = max(clientRect.right - sidebarWidth, 1)
         let width = max(min(scaled(640), area - scaled(32)), min(area, scaled(240)))
         return (sidebarWidth + (area - width) / 2, contentSpan.top + scaled(8), width)
     }

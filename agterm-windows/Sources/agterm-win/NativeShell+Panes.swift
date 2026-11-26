@@ -18,10 +18,8 @@ extension NativeShell {
     /// sessionArea is the terminal area beside the sidebar and between the title bar and the notice bar, which a
     /// session's panes share.
     var sessionArea: Rect {
-        var client = RECT()
-        GetClientRect(window, &client)
         let content = contentSpan
-        return Rect(x: sidebarWidth, y: content.top, width: max(client.right - sidebarWidth, 1), height: content.bottom - content.top)
+        return Rect(x: sidebarWidth, y: content.top, width: max(clientRect.right - sidebarWidth, 1), height: content.bottom - content.top)
     }
 
     var dividerThickness: Int32 { scaled(4) }
