@@ -88,3 +88,29 @@ jobs:
           $notes = "agterm-win $version, locked to agterm ${agterm}: Windows 10 1809 or later, x64, installs per user without admin."
           $notes += if ($signed) { "`n`nFree code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)." } else { "`n`nUnsigned: SmartScreen warns on first run." }
           gh release create "v$version" --target $env:GITHUB_SHA $setup.FullName "$($setup.FullName).sha256" --title "agterm-win $version" --notes $notes
+
+  # Run by hand on release/v<version>: repacks the published release's Chocolatey package from this branch's
+  # definitions and resubmits it, as moderation asks when a submitted version needs corrective action.
+  rerelease-chocolatey:
+    if: startsWith(github.ref, 'refs/heads/release/v')
+    runs-on: windows-2022
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: agterm-windows
+    steps:
+      - uses: actions/checkout@v7
+      - name: Pack and push Chocolatey package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ github.ref_name }}'.Substring('release/v'.Length)
+          ./scripts/package-managers.ps1 -Version $version
+          $nupkg = "build/package-managers/$version/agterm-win.$version.nupkg"
+          choco push $nupkg --source https://push.chocolatey.org/ --api-key $env:CHOCOLATEY_API_KEY
+          if ($LASTEXITCODE) { throw 'Chocolatey Community Repository upload failed' }
+          gh release upload "v$version" $nupkg --clobber
+          if ($LASTEXITCODE) { throw 'attaching the nupkg to the release failed' }

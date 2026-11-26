@@ -7,11 +7,11 @@
     <authors>Umputun, andriyg76</authors>
     <owners>andriyg76</owners>
     <projectUrl>https://github.com/andriyg76/agterm-win</projectUrl>
-    <packageSourceUrl>https://github.com/andriyg76/agterm-win/tree/windows-port/agterm-windows/packaging/chocolatey</packageSourceUrl>
+    <packageSourceUrl>https://github.com/andriyg76/agterm-win/tree/v{{Version}}/agterm-windows/packaging/chocolatey</packageSourceUrl>
     <projectSourceUrl>https://github.com/andriyg76/agterm-win</projectSourceUrl>
     <bugTrackerUrl>https://github.com/andriyg76/agterm-win/issues</bugTrackerUrl>
-    <iconUrl>https://raw.githubusercontent.com/andriyg76/agterm-win/windows-port/agterm-windows/Resources/agterm.png</iconUrl>
-    <licenseUrl>https://github.com/andriyg76/agterm-win/blob/windows-port/LICENSE</licenseUrl>
+    <iconUrl>https://cdn.jsdelivr.net/gh/andriyg76/agterm-win@v{{Version}}/agterm-windows/Resources/agterm.png</iconUrl>
+    <licenseUrl>https://github.com/andriyg76/agterm-win/blob/v{{Version}}/LICENSE</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <releaseNotes>https://github.com/andriyg76/agterm-win/releases/tag/v{{Version}}</releaseNotes>
     <tags>agterm terminal terminal-emulator ghostty cli</tags>
