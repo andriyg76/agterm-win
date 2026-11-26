@@ -19,6 +19,7 @@ extension NativeShell {
         noticeWindow?.invalidate()
         refreshClientBrushes(colors)
         invalidateTitleBar()
+        invalidateSidebarFooter()
         if let window { InvalidateRect(window, nil, false) }
     }
 

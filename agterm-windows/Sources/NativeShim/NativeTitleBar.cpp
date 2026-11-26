@@ -138,6 +138,41 @@ extern "C" void *nt_tooltip_create(void *parent) {
     return tip;
 }
 
+extern "C" void nt_sidebar_button_paint(intptr_t notification, uint32_t dpi, uint16_t glyph, int32_t checked) {
+    const auto &item = *reinterpret_cast<const DRAWITEMSTRUCT *>(notification);
+    const bool disabled = (item.itemState & ODS_DISABLED) != 0;
+    const bool pressed = (item.itemState & ODS_SELECTED) != 0;
+    const auto color = checked ? nt_chrome_sb_selected() : pressed ? nt_chrome_sb_highlight() : nt_chrome_sb_bg();
+    HBRUSH brush = CreateSolidBrush(color);
+    FillRect(item.hDC, &item.rcItem, brush);
+    DeleteObject(brush);
+
+    loadFonts(dpi);
+    int saved = SaveDC(item.hDC);
+    SelectObject(item.hDC, fonts.icons);
+    SetBkMode(item.hDC, TRANSPARENT);
+    SetTextColor(item.hDC, disabled ? nt_chrome_sb_dim() : nt_chrome_sb_text());
+    RECT rect = item.rcItem;
+    const wchar_t character = static_cast<wchar_t>(glyph);
+    DrawTextW(item.hDC, &character, 1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    if (item.itemState & ODS_FOCUS) DrawFocusRect(item.hDC, &rect);
+    RestoreDC(item.hDC, saved);
+}
+
+extern "C" void nt_tooltip_for_control(void *tip, void *parent, void *control, const uint16_t *text) {
+    if (!tip || !control) return;
+    TTTOOLINFOW info{};
+    info.cbSize = TTTOOLINFOW_V2_SIZE;
+    info.hwnd = static_cast<HWND>(parent);
+    info.uId = reinterpret_cast<UINT_PTR>(control);
+    const auto window = static_cast<HWND>(tip);
+    const auto arg = reinterpret_cast<LPARAM>(&info);
+    const bool known = SendMessageW(window, TTM_GETTOOLINFOW, 0, arg) != 0;
+    info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    info.lpszText = const_cast<wchar_t *>(reinterpret_cast<const wchar_t *>(text));
+    SendMessageW(window, known ? TTM_UPDATETIPTEXTW : TTM_ADDTOOLW, 0, arg);
+}
+
 // The V2 size is what both comctl32 5 and 6 accept; the full struct's lpReserved makes version 5 refuse the tool.
 extern "C" void nt_tooltip_set(void *tip, void *parent, uintptr_t id, int32_t left, int32_t top, int32_t right, int32_t bottom,
                                const uint16_t *text) {

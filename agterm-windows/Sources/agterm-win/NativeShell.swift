@@ -2280,25 +2280,19 @@ final class NativeShell {
     private var menuShortcuts: NativeMenu.Shortcuts { Keys.keymap.shortcuts }
 
     private func makeSidebarFooter() {
-        for (command, label) in [(NativeMenu.Command.newWorkspace, "+ Workspace"), (.newSession, "+ Session"),
-                                 (.toggleWorkspaceFilter, "Filter"), (.toggleFlaggedView, "Flags")] {
-            let toggles = command == .toggleWorkspaceFilter || command == .toggleFlaggedView
-            let style = toggles ? DWORD(BS_PUSHLIKE) | DWORD(BS_CHECKBOX) : DWORD(BS_PUSHBUTTON)
-            guard let button = CreateWindowExW(0, Array("BUTTON".utf16) + [0], Array(label.utf16) + [0],
-                                               DWORD(WS_CHILD) | DWORD(WS_VISIBLE) | style,
+        for command: NativeMenu.Command in [.newWorkspace, .newSession, .toggleWorkspaceFilter, .toggleFlaggedView] {
+            guard let button = CreateWindowExW(0, Array("BUTTON".utf16) + [0], Array(command.title.utf16) + [0],
+                                               DWORD(WS_CHILD) | DWORD(WS_VISIBLE) | DWORD(BS_OWNERDRAW),
                                                0, 0, 0, 0, window, HMENU(bitPattern: command.rawValue), GetModuleHandleW(nil), nil) else { continue }
-            let font = GetStockObject(DEFAULT_GUI_FONT)
-            SendMessageW(button, UINT(WM_SETFONT), WPARAM(UInt(bitPattern: Int(bitPattern: font))), 1)
             footerButtons[command] = button
         }
     }
 
     private func layoutSidebarFooter(width: Int32, top: Int32, height: Int32) {
         let gap = scaled(3)
-        let side = min(scaled(44), max(0, (width - 5 * gap) / 4))
-        let launch = min(scaled(74), max(0, (width - 5 * gap - 2 * side) / 2))
-        for (command, x, size) in [(NativeMenu.Command.newWorkspace, gap, launch), (.newSession, 2 * gap + launch, launch),
-                                   (.toggleWorkspaceFilter, width - 2 * (side + gap), side), (.toggleFlaggedView, width - side - gap, side)] {
+        let size = min(scaled(24), max(0, (width - 5 * gap) / 4))
+        for (command, x) in [(NativeMenu.Command.newWorkspace, gap), (.newSession, 2 * gap + size),
+                             (.toggleWorkspaceFilter, width - 2 * (size + gap)), (.toggleFlaggedView, width - size - gap)] {
             MoveWindow(footerButtons[command], x, top + gap, size, max(0, height - 2 * gap), true)
         }
         refreshSidebarFooter()
@@ -2306,12 +2300,31 @@ final class NativeShell {
 
     private func refreshSidebarFooter() {
         let state = activeStructure
-        for (command, checked, enabled) in [(NativeMenu.Command.toggleWorkspaceFilter, state.filtered, state.canFilter),
-                                            (.toggleFlaggedView, state.flaggedView, state.canToggleFlaggedView)] {
+        for (command, enabled) in [(NativeMenu.Command.toggleWorkspaceFilter, state.canFilter),
+                                    (.toggleFlaggedView, state.canToggleFlaggedView)] {
             guard let button = footerButtons[command] else { continue }
-            SendMessageW(button, UINT(BM_SETCHECK), WPARAM(checked ? BST_CHECKED : BST_UNCHECKED), 0)
             EnableWindow(button, enabled)
+            InvalidateRect(button, nil, false)
         }
+    }
+
+    func invalidateSidebarFooter() {
+        for button in footerButtons.values { InvalidateRect(button, nil, false) }
+    }
+
+    fileprivate func paintSidebarFooterButton(_ notification: LPARAM) -> Bool {
+        guard let item = UnsafePointer<DRAWITEMSTRUCT>(bitPattern: Int(notification))?.pointee,
+              let command = NativeMenu.Command(rawValue: Int(item.CtlID)), footerButtons[command] == item.hwndItem else { return false }
+        let (glyph, checked): (UInt16, Bool)
+        switch command {
+        case .newWorkspace: (glyph, checked) = (0xE8F4, false)
+        case .newSession: (glyph, checked) = (0xE710, false)
+        case .toggleWorkspaceFilter: (glyph, checked) = (0xE71C, activeStore.focusEnabled)
+        case .toggleFlaggedView: (glyph, checked) = (0xE7C1, activeStore.sidebarMode == .flagged)
+        default: return false
+        }
+        nt_sidebar_button_paint(notification, dpi, glyph, checked ? 1 : 0)
+        return true
     }
 
     fileprivate func sidebarFooterClicked(_ source: LPARAM) {
@@ -2615,6 +2628,11 @@ final class NativeShell {
             let span = bar.span(of: button)
             let tip = Array((button.tip(Keys.keymap.shortcuts) ?? "").utf16) + [0]
             nt_tooltip_set(tooltip, UnsafeMutableRawPointer(window), UInt(button.rawValue + 1), span.left, 0, span.right, bar.height, tip)
+        }
+        for (command, button) in footerButtons {
+            let chord = menuShortcuts[command] ?? command.shortcut
+            let tip = chord.isEmpty ? command.title : "\(command.title) (\(chord))"
+            nt_tooltip_for_control(tooltip, UnsafeMutableRawPointer(window), UnsafeMutableRawPointer(button), Array(tip.utf16) + [0])
         }
     }
 
@@ -3002,6 +3020,8 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
             if notification == WPARAM(EN_CHANGE) { shell.findChanged() }
             if notification == WPARAM(BN_CLICKED), lParam != 0 { shell.sidebarFooterClicked(lParam) }
             return 0
+        case UINT(WM_DRAWITEM) where shell.paintSidebarFooterButton(lParam):
+            return 1
         case NativeShell.titleActionMessage:
             if let button = TitleBar.Button(rawValue: Int(wParam)) { shell.act(button) }
             return 0
