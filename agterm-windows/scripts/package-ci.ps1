@@ -1,4 +1,4 @@
-# Unsigned Inno installer + Store MSIX (and registerable layout) from an existing release build.
+# Unsigned Inno installer, portable zip and Store MSIX (and registerable layout) from an existing release build.
 # CI runs swift build -c release first, then:
 #   scripts\package-ci.ps1 -Version (Get-Content AGTERM_VERSION -TotalCount 1).0 -Arch x64 -Output $env:RUNNER_TEMP\ci-packages
 param(
@@ -32,6 +32,8 @@ if (-not (Test-Path $iscc)) { throw "no ISCC at $iscc; install Inno Setup 6" }
 & $iscc /DAppVersion=$Version /DArch=$Arch /DStage=$stage /DOutput=$Output /DZmxRev=$zmxRev (Join-Path $root "packaging\agterm.iss")
 if ($LASTEXITCODE) { throw "ISCC failed" }
 
+& (Join-Path $PSScriptRoot "portable-zip.ps1") -Stage $stage -Output (Join-Path $Output "agterm-win-$Version-$Arch-portable.zip")
+
 & (Join-Path $PSScriptRoot "msix.ps1") -Version $Version -Arch $Arch -Stage $stage -Output $Output
 & (Join-Path $PSScriptRoot "msix.ps1") -Version $Version -Arch $Arch -Stage $stage -Output $Output -LayoutOnly
-"packaged installer and MSIX under $Output"
+"packaged installer, portable zip and MSIX under $Output"

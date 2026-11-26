@@ -6,14 +6,19 @@ arm64 installers natively on `windows-2022` and `windows-11-arm` with `scripts\r
 publishes the release. `scripts\release.ps1 -Version <version> [-Arch x64|arm64] [-Publish]` does the same locally for the
 host's architecture; its header lists the tools and the signing variables.
 
-- **GitHub**: `-Publish` uploads the installer and its `.sha256` to this fork's release `v<version>`, creating it
-  for the first architecture and adding to it for the second.
+- **GitHub**: `-Publish` uploads the installer, the portable zip and their `.sha256` files to this fork's release
+  `v<version>`, creating it for the first architecture and adding to it for the second.
+- **Portable zip**: `agterm-win-<version>-<arch>-portable.zip` is the stage `release.ps1` signs, unpacked into any
+  folder and started with `agterm-win.exe`; it skips the installer's Start menu entry and PATH change, so add the folder
+  to PATH for `agtermctl`. `windows-release.yml` zips it before SignPath, which signs only the installer, so the
+  release's zips are unsigned.
 - **winget / Chocolatey**: `scripts\package-managers.ps1 -Version <version>` renders `winget/` and `chocolatey/` for
   that release's two installers into `build\package-managers\<version>`. The winget folder goes to a `microsoft/winget-pkgs` PR as
   `manifests/a/andriyg76/agterm-win/<version>`; the `.nupkg` is pushed with `choco push` and the account's API key.
   Both identifiers are `agterm-win`, leaving `agterm` to upstream.
-- **CI (`windows.yml`)**: after tests, `scripts\package-ci.ps1` builds an unsigned Inno installer and Store MSIX (plus a
-  registerable layout) and uploads `ci-installer-*`, `ci-msix-*`, and `msix-store-layout-*` on every run.
+- **CI (`windows.yml`)**: after tests, `scripts\package-ci.ps1` builds an unsigned Inno installer, a portable zip and a
+  Store MSIX (plus a registerable layout) and uploads `ci-installer-*`, `ci-portable-*`, `ci-msix-*`, and
+  `msix-store-layout-*` on every run.
 - **Microsoft Store**: one MSIX per architecture from `scripts\msix.ps1`, which `windows-release.yml` uploads as the
   `msix-x64` and `msix-arm64` artifacts; both go into the same Partner Center submission, and the Store signs them. Its identity comes from the repository variables `MSIX_IDENTITY_NAME`,
   `MSIX_PUBLISHER` and `MSIX_PUBLISHER_DISPLAY_NAME`, as Partner Center's Product identity page shows them.
