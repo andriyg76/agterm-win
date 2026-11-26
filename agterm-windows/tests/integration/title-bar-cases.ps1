@@ -30,6 +30,7 @@ public static class AgtermWin32 {
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
     [DllImport("user32.dll")] public static extern bool GetMonitorInfoW(IntPtr monitor, ref MonitorInfo info);
     [DllImport("user32.dll")] static extern int GetMenuItemCount(IntPtr menu);
+    [DllImport("user32.dll")] static extern bool GetMenuItemRect(IntPtr window, IntPtr menu, uint position, out Rect rect);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetMenuStringW(IntPtr menu, uint position, StringBuilder text, int capacity, uint flags);
     [DllImport("user32.dll")] static extern uint GetMenuItemID(IntPtr menu, int position);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
@@ -86,6 +87,11 @@ public static class AgtermWin32 {
         return titles.ToArray();
     }
 
+    public static bool MenuItemBounds(IntPtr menuWindow, uint position, out Rect rect) {
+        IntPtr menu = SendMessageW(menuWindow, 0x01E1, IntPtr.Zero, IntPtr.Zero);
+        return GetMenuItemRect(IntPtr.Zero, menu, position, out rect);
+    }
+
     // MenuIds reads the items of a shown popup menu through MN_GETHMENU; a submenu's id is 0xFFFFFFFF.
     public static uint[] MenuIds(IntPtr menuWindow) {
         IntPtr menu = SendMessageW(menuWindow, 0x01E1, IntPtr.Zero, IntPtr.Zero);
@@ -115,7 +121,7 @@ function Get-Bar([IntPtr]$Window, [double]$SidebarWidthPts = 220) {
     $menuHeight = & $scaled 26
     $x = $gap
     $labelW = { param($t) & $scaled ($t.Length * 7 + 20) }
-    $menuGap = [Math]::Floor((& $scaled 7) / 5)
+    $menuGap = [Math]::Floor((& $labelW " ") / 5)
     $menus = [ordered]@{}
     foreach ($label in @("File", "Edit", "View", "Navigate", "Help")) {
         $w = & $labelW $label
@@ -172,6 +178,13 @@ function Send-FrameClick([IntPtr]$Window, [int]$Code, [int]$X, [int]$Y) {
 
 function Send-Escape([IntPtr]$Window) {
     [AgtermWin32]::PostMessageW($Window, 0x0100, [IntPtr]0x1B, [IntPtr]::Zero) | Out-Null
+}
+
+function Click-MenuItem([IntPtr]$Menu, [uint32]$Position) {
+    $rect = New-Object AgtermWin32+Rect
+    if (-not [AgtermWin32]::MenuItemBounds($Menu, $Position, [ref]$rect)) { return $false }
+    [AgtermInput]::Click([int](($rect.Left + $rect.Right) / 2), [int](($rect.Top + $rect.Bottom) / 2))
+    $true
 }
 
 # Get-Shot draws the window as Save-Snapshot does and keeps where its client starts inside the picture.
@@ -301,8 +314,7 @@ $shellCases["title-bar"] = {
         if (-not $menu) { $failures += "the footer session button opened no launch menu" }
         else {
             if ([AgtermWin32]::MenuTitles($menu) -notcontains "Local Profiles") { $failures += "the footer lost local profiles" }
-            Send-Key $menu 0x24
-            Send-Key $menu 0x0D
+            if (-not (Click-MenuItem $menu 0)) { $failures += "could not click the footer's default launch item" }
             if (-not (Wait-Until { @(Get-SessionNodes $state).Count -eq $before + 1 })) { $failures += "the footer did not launch a session" }
         }
     }
@@ -394,10 +406,12 @@ $shellCases["title-bar-menus"] = {
     Send-Click $window (Get-Centre $bar "help") $bar.MenuMiddle
     $helpMenu = Wait-Until { [AgtermWin32]::Visible($processId, "#32768") | Select-Object -First 1 } 5
     if ($helpMenu) {
-        Send-Key $helpMenu 0x24
-        Send-Key $helpMenu 0x0D
+        if (-not (Click-MenuItem $helpMenu 0)) { $failures += "could not click Help → About" }
         $about = Wait-Until { [AgtermWin32]::Visible($processId, "#32770") | Where-Object { [AgtermWin32]::TextOf($_) -eq "About agterm" } | Select-Object -First 1 } 5
-        if ($about) { Send-Escape $about } else { $failures += "Help → About opened no About dialog" }
+        if ($about) {
+            [AgtermWin32]::PostMessageW($about, 0x0111, [IntPtr]1, [IntPtr]::Zero) | Out-Null
+            if (-not (Wait-Until { -not [AgtermWin32]::IsWindowVisible($about) } 5)) { $failures += "About did not close" }
+        } else { $failures += "Help → About opened no About dialog" }
     } else { $failures += "Help did not reopen for About" }
 
     Note "system menu"
