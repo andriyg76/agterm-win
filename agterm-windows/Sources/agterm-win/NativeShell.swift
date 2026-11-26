@@ -2769,7 +2769,7 @@ final class NativeShell {
     }
 
     fileprivate func mouseUp(_ lParam: LPARAM) {
-        if endDividerDrag() { return }
+        if endDividerDrag(lParam) { return }
         if pressedAppIcon {
             pressedAppIcon = false
             ReleaseCapture()
