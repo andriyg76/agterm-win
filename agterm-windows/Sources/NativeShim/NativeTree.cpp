@@ -101,6 +101,12 @@ int64_t itemTag(HWND tree, HTREEITEM node) {
     return SendMessageW(tree, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&item)) ? item.lParam : 0;
 }
 
+LRESULT CALLBACK treeProcedure(HWND tree, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) {
+    if (message == WM_NCHITTEST && SendMessageW(GetParent(tree), NT_DIVIDER_HIT, 0, lParam)) return HTTRANSPARENT;
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(tree, treeProcedure, 1);
+    return DefSubclassProc(tree, message, wParam, lParam);
+}
+
 }  // namespace
 
 extern "C" void *nt_tree_create(void *parent, uint32_t dpi) {
@@ -111,6 +117,7 @@ extern "C" void *nt_tree_create(void *parent, uint32_t dpi) {
                                     TVS_SHOWSELALWAYS | TVS_FULLROWSELECT | TVS_EDITLABELS,
                                 0, 0, 100, 100, static_cast<HWND>(parent), nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!tree) return nullptr;
+    SetWindowSubclass(tree, treeProcedure, 1, 0);
     TreeView_SetExtendedStyle(tree, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
     nt_tree_apply_colors(tree);
     nt_tree_set_dpi(tree, dpi);

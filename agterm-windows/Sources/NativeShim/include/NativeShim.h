@@ -94,6 +94,9 @@ void nt_toast_remove_group(const uint16_t *group);
 void nt_toast_free(void *text);
 
 // The sidebar: a dark Win32 tree whose items carry a caller's tag.
+// The tree and the terminals beside it ask their parent NT_DIVIDER_HIT with WM_NCHITTEST's screen point; a nonzero answer
+// passes the pointer through to the parent, which owns the sidebar divider's grab zone over both of them.
+#define NT_DIVIDER_HIT 0x8106
 void *nt_tree_create(void *parent, uint32_t dpi);
 void nt_tree_set_dpi(void *tree, uint32_t dpi);
 void nt_tree_clear(void *tree);

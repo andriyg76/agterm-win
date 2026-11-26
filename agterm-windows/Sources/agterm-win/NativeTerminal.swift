@@ -711,6 +711,9 @@ private let nativeWindowProcedure: WNDPROC = { window, message, wParam, lParam i
         case UINT(WM_DROPFILES):
             if let drop = HDROP(bitPattern: UInt(wParam)) { native.drop(drop) }
             return 0
+        case UINT(WM_NCHITTEST):
+            if let parent = GetParent(window), SendMessageW(parent, UINT(NT_DIVIDER_HIT), 0, lParam) != 0 { return -1 } // HTTRANSPARENT
+            return DefWindowProcW(window, message, wParam, lParam)
         case UINT(WM_SETCURSOR):
             if lParam & 0xFFFF == LPARAM(HTCLIENT), let hand = native.pointerCursor() {
                 SetCursor(hand)

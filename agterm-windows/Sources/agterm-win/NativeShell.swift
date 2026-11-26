@@ -3043,6 +3043,8 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
         case NativeShell.titleActionMessage:
             if let button = TitleBar.Button(rawValue: Int(wParam)) { shell.act(button) }
             return 0
+        case UINT(NT_DIVIDER_HIT):
+            return shell.onSidebarDivider(screen: lParam) ? 1 : 0
         case UINT(NT_PAGE_STATE):
             shell.placeOverlays()
             return 0
