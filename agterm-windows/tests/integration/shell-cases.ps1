@@ -349,11 +349,14 @@ $shellCases = [ordered]@{
         $list = Invoke-Ctl $state @("keymap", "list")
         $chord = ($list.result.keymap.actions | ? { $_.action -eq "new_session" }).chord
         if ($chord -ne "ctrl+opt+t") { $failures += "new_session is '$chord', not ctrl+opt+t" }
-        Add-Content (Join-Path $state "config\keymap.conf") "map ctrl+alt+d toggle_sidebar"
+        Add-Content (Join-Path $state "config\keymap.conf") "map ctrl+alt+d toggle_sidebar`nmap ctrl+alt+f toggle_fullscreen"
         $reload = Invoke-Ctl $state @("keymap", "reload")
         if (-not $reload.ok -or $reload.result.count -lt 1) { $failures += "keymap reload replied $($reload | ConvertTo-Json -Compress)" }
-        $messages = (Invoke-Ctl $state @("keymap", "list")).result.keymap.diagnostics.message
-        if (-not ($messages -contains "'toggle_sidebar' is not available on Windows")) { $failures += "diagnostics are $($messages -join ' | ')" }
+        $keymap = (Invoke-Ctl $state @("keymap", "list")).result.keymap
+        $sidebarChord = ($keymap.actions | ? { $_.action -eq "toggle_sidebar" }).chord
+        if ($sidebarChord -ne "ctrl+opt+d") { $failures += "toggle_sidebar is '$sidebarChord', not ctrl+opt+d" }
+        $messages = $keymap.diagnostics.message
+        if (-not ($messages -contains "'toggle_fullscreen' is not available on Windows")) { $failures += "diagnostics are $($messages -join ' | ')" }
         $failures
     }
 }

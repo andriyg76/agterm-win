@@ -32,7 +32,15 @@ extension NativeShell {
 
     /// sidebarWidth is the tree column in client pixels at the current DPI.
     var sidebarWidth: Int32 {
-        scaled(Int32(settings.sidebarWidthPoints.rounded()))
+        settings.sidebarVisible ? scaled(Int32(settings.sidebarWidthPoints.rounded())) : 0
+    }
+
+    var sidebarVisible: Bool { settings.sidebarVisible }
+
+    func setSidebarVisible(_ visible: Bool) {
+        settings.sidebarVisible = visible
+        saveSettings()
+        layout()
     }
 
     func setSidebarWidth(points: Double) {
@@ -45,6 +53,7 @@ extension NativeShell {
     var sidebarWidthPoints: Double { settings.sidebarWidthPoints }
 
     func onSidebarDivider(x: Int32) -> Bool {
+        guard settings.sidebarVisible else { return false }
         let edge = sidebarWidth
         let slop = scaled(Self.dividerSlop)
         return x >= edge - slop && x <= edge + slop

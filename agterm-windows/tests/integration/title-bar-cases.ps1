@@ -26,6 +26,7 @@ public static class AgtermWin32 {
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window, ref Point point);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
@@ -119,22 +120,24 @@ function Get-Bar([IntPtr]$Window, [double]$SidebarWidthPts = 220) {
     $width = $client.Right; $action = & $scaled 40; $caption = & $scaled 46; $height = & $scaled 40
     $sidebar = [int][Math]::Round($SidebarWidthPts * $dpi / 96)
     $gap = [int][Math]::Floor($action / 4)
-    $menuHeight = & $scaled 26
-    $x = $gap
+    $x = 2 * $action + $gap
+    $edge = $width - 3 * $caption
     $labelW = { param($t) & $scaled ($t.Length * 7 + 20) }
     $menuGap = [Math]::Floor((& $labelW " ") / 5)
     $menus = [ordered]@{}
     foreach ($label in @("File", "Edit", "View", "Navigate", "Help")) {
         $w = & $labelW $label
-        if (($x + $w) -gt $width) { break }
+        if (($x + $w) -gt ($edge - 5 * $action - 2 * $gap)) { break }
         $menus[$label.ToLowerInvariant()] = @($x, ($x + $w))
         $x += $w + $menuGap
     }
     $edge = $width - 3 * $caption
-    $titleLeft = [Math]::Max($sidebar, $action) + $gap
+    $menuEnd = if ($menus.Count) { @($menus.Values)[-1][1] } else { 2 * $action }
+    $titleLeft = [Math]::Max($sidebar, $menuEnd) + $gap
     $titleRight = $edge - 5 * $action - 2 * $gap
     $spans = [ordered]@{}
     foreach ($key in $menus.Keys) { $spans[$key] = $menus[$key] }
+    $spans.sidebar = @($action, (2 * $action))
     $spans.scratch = @(($edge - 5 * $action - $gap), ($edge - 4 * $action - $gap))
     $spans.split = @(($edge - 4 * $action - $gap), ($edge - 3 * $action - $gap))
     $spans.overlays = @(($edge - 3 * $action - $gap), ($edge - 2 * $action - $gap))
@@ -144,7 +147,7 @@ function Get-Bar([IntPtr]$Window, [double]$SidebarWidthPts = 220) {
     $spans.maximize = @(($width - 2 * $caption), ($width - $caption))
     $spans.close = @(($width - $caption), $width)
     [pscustomobject]@{ Height = $height; Width = $width; Action = $action; Caption = $caption; Middle = [int]($height / 2)
-                       MenuMiddle = $height + [int]($menuHeight / 2); ContentTop = $height + $menuHeight
+                       MenuMiddle = [int]($height / 2); ContentTop = $height
                        Spans = $spans; Title = @($titleLeft, $titleRight) }
 }
 
@@ -254,7 +257,7 @@ $shellCases["title-bar"] = {
     $origin = Get-ScreenPoint $window 0 0
     if ($origin.Y -ne $rect.Top) { $failures += "the client starts $($origin.Y - $rect.Top) px below the window's top: Windows' caption is still there" }
 
-    $expected = [ordered]@{ scratch = $hitClient; split = $hitClient; overlays = $hitClient; dashboard = $hitClient; quick = $hitClient
+    $expected = [ordered]@{ sidebar = $hitClient; scratch = $hitClient; split = $hitClient; overlays = $hitClient; dashboard = $hitClient; quick = $hitClient
                             minimize = $hitMinimize; maximize = $hitMaximize; close = $hitClose }
     foreach ($label in @("file", "edit", "view", "navigate", "help")) {
         if (-not $bar.Spans[$label] -or (Get-Hit $window (Get-Centre $bar $label) $bar.MenuMiddle) -ne $hitClient) {
@@ -295,7 +298,7 @@ $shellCases["title-bar"] = {
                 Show-Pixels $shot $part $span[0] $span[1] 0 $bar.Height
             }
         }
-        if ($bar.Spans.file -and (Get-InkCount $shot $bar.Spans.file[0] $bar.Spans.file[1] $bar.Height $bar.ContentTop) -lt 8) {
+        if ($bar.Spans.file -and (Get-InkCount $shot $bar.Spans.file[0] $bar.Spans.file[1] 0 $bar.Height) -lt 8) {
             $failures += "the File tab drew no label"
         }
         if ((Get-InkCount $shot $bar.Title[0] ([Math]::Min($bar.Title[1], $bar.Title[0] + 200)) 0 $bar.Height) -lt 20) {
@@ -304,6 +307,45 @@ $shellCases["title-bar"] = {
     } finally {
         Save-Bitmap $shot.Bitmap (Join-Path $Shell.Dir "title-bar.png")
     }
+
+    Note "sidebar toggle preserves the width and restores the footer"
+    $footer = [AgtermSettings]::GetDlgItem($window, 8)
+    Send-Click $window (Get-Centre $bar "sidebar") $bar.Middle
+    if (-not (Wait-Until { (Invoke-Ctl $state @("tree")).result.tree.sidebarVisible -eq $false })) {
+        $failures += "the title button did not hide the sidebar"
+    }
+    if ([AgtermWin32]::IsWindowVisible($footer)) { $failures += "the hidden sidebar kept its footer visible" }
+    Send-Click $window (Get-Centre $bar "sidebar") $bar.Middle
+    if (-not (Wait-Until { (Invoke-Ctl $state @("tree")).result.tree.sidebarVisible -eq $true })) {
+        $failures += "the title button did not restore the sidebar"
+    }
+    if ((Invoke-Ctl $state @("tree")).result.tree.sidebarWidth -ne $sidebarPts) { $failures += "hiding the sidebar changed its saved width" }
+
+    Note "footer hover changes its background and clears on leave"
+    $buttonRect = New-Object AgtermWin32+Rect
+    [AgtermWin32]::GetWindowRect($footer, [ref]$buttonRect) | Out-Null
+    $sample = Get-ScreenPoint $window 0 0
+    $sampleX = $buttonRect.Left - $sample.X + 2
+    $sampleY = $buttonRect.Top - $sample.Y + 2
+    [AgtermWin32]::SetCursorPos(($sample.X + $dragX), ($sample.Y + $bar.Middle)) | Out-Null
+    Start-Sleep -Milliseconds 100
+    $normal = Get-Shot $window
+    try { $normalColor = $normal.Bitmap.GetPixel($sampleX + $normal.X, $sampleY + $normal.Y).ToArgb() }
+    finally { $normal.Bitmap.Dispose() }
+    [AgtermWin32]::SetCursorPos(($buttonRect.Left + 2), ($buttonRect.Top + 2)) | Out-Null
+    Start-Sleep -Milliseconds 100
+    $hover = Get-Shot $window
+    try { $hoverColor = $hover.Bitmap.GetPixel($sampleX + $hover.X, $sampleY + $hover.Y).ToArgb() }
+    finally { $hover.Bitmap.Dispose() }
+    if ($normalColor -eq $hoverColor) { $failures += "the footer button has no hover background" }
+    [AgtermWin32]::SetCursorPos(($sample.X + $dragX), ($sample.Y + $bar.Middle)) | Out-Null
+    Start-Sleep -Milliseconds 100
+    $left = Get-Shot $window
+    try {
+        if ($left.Bitmap.GetPixel($sampleX + $left.X, $sampleY + $left.Y).ToArgb() -ne $normalColor) {
+            $failures += "the footer hover did not clear on leave"
+        }
+    } finally { $left.Bitmap.Dispose() }
 
     Note "new session from the sidebar footer"
     $before = @(Get-SessionNodes $state).Count
@@ -430,7 +472,12 @@ $shellCases["title-bar-menus"] = {
         $about = Wait-Until {
             [AgtermWin32]::Visible($processId, "#32770") | Where-Object { [AgtermWin32]::TextOf($_) -eq "About agterm" } | Select-Object -First 1
         } 5
-        if ($about) { Save-ScreenSnapshot $Shell "about" } else { $failures += "Help → About opened no About dialog" }
+        if ($about) {
+            $text = ([AgtermWin32]::VisibleChildren($about, "Static") | ForEach-Object { [AgtermWin32]::TextOf($_) }) -join "`n"
+            if ($text -notmatch 'Version \d+\.\d+\.\d+\.\d+') { $failures += "About has no four-component Windows version: $text" }
+            if ($text -notmatch 'Built \d{4}-\d{2}-\d{2}T') { $failures += "About has no build date: $text" }
+            Save-ScreenSnapshot $Shell "about"
+        } else { $failures += "Help → About opened no About dialog" }
     } else { $failures += "Help did not reopen for About" }
     $failures
 }

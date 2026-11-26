@@ -8,7 +8,7 @@ public enum NativeMenu {
              editKeymap, reloadKeymap, settings, sessionPalette, commandPalette, toggleSplit, toggleHorizontalSplit, closeSplit, swapPanes,
              focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard, toggleOverlay, newWorkspace, renameWorkspace,
              deleteWorkspace, toggleFlag, toggleFlaggedView, focusWorkspace, toggleWorkspaceFilter, previousWorkspace, nextWorkspace,
-             newCompanion, convertCompanion, attentionPalette, selectTheme, about
+             newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar
 
         public var title: String {
             switch self {
@@ -33,6 +33,7 @@ public enum NativeMenu {
             case .settings: "Settings…"
             case .selectTheme: "Select Theme…"
             case .about: "About"
+            case .toggleSidebar: "Toggle Sidebar"
             case .sessionPalette: "Go to Session…"
             case .commandPalette: "Command Palette…"
             case .attentionPalette: "Go to Attention…"
@@ -284,9 +285,11 @@ public enum NativeMenu {
         public var dashboardOpen = false
         public var canToggleOverlay = false
         public var overlayShown = false
+        public var sidebarVisible = true
 
         public init(canSplit: Bool = false, hasSplit: Bool = false, scratchShown: Bool = false, quickShown: Bool = false,
-                    canDashboard: Bool = false, dashboardOpen: Bool = false, canToggleOverlay: Bool = false, overlayShown: Bool = false) {
+                    canDashboard: Bool = false, dashboardOpen: Bool = false, canToggleOverlay: Bool = false, overlayShown: Bool = false,
+                    sidebarVisible: Bool = true) {
             self.canSplit = canSplit
             self.hasSplit = hasSplit
             self.scratchShown = scratchShown
@@ -295,6 +298,7 @@ public enum NativeMenu {
             self.dashboardOpen = dashboardOpen
             self.canToggleOverlay = canToggleOverlay
             self.overlayShown = overlayShown
+            self.sidebarVisible = sidebarVisible
         }
     }
 
@@ -304,7 +308,8 @@ public enum NativeMenu {
         let quick = toggle(.quickTerminal, checked: view.quickShown, enabled: true, shortcuts)
         let flag = toggle(.toggleFlag, checked: structure.flagged == true, enabled: structure.flagged != nil, shortcuts)
         let focus = toggle(.focusWorkspace, checked: structure.focused, enabled: structure.workspace == true, shortcuts)
-        return fontSizing(shortcuts) + [.separator, .command(.selectTheme), .separator, flaggedView(structure, shortcuts), flag,
+        return [toggle(.toggleSidebar, checked: view.sidebarVisible, enabled: true, shortcuts), .separator]
+            + fontSizing(shortcuts) + [.separator, .command(.selectTheme), .separator, flaggedView(structure, shortcuts), flag,
                 .separator, focus, workspaceFilter(structure, shortcuts), .separator,
                 .command(.toggleSplit, enabled: view.canSplit, shortcuts), .command(.toggleHorizontalSplit, enabled: view.canSplit, shortcuts),
                 .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), scratch, overlay,

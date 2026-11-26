@@ -222,6 +222,8 @@ private final class FakeHost: NativeControlHost {
     }
     func closeDashboard() { dashboard = nil }
 
+    var sidebarVisible = true
+    func setSidebarVisible(_ visible: Bool) { sidebarVisible = visible }
     var sidebarWidthPoints: Double = AppStore.sidebarWidthDefault
     func setSidebarWidth(points: Double) { sidebarWidthPoints = AppStore.clampSidebarWidth(points) }
 
@@ -337,6 +339,20 @@ struct NativeControlTests {
         #expect(await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(workspace: srv.id.uuidString)), host).ok)
         #expect(host.performed.count == 2 && host.localSessions.isEmpty)
     }
+    @Test func sidebarVisibilityUsesTheSameStateAsTreeWithoutChangingItsWidth() async {
+        let host = FakeHost()
+        let width = host.sidebarWidthPoints
+        #expect(await handle(ControlRequest(cmd: .sidebar, args: ControlArgs(mode: "hide")), host).ok)
+        let hidden = await handle(ControlRequest(cmd: .tree), host)
+        #expect(hidden.result?.tree?.sidebarVisible == false)
+        #expect(hidden.result?.tree?.sidebarWidth == width)
+        #expect(await handle(ControlRequest(cmd: .sidebar), host).ok)
+        let visible = await handle(ControlRequest(cmd: .tree), host)
+        #expect(visible.result?.tree?.sidebarVisible == true)
+        #expect(!(await handle(ControlRequest(cmd: .sidebar, args: ControlArgs(mode: "invalid")), host)).ok)
+        #expect(host.sidebarVisible)
+    }
+
     @Test func sidebarWidthSetsAndEchoesOnTree() async {
         let host = FakeHost()
         let set = await handle(ControlRequest(cmd: .sidebarWidth, args: ControlArgs(sidebarWidth: 271.3)), host)

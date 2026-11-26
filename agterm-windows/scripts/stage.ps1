@@ -4,11 +4,15 @@
 param(
     [ValidateSet("debug", "release")][string]$Configuration = "debug",
     [Parameter(Mandatory)][string]$Output,
-    [string]$SwiftRuntime
+    [string]$SwiftRuntime,
+    [string]$Version
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $build = Join-Path $root ".build\$Configuration"
+$agterm = Get-Content (Join-Path $root "AGTERM_VERSION") -TotalCount 1
+if (-not $Version) { $Version = "$agterm.0" }
+if ($Version -notmatch "^$([regex]::Escape($agterm))\.\d+$") { throw "Version must be $agterm.N, got $Version" }
 foreach ($exe in "agterm-win.exe", "agtermctl.exe") {
     if (-not (Test-Path (Join-Path $build $exe))) { throw "build $Configuration first: no $build\$exe (swift build --product agtermctl builds the CLI)" }
 }
@@ -22,6 +26,19 @@ if (Test-Path $Output) { Remove-Item -Recurse -Force $Output }
 New-Item -ItemType Directory $Output | Out-Null
 Copy-Item (Join-Path $build "agterm-win.exe"), (Join-Path $build "agtermctl.exe") $Output
 Copy-Item (Join-Path $root "AGTERM_VERSION"), (Join-Path $root "vendor\server\agterm-server.sha256") $Output
+$identity = [ordered]@{
+    version = $Version
+    buildDate = (Get-Item (Join-Path $build "agterm-win.exe")).LastWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")
+}
+if ($env:GITHUB_ACTIONS -eq "true") {
+    $branch = if ($env:GITHUB_HEAD_REF) { $env:GITHUB_HEAD_REF } else { $env:GITHUB_REF_NAME }
+    if ($branch) { $identity.branch = $branch }
+    if ($env:GITHUB_EVENT_NAME -in @("pull_request", "pull_request_target") -and $env:GITHUB_EVENT_PATH) {
+        $event = Get-Content -Raw $env:GITHUB_EVENT_PATH | ConvertFrom-Json
+        if ($event.pull_request.number) { $identity.pullRequest = [int]$event.pull_request.number }
+    }
+}
+[IO.File]::WriteAllText((Join-Path $Output "build-info.json"), ($identity | ConvertTo-Json) + "`n")
 # the bundled terminal themes, agterm's macOS names from iTerm2-Color-Schemes at the commit ghostty's themes pin, with its LICENSE
 Copy-Item -Recurse (Join-Path $root "Resources\themes") (Join-Path $Output "themes")
 # the Claude Code and Codex status adapters agterm-win installs into ~\.config\agterm\agent-status

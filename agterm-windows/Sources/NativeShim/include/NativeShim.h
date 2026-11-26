@@ -194,6 +194,7 @@ void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, int32_t menu
 // A tooltip over rectangles of `parent`'s client; nt_tooltip_set with an empty text removes the tool `id`.
 void *nt_tooltip_create(void *parent);
 void nt_tooltip_for_control(void *tip, void *parent, void *control, const uint16_t *text);
+void nt_sidebar_button_track(void *window);
 void nt_sidebar_button_paint(intptr_t notification, uint32_t dpi, uint16_t glyph, int32_t checked);
 void nt_tooltip_set(void *tip, void *parent, uintptr_t id, int32_t left, int32_t top, int32_t right, int32_t bottom,
                     const uint16_t *text);

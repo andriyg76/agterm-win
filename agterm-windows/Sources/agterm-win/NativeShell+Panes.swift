@@ -29,7 +29,7 @@ extension NativeShell {
         return NativeMenu.View(canSplit: session != nil && dashboard == nil, hasSplit: session?.splitTerminal != nil,
                                scratchShown: session?.scratchShown == true, quickShown: quickShown, canDashboard: !locals.isEmpty,
                                dashboardOpen: dashboard != nil, canToggleOverlay: selectedOverlayHidden != nil,
-                               overlayShown: selectedOverlayHidden == false)
+                               overlayShown: selectedOverlayHidden == false, sidebarVisible: settings.sidebarVisible)
     }
 
     /// enabled is whether a title bar button can act now; one that cannot stays in place, drawn dimmed.
@@ -44,6 +44,7 @@ extension NativeShell {
 
     func buttonIsActive(_ button: TitleBar.Button) -> Bool {
         switch button {
+        case .sidebar: settings.sidebarVisible
         case .scratch: viewState.scratchShown
         case .split: local(selected)?.split?.shown == true
         case .overlays: selectedOverlayHidden == true
