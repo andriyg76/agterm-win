@@ -59,6 +59,14 @@ struct AgentHooksSetupTests {
         }
     }
 
+    @Test func codexAppendsHooksAlongsideExistingTrustState() throws {
+        let existing = "[hooks.state.abc]\ntrusted = true\n"
+        let merged = try AgentHooksSetup.codexConfig(existing: existing, folder: folder).get().text
+        #expect(merged.hasPrefix(existing))
+        #expect(merged.contains("[[hooks.UserPromptSubmit]]"))
+        #expect(try AgentHooksSetup.codexConfig(existing: merged, folder: folder).get().changed == false)
+    }
+
     @Test func installCopiesAdaptersStampsOnceAndSkipsAMissingCodex() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

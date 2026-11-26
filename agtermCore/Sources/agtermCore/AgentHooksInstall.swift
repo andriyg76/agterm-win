@@ -283,21 +283,42 @@ public enum AgentHooksInstall {
         if probe.notify.contains(where: { $0.contains("codex-notify.sh") }) {
             text = removeLegacyCodexNotify(from: text)
         }
-        return .merged(contents: appendCodexBlock(to: text, scriptDir: scriptDir))
+        let merged = appendCodexBlock(to: text, scriptDir: scriptDir)
+        guard (try? codexConfigDefinesHooks(merged)) == true else { return .hooksExist }
+        return .merged(contents: merged)
+    }
+
+    /// Whether the TOML defines hooks of its own. Codex's trust state can coexist with new event definitions.
+    public static func codexConfigDefinesHooks(_ existing: String) throws -> Bool {
+        try TOMLDecoder().decode(CodexConfigProbe.self, from: existing).hooksPresent
     }
 
     // the two top-level keys the merge cares about (Codable ignores every other). `hooksPresent` is a presence
-    // check across any hooks shape; `notify` is the top-level notify program (array-of-argv or a bare string),
+    // check for hook definitions; `notify` is the top-level notify program (array-of-argv or a bare string),
     // so the retired codex-notify.sh is recognized by its PARSED value, not a fragile line match.
     private struct CodexConfigProbe: Decodable {
         let hooksPresent: Bool
         let notify: [String]
 
         private enum CodingKeys: String, CodingKey { case hooks, notify }
+        private struct HookKey: CodingKey {
+            let stringValue: String
+            let intValue: Int? = nil
+
+            init(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { return nil }
+        }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            hooksPresent = container.contains(.hooks)
+            if let hooks = try? container.nestedContainer(keyedBy: HookKey.self, forKey: .hooks) {
+                // Codex also writes trust records for hooks loaded from hooks.json into config.toml.
+                hooksPresent = hooks.allKeys.contains { key in
+                    key.stringValue != "state" || (try? hooks.nestedContainer(keyedBy: HookKey.self, forKey: key)) == nil
+                }
+            } else {
+                hooksPresent = container.contains(.hooks)
+            }
             if let array = try? container.decodeIfPresent([String].self, forKey: .notify) {
                 notify = array
             } else if let single = try? container.decodeIfPresent(String.self, forKey: .notify) {
