@@ -75,7 +75,10 @@ struct NativeMenuTests {
     @Test func everyCommandNamesItsShortcut() {
         #expect(NativeMenu.Command.allCases.allSatisfy { !$0.title.isEmpty })
         #expect(NativeMenu.Command.allCases.filter { $0.shortcut.isEmpty } == [.clearScrollback, .newServerSession, .renameSession, .restartSession, .editKeymap, .reloadKeymap,
-                                                                                      .toggleHorizontalSplit, .closeSplit, .swapPanes, .toggleScratch])
+                                                                                      .toggleHorizontalSplit, .closeSplit, .swapPanes, .toggleScratch,
+                                                                                      .newWorkspace, .renameWorkspace, .deleteWorkspace, .toggleFlag, .toggleFlaggedView,
+                                                                                      .focusWorkspace, .toggleWorkspaceFilter, .previousWorkspace, .nextWorkspace,
+                                                                                      .newCompanion, .convertCompanion])
     }
 
     @Test func viewHoldsThePanesScratchQuickTerminalAndDashboard() {
@@ -88,7 +91,8 @@ struct NativeMenuTests {
         #expect(view.first { $0.pick == .command(.toggleScratch) }?.checked == true)
         #expect(view.first { $0.pick == .command(.dashboard) }?.enabled == true)
         let none = NativeMenu.view(.init())
-        #expect(none.filter { $0.pick != nil && $0.pick != .command(.quickTerminal) }.allSatisfy { !$0.enabled })
+        let always: [NativeMenu.Pick?] = [.command(.quickTerminal), .command(.toggleFlaggedView), .command(.toggleWorkspaceFilter)]
+        #expect(none.filter { $0.pick != nil && !always.contains($0.pick) }.allSatisfy { !$0.enabled })
     }
 
     @Test func fontStepsStayInRange() {

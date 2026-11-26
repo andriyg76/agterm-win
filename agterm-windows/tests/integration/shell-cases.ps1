@@ -115,10 +115,17 @@ function Stop-Shell($Shell) {
     cmd.exe /d /c del /f /q "$(Join-Path $Shell.State 'agterm.sock')" 2>$null
 }
 
+# Get-Node finds a session in the local window's tree, else in a server window's, which bare tree leaves out.
 function Get-Node([string]$State, [string]$Id) {
     $tree = Invoke-Ctl $State @("tree")
     if (-not $tree.ok) { return $null }
-    $tree.result.tree.workspaces | % { $_.sessions } | ? { $_.id -eq $Id } | Select-Object -First 1
+    $node = $tree.result.tree.workspaces | % { $_.sessions } | ? { $_.id -eq $Id } | Select-Object -First 1
+    if ($node) { return $node }
+    foreach ($window in @((Invoke-Ctl $State @("window", "list")).result.windows | ? { $_.remote })) {
+        $node = (Invoke-Ctl $State @("tree", "--window", $window.id)).result.tree.workspaces | % { $_.sessions } | ? { $_.id -eq $Id } |
+            Select-Object -First 1
+        if ($node) { return $node }
+    }
 }
 
 function New-PowerShellSession([string]$State, [string[]]$Extra = @()) {
@@ -342,11 +349,11 @@ $shellCases = [ordered]@{
         $list = Invoke-Ctl $state @("keymap", "list")
         $chord = ($list.result.keymap.actions | ? { $_.action -eq "new_session" }).chord
         if ($chord -ne "ctrl+opt+t") { $failures += "new_session is '$chord', not ctrl+opt+t" }
-        Add-Content (Join-Path $state "config\keymap.conf") "map ctrl+alt+d toggle_flag"
+        Add-Content (Join-Path $state "config\keymap.conf") "map ctrl+alt+d toggle_sidebar"
         $reload = Invoke-Ctl $state @("keymap", "reload")
         if (-not $reload.ok -or $reload.result.count -lt 1) { $failures += "keymap reload replied $($reload | ConvertTo-Json -Compress)" }
         $messages = (Invoke-Ctl $state @("keymap", "list")).result.keymap.diagnostics.message
-        if (-not ($messages -contains "'toggle_flag' is not available on Windows")) { $failures += "diagnostics are $($messages -join ' | ')" }
+        if (-not ($messages -contains "'toggle_sidebar' is not available on Windows")) { $failures += "diagnostics are $($messages -join ' | ')" }
         $failures
     }
 }

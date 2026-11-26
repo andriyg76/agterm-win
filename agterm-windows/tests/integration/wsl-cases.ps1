@@ -72,9 +72,10 @@ $shellCases["wsl-not-at-launch"] = {
     $defined = @($written -split "`n" | ? { $_ -match '^\s*[^#!\s]' } | % { ($_ -split '\s*=\s*', 2)[0].Trim() })
     $list = Invoke-Ctl $state @("window", "list")
     if (-not $list.ok) { return $failures + @("window list replied $($list | ConvertTo-Json -Compress)") }
-    $running = @($list.result.windows | ? { $_.open })
+    $servers = @($list.result.windows | ? { $_.remote })
+    $running = @($servers | ? { $_.open })
     if ($running) { $failures += "servers started at launch: $(($running.remote.host) -join ', ')" }
-    $listed = @($list.result.windows | % { $_.remote.host })
+    $listed = @($servers | % { $_.remote.host })
     if (($listed -join ",") -ne ($defined -join ",")) { $failures += "window list reports '$($listed -join ',')', remote.properties defines '$($defined -join ',')'" }
     $tree = (Invoke-Ctl $state @("tree")).result.tree
     $remote = @($tree.workspaces.sessions | ? { $_.remoteHost })
@@ -436,8 +437,6 @@ $shellCases["notice-bar"] = {
     $failures
 }
 
-$localWorkspace = "00000000-0000-0000-0000-00000000000A"
-
 $shellPreparations["overlay-server-program"] = {
     param($state)
     $dist = if ($env:AGTERM_WIN_GATE_WSL) { $env:AGTERM_WIN_GATE_WSL } else { $absent }
@@ -466,8 +465,8 @@ $shellCases["overlay-server-program"] = {
     $connected = Wait-Until { $s = Get-WSLServer $state $dist; if ($s.connected) { $s } } 120
     if (-not $connected) { return $failures + @("AGTERM_WIN_GATE_WSL=$dist never reached connected") }
 
-    $tree = (Invoke-Ctl $state @("tree")).result.tree
-    $workspace = @($tree.workspaces | Where-Object { $_.id -ne $localWorkspace } | Select-Object -First 1)
+    $tree = (Invoke-Ctl $state @("tree", "--window", $connected.id)).result.tree
+    $workspace = @($tree.workspaces | Select-Object -First 1)
     if (-not $workspace) { return $failures + @("no server workspace in tree") }
     $row = (Invoke-Ctl $state @("session", "new", "--workspace", $workspace.id))
     if (-not $row.ok) { return $failures + @("session new on server replied $($row | ConvertTo-Json -Compress)") }

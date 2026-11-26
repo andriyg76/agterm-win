@@ -5,19 +5,19 @@ import WinSDK
 import agtermCore
 
 private nonisolated(unsafe) var shell: NativeShell!
-private let localWorkspaceID = Foundation.UUID()
 /// shellWindowID is the single agterm-win window for PickRegistry and SessionPickBook replica placement.
-private let shellWindowID = Foundation.UUID(uuidString: "00000000-0000-0000-0000-00000000000B")!
+private let shellWindowID = LocalWindow.id
 
 /// NativeShell is the application window: a Win32 sidebar beside the selected native terminal. It holds local
 /// sessions started from launch profiles, each with a terminal of its own, and the catalogs of the agterm-servers started
 /// on `remote.properties` remotes, whose sessions share one terminal that attaches whichever is selected.
 @MainActor
 final class NativeShell {
+    /// LocalSession is what runs in a session of `localStore`, under the store session's id.
     struct LocalSession {
-        let id = Foundation.UUID()
+        let id: Foundation.UUID
         /// fallback names the session until its program reports a title or a folder: its profile's name.
-        let fallback: String
+        var fallback: String
         var customName: String?
         var programTitle: String?
         /// directory is the folder the shell last reported, decoded.
@@ -123,6 +123,8 @@ final class NativeShell {
     private var asking: Set<String> = []
     private let settingsURL: URL
     var settings: NativeSettings
+    /// localStore is the local window's tree: its workspaces and the order and grouping of `locals`.
+    let localStore: AppStore
     var window: HWND?
     var tree: UnsafeMutableRawPointer?
     var noticeWindow: NoticeBarWindow?
@@ -163,8 +165,12 @@ final class NativeShell {
     // what the remote terminal was last given, so a session that ends or comes back is shown again
     private var runningLaunch: SessionSidebar.Launch?
     private enum SidebarDestination: Equatable {
-        case local
+        case local(workspace: Foundation.UUID?)
         case server(Foundation.UUID, workspace: Foundation.UUID?)
+
+        var isLocal: Bool {
+            if case .local = self { true } else { false }
+        }
     }
     // Positive tree tags address sessions. Negative tags address the launch and selection targets of group rows.
     private var tagged: [Foundation.UUID] = []
@@ -206,6 +212,13 @@ final class NativeShell {
         self.settingsURL = settingsURL
         self.version = version
         settings = NativeSettings.load(from: settingsURL)
+        localStore = LocalWindow.load(stateDirectory: settingsURL.deletingLastPathComponent(), legacy: settings.localSessions,
+                                      legacySelected: settings.selectedLocal)
+        if !settings.localSessions.isEmpty || settings.selectedLocal != nil {
+            settings.localSessions = []
+            settings.selectedLocal = nil
+            saveSettings()
+        }
         TerminalAppearance.use(settings.appearance)
         applyGeneral()
         applyChrome()
@@ -619,13 +632,8 @@ final class NativeShell {
             settings.frame = .init(left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom)
             settings.maximized = placement.showCmd == UINT(SW_SHOWMAXIMIZED)
         }
-        let running = locals.filter { !$0.exited }
-        settings.localSessions = running.map { session in
-            let split = session.splitTerminal == nil ? nil : session.split.map { NativeSettings.Split($0, directory: session.splitDirectory) }
-            return .init(title: session.fallback, customName: session.customName, commandLine: session.commandLine, directory: session.directory,
-                         split: split)
-        }
-        settings.selectedLocal = running.firstIndex { $0.id == selected }
+        locals.forEach(mirror)
+        localStore.save()
         saveSettings()
     }
 
@@ -691,6 +699,8 @@ final class NativeShell {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     shell.profiles = LaunchProfiles.available(wslDistributions: distributions, powerShell7: powerShell7)
+                    shell.refreshFallbacks()
+                    shell.rebuild()
                     shell.seedRemoteCommands(LaunchProfiles.serverDistributions(distributions))
                     startServers()
                     log("native shell: \(shell.profiles.count) launch profile(s): \(shell.profiles.map(\.name).joined(separator: ", "))")
@@ -723,12 +733,30 @@ final class NativeShell {
         catalogChanged()
     }
 
-    private func newSession(_ profile: LaunchProfile) {
-        startLocal(fallback: fallbackName(for: profile), commandLine: profile.commandLine, directory: newSessionDirectory, placed: true)
+    private func newSession(_ profile: LaunchProfile, in workspace: Foundation.UUID? = nil) {
+        newLocal(command: profile.commandLine, in: workspace)
+    }
+
+    /// newLocal adds a session running `command` to `workspace`, the current one when nil, where Settings ▸ General
+    /// places a new session, and shows it.
+    @discardableResult
+    func newLocal(command: String, in workspace: Foundation.UUID? = nil) -> Foundation.UUID? {
+        guard let target = workspace ?? localStore.currentWorkspaceID,
+              let destination = localStore.workspaces.first(where: { $0.id == target }),
+              let session = localStore.addSession(toWorkspace: target, cwd: newSessionDirectory, command: command,
+                                                  at: newSessionIndex(destination, localStore.selectedSessionID)) else { return nil }
+        syncLocals()
+        select(session.id)
+        return session.id
+    }
+
+    /// newSessionIndex is where Settings ▸ General puts a session started without a placement, among `workspace`'s.
+    func newSessionIndex(_ workspace: Workspace, _ selected: Foundation.UUID?) -> Int? {
+        settings.general.insertionIndex(count: workspace.sessions.count, selected: workspace.sessions.firstIndex { $0.id == selected })
     }
 
     /// newSessionDirectory is where Settings ▸ General starts a session from the menu or a key.
-    private var newSessionDirectory: String {
+    var newSessionDirectory: String {
         settings.general.startDirectory(current: locals.first { $0.id == selected }?.directory, home: Self.home, exists: Self.isFolder)
     }
 
@@ -745,22 +773,31 @@ final class NativeShell {
         NativeTerminal.scrollLines = settings.general.scrollLines
     }
 
-    private func fallbackName(for profile: LaunchProfile) -> String {
-        let siblings = locals.filter { $0.fallback.hasPrefix(profile.name) }.count
-        return siblings == 0 ? profile.name : "\(profile.name) \(siblings + 1)"
+    /// restoreLocals starts again the local sessions the store kept, fresh programs under their names.
+    private func restoreLocals() {
+        syncLocals()
+        log("native shell: restored \(locals.count) local session(s)")
+        if let id = localStore.selectedSessionID, locals.contains(where: { $0.id == id }) { select(id) }
     }
 
-    /// restoreLocals starts again the local sessions open at the last quit, fresh programs under their names.
-    private func restoreLocals() {
-        let saved = settings.localSessions
-        guard !saved.isEmpty else { return }
-        for session in saved {
-            let id = startLocal(fallback: session.title, customName: session.customName, commandLine: session.commandLine,
-                                directory: session.directory, selecting: false)
-            if let saved = session.split { restoreSplit(id, saved) }
+    /// syncLocals starts a terminal for each local store session without one and ends the terminals of sessions the
+    /// store no longer has, keeping `locals` in the store's order.
+    func syncLocals() {
+        let sessions = localStore.workspaces.flatMap(\.sessions).filter { $0.remoteHost == nil && $0.content == .terminal }
+        let ids = Set(sessions.map(\.id))
+        for gone in locals where !ids.contains(gone.id) { endLocal(gone.id) }
+        for session in sessions where !locals.contains(where: { $0.id == session.id }) { startLocal(session) }
+        let order = Dictionary(uniqueKeysWithValues: sessions.enumerated().map { ($1.id, $0) })
+        locals.sort { order[$0.id, default: 0] < order[$1.id, default: 0] }
+    }
+
+    /// refreshFallbacks names local sessions after the launch profiles discovered since they started.
+    private func refreshFallbacks() {
+        var earlier: [String] = []
+        for index in locals.indices {
+            locals[index].fallback = LocalWindow.fallbackName(commandLine: locals[index].commandLine, profiles: profiles, earlier: earlier)
+            earlier.append(locals[index].fallback)
         }
-        log("native shell: restored \(saved.count) local session(s)")
-        if let index = settings.selectedLocal { select(locals[index].id) }
     }
 
     var stateDirectory: URL { settingsURL.deletingLastPathComponent() }
@@ -790,23 +827,37 @@ final class NativeShell {
                                environment: sessionEnvironment(session.id))
     }
 
-    /// startLocal starts a local session; `placed` puts it where Settings ▸ General says, otherwise it goes last.
-    @discardableResult
-    private func startLocal(fallback: String, customName: String? = nil, commandLine: String, directory: String? = nil,
-                            selecting: Bool = true, placed: Bool = false) -> Foundation.UUID {
-        let session = LocalSession(fallback: fallback, customName: customName, directory: directory, commandLine: commandLine,
-                                   terminal: makeTerminal())
-        let id = session.id
-        wirePane(session.terminal, of: id)
-        let index = placed ? settings.general.insertionIndex(count: locals.count, selected: locals.firstIndex { $0.id == selected })
-            : locals.count
-        locals.insert(session, at: index)
+    /// startLocal starts the terminal of store session `stored`, with the split it was saved with.
+    private func startLocal(_ stored: Session) {
+        let commandLine = stored.initialCommand ?? quickProfileCommandLine ?? "cmd.exe"
+        let fallback = LocalWindow.fallbackName(commandLine: commandLine, profiles: profiles, earlier: locals.map(\.fallback))
+        let cwd = stored.currentCwd ?? stored.initialCwd
+        let session = LocalSession(id: stored.id, fallback: fallback, customName: stored.customName, directory: cwd.isEmpty ? nil : cwd,
+                                   commandLine: commandLine, terminal: makeTerminal())
+        wirePane(session.terminal, of: session.id)
+        locals.append(session)
         layout()
-        log("native shell: new \(session.name) session [\(id)]")
+        log("native shell: new \(session.name) session [\(session.id)]")
         launch(session)
-        rebuild()
-        if selecting { select(id) }
-        return id
+        if stored.hasSplit {
+            restoreSplit(session.id, NativeSplit(axis: stored.splitAxis, ratio: stored.splitRatio ?? 0.5, shown: stored.isSplit,
+                                                 focused: stored.splitFocused), directory: stored.splitCwd)
+        }
+    }
+
+    /// mirror writes what a local session's panes report into its store session, which saves it.
+    func mirror(_ session: LocalSession) {
+        guard let stored = localStore.session(withID: session.id) else { return }
+        stored.currentCwd = session.directory
+        stored.oscTitle = session.programTitle
+        stored.initialCommand = session.commandLine
+        let split = session.splitTerminal == nil ? nil : session.split
+        stored.hasSplit = split != nil
+        stored.isSplit = split?.shown ?? false
+        stored.splitAxis = split?.axis ?? .leftRight
+        stored.splitRatio = split?.ratio
+        stored.splitFocused = split?.focused ?? false
+        stored.splitCwd = split == nil ? nil : session.splitDirectory
     }
 
     func localExited(_ id: Foundation.UUID) {
@@ -830,6 +881,7 @@ final class NativeShell {
         } else if terminal === locals[index].scratch {
             if let directory { locals[index].scratchDirectory = directory }
         }
+        mirror(locals[index])
         if locals[index].name != before { rebuild() }
     }
 
@@ -961,18 +1013,33 @@ final class NativeShell {
     }
 
     private func sidebarDestination(for id: Foundation.UUID) -> SidebarDestination {
-        guard let server = server(of: id) else { return .local }
+        guard let server = server(of: id) else {
+            let workspace = localStore.workspace(forSession: id)
+            return .local(workspace: workspace?.isRoot == false ? workspace?.id : nil)
+        }
         let workspace = server.remote.store.workspace(forSession: id)
         return .server(server.group, workspace: workspace?.isRoot == true ? nil : workspace?.id)
     }
 
     private var activeSidebarDestination: SidebarDestination {
-        selectedSidebarGroup ?? selected.map(sidebarDestination(for:)) ?? .local
+        selectedSidebarGroup ?? selected.map(sidebarDestination(for:)) ?? .local(workspace: nil)
     }
 
     private func sidebarGroup(_ tag: Int64) -> SidebarDestination? {
         guard tag < 0, tag >= -Int64(sidebarGroups.count) else { return nil }
         return sidebarGroups[Int(-tag - 1)].destination
+    }
+
+    /// rowID is what a row stands for: a session, or a named workspace, local or a server's.
+    private func rowID(_ tag: Int64) -> Foundation.UUID? {
+        if tag > 0 { return Int(tag) <= tagged.count ? tagged[Int(tag) - 1] : nil }
+        return sidebarGroup(tag).flatMap(rowID(destination:))
+    }
+
+    private func rowID(destination: SidebarDestination) -> Foundation.UUID? {
+        switch destination {
+        case .local(let workspace), .server(_, let workspace): workspace
+        }
     }
 
     private func sidebarServer(_ id: Foundation.UUID) -> Server? { servers.first { $0.group == id } }
@@ -997,8 +1064,8 @@ final class NativeShell {
 
     private func launchInSidebar(_ destination: SidebarDestination) {
         switch destination {
-        case .local:
-            if profiles.indices.contains(defaultProfile) { newSession(profiles[defaultProfile]) }
+        case .local(let workspace):
+            if profiles.indices.contains(defaultProfile) { newSession(profiles[defaultProfile], in: workspace ?? localStore.rootWorkspace?.id) }
         case .server(let id, let target):
             guard let server = sidebarServer(id), let workspace = sidebarWorkspace(on: server, target: target) else { return }
             newServerSession(on: server, workspace: workspace.id)
@@ -1031,13 +1098,20 @@ final class NativeShell {
     }
 
     private func name(of id: Foundation.UUID) -> String? {
-        locals.first { $0.id == id }?.name ?? serverSession(id)?.displayName
+        locals.first { $0.id == id }?.name ?? serverSession(id)?.displayName ?? namedWorkspace(id)?.name
+    }
+
+    /// namedWorkspace is the named workspace `id`, the local window's or a server's.
+    private func namedWorkspace(_ id: Foundation.UUID) -> Workspace? {
+        ([localStore] + servers.map(\.remote.store)).lazy.flatMap(\.workspaces).first { $0.id == id && !$0.isRoot }
     }
 
     private var requestedSidebarRename: Foundation.UUID?
 
     private func startRename(_ id: Foundation.UUID?) {
-        guard let tree, let id, canRename(id), let item = items[id] else { return }
+        guard let tree, let id else { return }
+        let row = items[id] ?? sidebarGroups.first { rowID(destination: $0.destination) == id }?.item
+        guard let item = row, items[id] == nil || canRename(id) else { return }
         requestedSidebarRename = id
         defer { requestedSidebarRename = nil }
         nt_tree_edit(tree, item)
@@ -1050,7 +1124,7 @@ final class NativeShell {
         var text = [UInt16](repeating: 0, count: 512)
         let stage = nt_tree_label_edit(Int(notification), &tag, &text, Int32(text.count))
         guard stage != 0 else { return nil }
-        let id = tag > 0 && Int(tag) <= tagged.count ? tagged[Int(tag) - 1] : nil
+        let id = rowID(tag)
         switch stage {
         case 1:
             guard let id, id == requestedSidebarRename, let tree, let name = name(of: id) else { return 1 }
@@ -1076,8 +1150,13 @@ final class NativeShell {
     }
 
     private func rename(_ id: Foundation.UUID, to name: String) {
+        if namedWorkspace(id) != nil {
+            if !name.isEmpty { structure(.workspaceRename, target: id, ControlArgs(name: name)) }
+            return
+        }
         if let index = locals.firstIndex(where: { $0.id == id }) {
             locals[index].customName = SessionNaming.customName(name)
+            localStore.renameSession(id, to: name)
             rebuild()
             return
         }
@@ -1122,7 +1201,30 @@ final class NativeShell {
         closeLocal(id)
     }
 
+    /// closeLocal closes a local session with its companions; the store picks what is shown next.
     private func closeLocal(_ id: Foundation.UUID) {
+        guard locals.contains(where: { $0.id == id }) else { return }
+        localStore.closeSession(id)
+        localsChanged(selectionMoved: false)
+    }
+
+    /// localsChanged follows a change to the local store: terminals start and end with their sessions, and when the
+    /// session in view is gone, or `selectionMoved`, the store's selection is shown.
+    func localsChanged(selectionMoved: Bool) {
+        syncLocals()
+        let lost = selected.map { id in localStore.session(withID: id) == nil && serverSession(id) == nil } ?? false
+        if lost { selected = nil }
+        rebuild()
+        guard lost || selectionMoved else { return }
+        if let next = localStore.selectedSessionID, locals.contains(where: { $0.id == next }) {
+            select(next)
+        } else if lost {
+            catalogChanged()
+        }
+    }
+
+    /// endLocal ends what runs in a local session that left the store.
+    private func endLocal(_ id: Foundation.UUID) {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         let closing = locals.remove(at: index)
         closing.overlay?.frame.destroy()
@@ -1130,17 +1232,6 @@ final class NativeShell {
         closing.terminals.forEach { DestroyWindow($0.window) }
         recentSessions.removeAll { $0 == id }
         if dashboard?.members.contains(where: { $0.session == id }) == true { dashboardSessionsChanged() }
-        guard selected == id else {
-            rebuild()
-            return
-        }
-        selected = nil
-        rebuild()
-        if let next = locals.indices.contains(index) ? locals[index].id : locals.last?.id {
-            select(next)
-        } else {
-            catalogChanged()
-        }
     }
 
     var selectedOverlayHidden: Bool? {
@@ -1189,8 +1280,95 @@ final class NativeShell {
             if let selected, let hidden = selectedOverlayHidden { setOverlayHidden(selected, !hidden) }
         case .quickTerminal: toggleQuick()
         case .dashboard: toggleDashboard()
+        case _ where command.isStructure:
+            let destination = selectedSidebarGroup ?? selected.map(sidebarDestination(for:)) ?? .local(workspace: nil)
+            runStructure(command, session: selectedSidebarGroup == nil ? selected : nil, destination: destination)
         default: visibleTerminal.perform(command)
         }
+    }
+
+    // MARK: workspaces
+
+    /// structureWindow is the `--window` of a window-scoped action: the remote window the destination is on, nil for
+    /// the local one.
+    private func structureWindow(_ destination: SidebarDestination) -> String? {
+        guard case .server(let group, _) = destination, let server = sidebarServer(group) else { return nil }
+        return NativeControl.remoteWindowID(server.name).uuidString
+    }
+
+    /// structureWorkspace is the named workspace an action on `destination` means: its row's, or the selected
+    /// session's while it is in one.
+    private func structureWorkspace(_ destination: SidebarDestination) -> Foundation.UUID? { rowID(destination: destination) }
+
+    /// runStructure does a workspace, flag or companion command for `session` (the selected one from a key) or for
+    /// the row `destination` is; each goes through the control API, so it does what its `agtermctl` command does.
+    private func runStructure(_ command: NativeMenu.Command, session: Foundation.UUID?, destination: SidebarDestination) {
+        var args = ControlArgs()
+        args.window = structureWindow(destination)
+        let workspace = structureWorkspace(destination)
+        switch command {
+        case .newWorkspace:
+            structure(.workspaceNew, target: nil, args) { [weak self] id in
+                if let id { self?.startRename(id) }
+            }
+        case .renameWorkspace: startRename(workspace)
+        case .deleteWorkspace:
+            guard let workspace, let named = namedWorkspace(workspace) else { return }
+            if !named.sessions.isEmpty {
+                let question = "Delete workspace \(named.name) and close its \(named.sessions.count) session(s)?"
+                guard MessageBoxW(window, Array(question.utf16) + [0], Array("agterm".utf16) + [0],
+                                  UINT(MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)) == IDOK else { return }
+            }
+            structure(.workspaceDelete, target: workspace)
+        case .focusWorkspace:
+            guard let workspace else { return }
+            structure(.workspaceFocus, target: workspace)
+        case .toggleWorkspaceFilter: structure(.workspaceFilter, target: nil, args)
+        case .toggleFlaggedView: structure(.sidebarMode, target: nil, args)
+        case .previousWorkspace, .nextWorkspace:
+            args.to = command == .nextWorkspace ? "next" : "prev"
+            structure(.workspaceGo, target: nil, args)
+        case .toggleFlag:
+            guard let session else { return }
+            args.window = nil
+            args.mode = "toggle"
+            structure(.sessionFlag, target: session, args)
+        case .newCompanion:
+            guard let session else { return }
+            structure(.sessionCompanionNew, target: session)
+        case .convertCompanion:
+            guard let session else { return }
+            structure(.sessionCompanionConvert, target: session)
+        default: break
+        }
+    }
+
+    /// structureMenu is the sidebar menu's workspace section for the row `destination` is, or `session`.
+    private func structureMenu(session: Foundation.UUID?, destination: SidebarDestination) -> (entries: [NativeMenu.Entry], targets: [Workspace]) {
+        let store = storeOf(destination)
+        let workspace = structureWorkspace(destination)
+        var model = NativeMenu.Structure(flaggedView: store.sidebarMode == .flagged, filtered: store.focusEnabled)
+        var targets: [Workspace] = []
+        if session == nil {
+            model.workspace = workspace != nil
+            model.focused = workspace.map(store.focusedWorkspaceIDs.contains) ?? false
+        } else if let session, let stored = store.session(withID: session) {
+            model.flagged = stored.flagged
+            let home = store.workspace(forSession: session)
+            model.canConvert = stored.parentID == nil && home.map { $0.sessions.first?.id != session } ?? false
+            targets = store.workspaces.filter { $0.id != home?.id }
+            model.moveTargets = targets.map { $0.isRoot ? "Top Level" : $0.name }
+        }
+        return (NativeMenu.structure(model, shortcuts: menuShortcuts), targets)
+    }
+
+    /// activeStore is the tree of the window the selection is in, which a window-scoped command from a key acts on.
+    var activeStore: AppStore { storeOf(activeSidebarDestination) }
+
+    /// storeOf is the tree `destination` is in: the local window's or a server's.
+    private func storeOf(_ destination: SidebarDestination) -> AppStore {
+        guard case .server(let group, _) = destination, let server = sidebarServer(group) else { return localStore }
+        return server.remote.store
     }
 
     // MARK: overlays
@@ -1861,11 +2039,12 @@ final class NativeShell {
     func rebuild() {
         guard let tree else { return }
         let unseen = settings.notifications.unseenCount ? serverUnseen : [:]
-        let localChildren = locals.map {
-            SessionSidebar.Item(id: $0.id, title: SessionSidebar.localTitle($0.name, exited: $0.exited, attention: $0.attention || $0.unseen > 0,
-                                                                     unseen: settings.notifications.unseenCount ? $0.unseen : 0),
-                                isWorkspace: false, ended: $0.exited, children: [], status: $0.activity.indicator,
-                                info: StatusGlyph.infoText($0.info))
+        let counting = settings.notifications.unseenCount
+        let runtimes = Dictionary(uniqueKeysWithValues: locals.map { ($0.id, $0) })
+        let local = SessionSidebar.items(localStore) { session in
+            guard let run = runtimes[session.id] else { return (session.displayName, false, AgentIndicator(), nil) }
+            return (SessionSidebar.localTitle(run.name, exited: run.exited, attention: run.attention || run.unseen > 0, unseen: counting ? run.unseen : 0),
+                    run.exited, run.activity.indicator, StatusGlyph.infoText(run.info))
         }
         nt_tree_clear(tree)
         tagged = []
@@ -1878,7 +2057,7 @@ final class NativeShell {
             let destination: SidebarDestination?
             let tag: Int64
             if item.isWorkspace {
-                destination = server.map { .server($0.group, workspace: item.id == $0.group ? nil : item.id) } ?? .local
+                destination = server.map { .server($0.group, workspace: item.id == $0.group ? nil : item.id) } ?? .local(workspace: item.id)
                 tag = -Int64(sidebarGroups.count + 1)
             } else {
                 destination = nil
@@ -1886,7 +2065,7 @@ final class NativeShell {
                 dimmed.append(item.ended ? 1 : 0)
                 tag = Int64(tagged.count)
             }
-            guard let node = nt_tree_add(tree, parent, Array(item.title.utf16) + [0], tag, 1) else { return }
+            guard let node = nt_tree_add(tree, parent, Array(item.title.utf16) + [0], tag, item.expanded ? 1 : 0) else { return }
             if let destination {
                 sidebarGroups.append((destination, node))
                 launchableGroups.append(canLaunchInSidebar(destination) ? 1 : 0)
@@ -1897,10 +2076,9 @@ final class NativeShell {
             }
             item.children.forEach { add($0, under: node, server: server) }
         }
-        add(SessionSidebar.Item(id: localWorkspaceID, title: "Local", isWorkspace: true, ended: false, children: localChildren), under: nil)
+        local.forEach { add($0, under: nil) }
         for server in servers {
-            add(SessionSidebar.server(id: server.group, label: server.label, workspaces: server.remote.store.workspaces, unseen: unseen),
-                under: nil, server: server)
+            add(SessionSidebar.server(id: server.group, label: server.label, store: server.remote.store, unseen: unseen), under: nil, server: server)
         }
         if let selectedSidebarGroup, !sidebarGroups.contains(where: { $0.destination == selectedSidebarGroup }) {
             self.selectedSidebarGroup = nil
@@ -1908,6 +2086,33 @@ final class NativeShell {
         syncSidebarSelection()
         updateBlink(blinks)
         titleChanged()
+    }
+
+    /// folded keeps a row the user folded or unfolded that way in its window's tree, as `workspace.collapse` and
+    /// `session.collapse` do. A server's section row has nothing to keep.
+    fileprivate func folded(_ tag: Int64, expanded: Bool) {
+        guard let id = rowID(tag) else { return }
+        let workspace = tag < 0
+        let cmd: agtermCore.Command = switch (workspace, expanded) {
+        case (true, true): .workspaceExpand
+        case (true, false): .workspaceCollapse
+        case (false, true): .sessionExpand
+        case (false, false): .sessionCollapse
+        }
+        // the tree is still in its expand notification; the store's change redraws it
+        DispatchQueue.main.async { [weak self] in self?.structure(cmd, target: id) }
+    }
+
+    /// structure runs a sidebar, menu or key action through the control API's structure path, so each one does
+    /// exactly what its `agtermctl` command does, in the window that holds its target.
+    func structure(_ cmd: agtermCore.Command, target: Foundation.UUID?, _ args: ControlArgs = ControlArgs(),
+                   done: ((Foundation.UUID?) -> Void)? = nil) {
+        let request = ControlRequest(cmd: cmd, target: target?.uuidString, args: args)
+        Task { @MainActor in
+            let response = await NativeControl.structure(request, host: self)
+            log("native shell: \(cmd.rawValue) \(target?.uuidString ?? "-"): \(response.ok ? "ok" : response.error ?? "failed")")
+            if response.ok { done?(response.result?.id.flatMap(Foundation.UUID.init(uuidString:))) }
+        }
     }
 
     private func syncSidebarSelection() {
@@ -1973,6 +2178,7 @@ final class NativeShell {
         let previous = selected
         if selected != id { selectedSidebarGroup = nil }
         selected = id
+        if localStore.session(withID: id) != nil, localStore.selectedSessionID != id { _ = localStore.selectSession(id) }
         // an --auto-reset status ends on the session entered and the one left, as a Mac's selection does
         for visited in Set([previous, id].compactMap { $0 }) { statusVisited(visited) }
         recentSessions.removeAll { $0 == id }
@@ -2048,7 +2254,7 @@ final class NativeShell {
                                    sessionCount: tagged.count, canRenameSession: canRename(selected),
                                    canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
                                    canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)),
-                                   localDefaultShortcut: activeSidebarDestination == .local, shortcuts: shortcuts)
+                                   localDefaultShortcut: activeSidebarDestination.isLocal, shortcuts: shortcuts)
         case 1: return NativeMenu.view(viewState, shortcuts: shortcuts)
         case 2: return NativeMenu.navigate(shortcuts: shortcuts)
         case 3: return NativeMenu.help(shortcuts: shortcuts)
@@ -2074,7 +2280,7 @@ final class NativeShell {
                           canCloseSession: canClose(selected), sessionCount: tagged.count, canRenameSession: canRename(selected),
                           canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
                           canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), view: viewState,
-                          localDefaultShortcut: activeSidebarDestination == .local, shortcuts: Keys.keymap.shortcuts)
+                          localDefaultShortcut: activeSidebarDestination.isLocal, shortcuts: Keys.keymap.shortcuts)
     }
 
     fileprivate func treeMenu(x: Int32, y: Int32) {
@@ -2082,7 +2288,7 @@ final class NativeShell {
         var point = POINT(x: x, y: y)
         let tag = nt_tree_item_at(tree, &point.x, &point.y)
         let session = tag > 0 && tag <= Int64(tagged.count) ? tagged[Int(tag) - 1] : nil
-        let destination = sidebarGroup(tag) ?? session.map(sidebarDestination(for:)) ?? .local
+        let destination = sidebarGroup(tag) ?? session.map(sidebarDestination(for:)) ?? .local(workspace: nil)
         let destinationName: String?
         switch destination {
         case .local: destinationName = nil
@@ -2099,10 +2305,18 @@ final class NativeShell {
                                          destination: destinationName, canLaunch: canLaunchInSidebar(destination),
                                          canRename: session.map { canRename($0) }, canRestart: canRestart(session),
                                          canClose: canClose(session), shortcuts: menuShortcuts)
-        let pick = showMenu(entries, owner: window, at: point)
+        let section = structureMenu(session: session, destination: destination)
+        let pick = showMenu(entries + [.separator] + section.entries, owner: window, at: point)
         focus()
         switch pick {
         case .sidebarSession?: launchInSidebar(destination)
+        case .profile(let index)? where profiles.indices.contains(index) && destination.isLocal:
+            newSession(profiles[index], in: structureWorkspace(destination) ?? localStore.rootWorkspace?.id)
+        case .moveToWorkspace(let index)? where section.targets.indices.contains(index):
+            var args = ControlArgs()
+            args.workspace = section.targets[index].id.uuidString
+            structure(.sessionMove, target: session, args)
+        case .command(let command)? where command.isStructure: runStructure(command, session: session, destination: destination)
         case .command(.renameSession)?: startRename(session)
         case .command(.restartSession)?: restartFromUI(session)
         case .command(.closeSession)?: closeFromUI(session)
@@ -2148,9 +2362,11 @@ final class NativeShell {
         switch mode {
         case .sessions:
             let counting = settings.notifications.unseenCount
-            let localRows = locals.map {
-                Palette.Local(id: $0.id, name: $0.name, exited: $0.exited, attention: $0.attention || $0.unseen > 0,
-                              unseen: counting ? $0.unseen : 0)
+            let localRows = locals.map { local in
+                let workspace = localStore.workspace(forSession: local.id)
+                return Palette.Local(id: local.id, name: local.name, exited: local.exited, attention: local.attention || local.unseen > 0,
+                                     unseen: counting ? local.unseen : 0, workspace: workspace?.isRoot == false ? workspace?.name ?? "" : "",
+                                     parent: localStore.session(withID: local.id)?.parentID)
             }
             return Palette.sessionRows(locals: localRows, servers: servers.map { (label: $0.label, workspaces: $0.remote.store.workspaces) },
                                        unseen: counting ? serverUnseen : [:])
@@ -2621,6 +2837,12 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
         case UINT(WM_NOTIFY):
             if let result = shell.customDraw(lParam) { return result }
             if let result = shell.labelEdit(lParam) { return result }
+            var row: Int64 = 0
+            var expanded: Int32 = 0
+            if nt_tree_expanded(Int(lParam), &row, &expanded) != 0 {
+                shell.folded(row, expanded: expanded != 0)
+                return 0
+            }
             if let key = UnsafePointer<NMTVKEYDOWN>(bitPattern: Int(lParam)), key.pointee.hdr.code == UINT(TVN_KEYDOWN),
                let chord = Keys.chord(virtualKey: Int32(key.pointee.wVKey)) {
                 switch Keys.keymap.press(chord) {
@@ -2874,22 +3096,40 @@ extension NativeShell: NativeControlHost {
         return (overlay, session.overlayExitCode)
     }
 
-    func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> Foundation.UUID? {
-        let customName = name.flatMap(SessionNaming.customName)
-        if let command {
-            return startLocal(fallback: "Session \(locals.count + 1)", customName: customName, commandLine: command, directory: cwd,
-                              selecting: select)
+    var newSession: NativeStructure.NewSession? {
+        let command = profiles.indices.contains(defaultProfile) ? profiles[defaultProfile].commandLine : nil
+        return NativeStructure.NewSession(cwd: newSessionDirectory, command: command) { [weak self] workspace, selected in
+            self?.newSessionIndex(workspace, selected)
         }
-        guard profiles.indices.contains(defaultProfile) else { return nil }
-        let profile = profiles[defaultProfile]
-        return startLocal(fallback: fallbackName(for: profile), customName: customName, commandLine: profile.commandLine, directory: cwd,
-                          selecting: select)
     }
 
-    func newServerSession() async -> ControlResponse {
-        guard let server = currentServer else { return ControlResponse(ok: false, error: "no agterm-server is started") }
-        return await newSession(on: server)
+    func remoteStore(_ window: Foundation.UUID) -> AppStore? {
+        servers.first { NativeControl.remoteWindowID($0.name) == window && $0.remote.connected }?.remote.store
     }
+
+    func structureChanged(_ store: AppStore, selectionMoved: Bool) {
+        guard store === localStore else {
+            rebuild()
+            if selectionMoved, let id = store.selectedSessionID, id != selected { select(id) }
+            return
+        }
+        localsChanged(selectionMoved: selectionMoved)
+    }
+
+    func performRemote(_ operation: RemoteOperation, window: Foundation.UUID, select: Bool) async -> ControlResponse {
+        guard let server = servers.first(where: { NativeControl.remoteWindowID($0.name) == window }) else {
+            return ControlResponse(ok: false, error: "remote window is not connected")
+        }
+        let response = await server.remote.perform(operation)
+        log("native shell: \(operation) on \(server.label): \(response.ok ? "ok" : response.error ?? "failed")")
+        if select, response.ok, let created = response.result?.id.flatMap(Foundation.UUID.init(uuidString:)) {
+            pendingCreatedSession = (server.group, created)
+            selectCreatedSession()
+        }
+        return response
+    }
+
+    var navigationOrder: [Foundation.UUID] { tagged }
 
     func closeSession(_ id: Foundation.UUID) async -> ControlResponse {
         if let index = locals.firstIndex(where: { $0.id == id }) {
@@ -2906,6 +3146,7 @@ extension NativeShell: NativeControlHost {
     func renameSession(_ id: Foundation.UUID, to name: String) async -> ControlResponse {
         if let index = locals.firstIndex(where: { $0.id == id }) {
             locals[index].customName = SessionNaming.customName(name)
+            localStore.renameSession(id, to: name)
             rebuild()
             return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
         }

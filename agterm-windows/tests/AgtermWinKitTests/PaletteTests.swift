@@ -19,7 +19,7 @@ struct PaletteTests {
                                                                                 Workspace(name: "dev", sessions: [api])]),
                                                                  ("WSL Debian", [Workspace(name: "", sessions: [db], isRoot: true)])])
         #expect(rows.map(\.title) == ["api", "build", "db", "Web"])
-        #expect(rows.map(\.subtitle) == ["WSL Ubuntu · dev", "Local", "WSL Debian", "WSL Ubuntu"])
+        #expect(rows.map(\.subtitle) == ["WSL Ubuntu · dev", "", "WSL Debian", "WSL Ubuntu"])
         #expect(rows.map(\.detail) == ["", "exited", "", "ended"])
         #expect(rows[1].target == .session(mine.id))
     }

@@ -6,7 +6,9 @@ public enum NativeMenu {
     public enum Command: Int, CaseIterable, Sendable {
         case copy = 1, paste, selectAll, clearScrollback, fontBigger, fontSmaller, fontReset, newSession, newServerSession, renameSession, restartSession, closeSession, nextSession, previousSession, find, quit,
              editKeymap, reloadKeymap, settings, sessionPalette, commandPalette, toggleSplit, toggleHorizontalSplit, closeSplit, swapPanes,
-             focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard, toggleOverlay
+             focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard, toggleOverlay, newWorkspace, renameWorkspace,
+             deleteWorkspace, toggleFlag, toggleFlaggedView, focusWorkspace, toggleWorkspaceFilter, previousWorkspace, nextWorkspace,
+             newCompanion, convertCompanion
 
         public var title: String {
             switch self {
@@ -41,6 +43,26 @@ public enum NativeMenu {
             case .toggleOverlay: "Overlay"
             case .quickTerminal: "Quick Terminal"
             case .dashboard: "Dashboard"
+            case .newWorkspace: "New Workspace"
+            case .renameWorkspace: "Rename Workspace"
+            case .deleteWorkspace: "Delete Workspace"
+            case .toggleFlag: "Flag Session"
+            case .toggleFlaggedView: "Show Flagged Sessions"
+            case .focusWorkspace: "Focus"
+            case .toggleWorkspaceFilter: "Toggle Workspace Filter"
+            case .previousWorkspace: "Previous Workspace"
+            case .nextWorkspace: "Next Workspace"
+            case .newCompanion: "New Companion"
+            case .convertCompanion: "Convert to Companion"
+            }
+        }
+
+        /// isStructure is a workspace, flag or companion command, which acts on a sidebar row.
+        public var isStructure: Bool {
+            switch self {
+            case .newWorkspace, .renameWorkspace, .deleteWorkspace, .focusWorkspace, .toggleWorkspaceFilter, .toggleFlaggedView,
+                 .previousWorkspace, .nextWorkspace, .toggleFlag, .newCompanion, .convertCompanion: true
+            default: false
             }
         }
 
@@ -69,12 +91,14 @@ public enum NativeMenu {
         case startServer(Int)
         case serverSession(Int)
         case sidebarSession
+        case moveToWorkspace(Int)
 
         static let sidebarSessionID = 999
         static let profileBase = 1000
         static let defaultProfileBase = 2000
         static let startServerBase = 3000
         static let serverSessionBase = 4000
+        static let moveToWorkspaceBase = 5000
 
         /// id is the Win32 menu item id; 0 is reserved for a dismissed menu.
         public var id: Int {
@@ -85,12 +109,15 @@ public enum NativeMenu {
             case .startServer(let index): Self.startServerBase + index
             case .serverSession(let index): Self.serverSessionBase + index
             case .sidebarSession: Self.sidebarSessionID
+            case .moveToWorkspace(let index): Self.moveToWorkspaceBase + index
             }
         }
 
         public init?(id: Int) {
             if id == Self.sidebarSessionID {
                 self = .sidebarSession
+            } else if id >= Self.moveToWorkspaceBase {
+                self = .moveToWorkspace(id - Self.moveToWorkspaceBase)
             } else if id >= Self.serverSessionBase {
                 self = .serverSession(id - Self.serverSessionBase)
             } else if id >= Self.startServerBase {
@@ -116,7 +143,7 @@ public enum NativeMenu {
         public let children: [Entry]
         public var checked = false
 
-        static let separator = Entry(title: "", shortcut: "", pick: nil, enabled: false, children: [])
+        public static let separator = Entry(title: "", shortcut: "", pick: nil, enabled: false, children: [])
 
         static func command(_ command: Command, enabled: Bool = true, _ shortcuts: Shortcuts = [:]) -> Entry {
             Entry(title: command.title, shortcut: shortcuts[command] ?? command.shortcut, pick: .command(command), enabled: enabled,
@@ -245,9 +272,12 @@ public enum NativeMenu {
         public var dashboardOpen = false
         public var canToggleOverlay = false
         public var overlayShown = false
+        public var flaggedView = false
+        public var filtered = false
 
         public init(canSplit: Bool = false, hasSplit: Bool = false, scratchShown: Bool = false, quickShown: Bool = false,
-                    canDashboard: Bool = false, dashboardOpen: Bool = false, canToggleOverlay: Bool = false, overlayShown: Bool = false) {
+                    canDashboard: Bool = false, dashboardOpen: Bool = false, canToggleOverlay: Bool = false, overlayShown: Bool = false,
+                    flaggedView: Bool = false, filtered: Bool = false) {
             self.canSplit = canSplit
             self.hasSplit = hasSplit
             self.scratchShown = scratchShown
@@ -256,6 +286,8 @@ public enum NativeMenu {
             self.dashboardOpen = dashboardOpen
             self.canToggleOverlay = canToggleOverlay
             self.overlayShown = overlayShown
+            self.flaggedView = flaggedView
+            self.filtered = filtered
         }
     }
 
@@ -269,9 +301,14 @@ public enum NativeMenu {
         quick.checked = view.quickShown
         var dashboard = Entry.command(.dashboard, enabled: view.canDashboard || view.dashboardOpen, shortcuts)
         dashboard.checked = view.dashboardOpen
+        var flagged = Entry.command(.toggleFlaggedView, shortcuts)
+        flagged.checked = view.flaggedView
+        var filter = Entry.command(.toggleWorkspaceFilter, shortcuts)
+        filter.checked = view.filtered
         return [.command(.toggleSplit, enabled: view.canSplit, shortcuts), .command(.toggleHorizontalSplit, enabled: view.canSplit, shortcuts),
                 .command(.focusLeftPane, enabled: view.hasSplit, shortcuts), .command(.focusRightPane, enabled: view.hasSplit, shortcuts),
-                .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), .separator, scratch, overlay, quick, dashboard]
+                .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), .separator, scratch, overlay, quick, dashboard,
+                .separator, flagged, filter]
     }
 
     /// file is the File menu: sessions and the terminal's edit commands.
@@ -281,12 +318,61 @@ public enum NativeMenu {
         sessions(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession,
                  sessionCount: sessionCount, canRenameSession: canRenameSession, canRestartSession: canRestartSession,
                  localDefaultShortcut: localDefaultShortcut, shortcuts: shortcuts)
-            + [.separator] + terminal(hasSelection: hasSelection, canPaste: canPaste, shortcuts: shortcuts)
+            + [.command(.newWorkspace, shortcuts), .separator] + terminal(hasSelection: hasSelection, canPaste: canPaste, shortcuts: shortcuts)
     }
 
     /// navigate is the Navigate menu: the palettes and Find.
     public static func navigate(shortcuts: Shortcuts = [:]) -> [Entry] {
-        [.command(.sessionPalette, shortcuts), .command(.commandPalette, shortcuts), .command(.find, shortcuts)]
+        [.command(.sessionPalette, shortcuts), .command(.commandPalette, shortcuts), .command(.find, shortcuts), .separator,
+         .command(.previousWorkspace, shortcuts), .command(.nextWorkspace, shortcuts)]
+    }
+
+    /// Structure is what the sidebar's workspace section acts on: a workspace row (`workspace` not nil, true for a named
+    /// one) or a session (`flagged` not nil), the workspaces a session can move to, and the view's flagged and filter state.
+    public struct Structure: Equatable, Sendable {
+        public var workspace: Bool?
+        public var focused = false
+        public var flagged: Bool?
+        public var canConvert = false
+        public var moveTargets: [String] = []
+        public var flaggedView = false
+        public var filtered = false
+
+        public init(workspace: Bool? = nil, focused: Bool = false, flagged: Bool? = nil, canConvert: Bool = false, moveTargets: [String] = [],
+                    flaggedView: Bool = false, filtered: Bool = false) {
+            self.workspace = workspace
+            self.focused = focused
+            self.flagged = flagged
+            self.canConvert = canConvert
+            self.moveTargets = moveTargets
+            self.flaggedView = flaggedView
+            self.filtered = filtered
+        }
+    }
+
+    /// structure is the sidebar's workspace section, as the Mac's sidebar menu has it: the workspace row's rename,
+    /// delete and focus, or the session's flag, companions and move, then the flagged view and focus filter.
+    public static func structure(_ structure: Structure, shortcuts: Shortcuts = [:]) -> [Entry] {
+        var menu = [Entry.command(.newWorkspace, shortcuts)]
+        if let named = structure.workspace {
+            var focus = Entry.command(.focusWorkspace, enabled: named, shortcuts)
+            focus.checked = structure.focused
+            menu += [.command(.renameWorkspace, enabled: named, shortcuts), .command(.deleteWorkspace, enabled: named, shortcuts), focus]
+        }
+        if let flagged = structure.flagged {
+            var flag = Entry.command(.toggleFlag, shortcuts)
+            flag.checked = flagged
+            let targets = structure.moveTargets.enumerated().map { index, name in
+                Entry(title: name, shortcut: "", pick: .moveToWorkspace(index), enabled: true, children: [])
+            }
+            menu += [flag, .command(.newCompanion, shortcuts), .command(.convertCompanion, enabled: structure.canConvert, shortcuts),
+                     Entry(title: "Move to", shortcut: "", pick: nil, enabled: !targets.isEmpty, children: targets)]
+        }
+        var flaggedView = Entry.command(.toggleFlaggedView, shortcuts)
+        flaggedView.checked = structure.flaggedView
+        var filter = Entry.command(.toggleWorkspaceFilter, shortcuts)
+        filter.checked = structure.filtered
+        return menu + [.separator, flaggedView, filter]
     }
 
     /// help is the Help menu: settings, the keymap, and Quit.

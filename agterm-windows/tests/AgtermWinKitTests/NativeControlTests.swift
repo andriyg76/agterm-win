@@ -4,22 +4,34 @@ import Testing
 import agtermCore
 
 @MainActor
+private func scratchStore() -> AppStore {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("native-control-\(UUID().uuidString)")
+    let store = AppStore(persistence: PersistenceStore(directory: directory, fileName: "window.json"), paneFinalizer: nil)
+    store.ensureRoot()
+    return store
+}
+
+@MainActor
 private final class FakeHost: NativeControlHost {
+    let localStore: AppStore
     var localSessions: [NativeControl.Local] = []
     var selectedSession: UUID?
     var serverWorkspaces: [ControlWorkspaceNode] = []
     var typed: [(String, UUID)] = []
     var renamed: [(UUID, String)] = []
     var closed: [UUID] = []
-    var serverCreates = 0
     var notified: [UUID] = []
     var fontPoints: Float = 11
     var screens: [UUID: (lines: [String], rows: Int)] = [:]
 
-    func add(_ name: String, command: String = "cmd.exe") -> UUID {
-        let id = UUID()
-        localSessions.append(NativeControl.Local(id: id, name: name, commandLine: command, exited: false, attention: false))
-        return id
+    init() {
+        localStore = scratchStore()
+    }
+
+    func add(_ name: String, command: String = "cmd.exe", in workspace: UUID? = nil) -> UUID {
+        let session = localStore.addSession(toWorkspace: workspace ?? localStore.rootWorkspace!.id, cwd: "", command: command, select: false)!
+        localSessions.append(NativeControl.Local(id: session.id, name: name, commandLine: command, exited: false, attention: false))
+        return session.id
     }
 
     func isServerSession(_ id: UUID) -> Bool { serverWorkspaces.flatMap(\.sessions).contains { $0.id == id.uuidString } }
@@ -37,18 +49,34 @@ private final class FakeHost: NativeControlHost {
 
     func serverPageOverlay(for id: UUID) -> (page: HtmlOverlay, hidden: Bool)? { nil }
 
-    var cwds: [String?] = []
-    func newLocalSession(name: String?, command: String?, cwd: String?, select: Bool) -> UUID? {
-        cwds.append(cwd)
-        let id = add(name ?? "Windows PowerShell", command: command ?? "powershell.exe")
-        if select { selectedSession = id }
-        return id
+    var defaultCommand: String? = "powershell.exe"
+    var newSession: NativeStructure.NewSession? {
+        NativeStructure.NewSession(cwd: #"C:\home"#, command: defaultCommand) { _, _ in nil }
     }
 
-    func newServerSession() async -> ControlResponse {
-        serverCreates += 1
-        return ControlResponse(ok: true)
+    var remotes: [UUID: AppStore] = [:]
+    func remoteStore(_ window: UUID) -> AppStore? { remotes[window] }
+
+    var structureChanges = 0
+    func structureChanged(_ store: AppStore, selectionMoved: Bool) {
+        structureChanges += 1
+        guard store === localStore else { return }
+        let sessions = store.workspaces.flatMap(\.sessions)
+        localSessions.removeAll { local in !sessions.contains { $0.id == local.id } }
+        for session in sessions where !localSessions.contains(where: { $0.id == session.id }) {
+            localSessions.append(NativeControl.Local(id: session.id, name: session.customName ?? "Windows PowerShell",
+                                                     commandLine: session.initialCommand ?? "", exited: false, attention: false))
+        }
+        if selectionMoved { selectedSession = store.selectedSessionID }
     }
+
+    var performed: [(RemoteOperation, UUID)] = []
+    func performRemote(_ operation: RemoteOperation, window: UUID, select: Bool) async -> ControlResponse {
+        performed.append((operation, window))
+        return ControlResponse(ok: true, result: ControlResult(id: "S1"))
+    }
+
+    var navigationOrder: [UUID] { localSessions.map(\.id) }
 
     func closeSession(_ id: UUID) async -> ControlResponse {
         closed.append(id)
@@ -218,12 +246,12 @@ struct NativeControlTests {
 
     @Test func windowListReportsEveryRemoteAsARemoteWindow() async {
         let host = FakeHost()
-        let before = await handle(ControlRequest(cmd: .windowList), host).result?.windows?.first
+        let before = await handle(ControlRequest(cmd: .windowList), host).result?.windows?.first { $0.remote != nil }
         #expect(before?.id == NativeControl.remoteWindowID("Ubuntu").uuidString && before?.open == false)
         #expect(before?.remote?.host == "Ubuntu" && before?.remote?.state == nil)
         let opened = await handle(ControlRequest(cmd: .windowRemoteOpen, args: ControlArgs(host: "Ubuntu")), host)
         #expect(opened.result?.id == before?.id)
-        let after = await handle(ControlRequest(cmd: .windowList), host).result?.windows?.first
+        let after = await handle(ControlRequest(cmd: .windowList), host).result?.windows?.first { $0.remote != nil }
         #expect(after?.open == true && after?.remote?.state == "connected")
     }
 
@@ -244,24 +272,71 @@ struct NativeControlTests {
         #expect(host.created.first?.name == "Ubuntu" && host.created.first?.create.cwd == "/tmp")
     }
 
-    @Test func treeListsLocalSessionsAheadOfTheServersWorkspaces() async {
+    @Test func bareTreeIsTheLocalWindowAndAWindowTreeIsTheServers() async {
         let host = FakeHost()
-        let shell = host.add("Windows PowerShell")
-        host.selectedSession = shell
-        let server = ControlSessionNode(id: UUID().uuidString, name: "zsh", cwd: "~", active: false, split: false, backedByZmx: true)
-        host.serverWorkspaces = [ControlWorkspaceNode(id: UUID().uuidString, name: "dev", active: false, sessions: [server])]
+        let dev = host.localStore.addWorkspace(name: "dev")
+        let shell = host.add("Windows PowerShell", in: dev.id)
+        _ = host.localStore.selectSession(shell)
         let tree = try! #require(await handle(ControlRequest(cmd: .tree), host).result?.tree)
-        #expect(tree.workspaces.map(\.name) == ["Local", "dev"])
-        #expect(tree.workspaces[0].sessions.map(\.name) == ["Windows PowerShell"])
-        #expect(tree.workspaces[0].sessions[0].active && tree.workspaces[0].active)
-        #expect(tree.workspaces[0].sessions[0].restoreCommand == "cmd.exe")
+        let named = try! #require(tree.workspaces.first { $0.name == "dev" })
+        #expect(named.sessions.map(\.name) == ["Windows PowerShell"] && named.sessions[0].active && named.active)
+        #expect(named.sessions[0].restoreCommand == "cmd.exe")
+        let served = scratchStore()
+        served.ensureRoot()
+        _ = served.addWorkspace(name: "srv")
+        let remote = NativeControl.remoteWindowID("Ubuntu")
+        #expect(await handle(ControlRequest(cmd: .tree, args: ControlArgs(window: remote.uuidString)), host).error == "remote window is not connected")
+        host.remotes[remote] = served
+        let server = try! #require(await handle(ControlRequest(cmd: .tree, args: ControlArgs(window: remote.uuidString)), host).result?.tree)
+        #expect(server.workspaces.contains { $0.name == "srv" } && !tree.workspaces.contains { $0.name == "srv" })
     }
 
-    @Test func treeHasNoLocalGroupWithoutLocalSessions() async {
+    @Test func windowListPutsTheLocalWindowFirst() async {
+        let windows = await handle(ControlRequest(cmd: .windowList), FakeHost()).result?.windows ?? []
+        #expect(windows.first?.id == LocalWindow.id.uuidString && windows.first?.active == true)
+    }
+
+    @Test func workspaceCommandsShapeTheLocalTree() async {
         let host = FakeHost()
-        #expect(await handle(ControlRequest(cmd: .tree), host).result?.tree?.workspaces.isEmpty == true)
+        let created = await handle(ControlRequest(cmd: .workspaceNew, args: ControlArgs(name: "api")), host)
+        let id = try! #require(created.result?.id)
+        #expect(await handle(ControlRequest(cmd: .workspaceRename, target: id, args: ControlArgs(name: "backend")), host).ok)
+        let session = host.add("a")
+        var move = ControlArgs()
+        move.workspace = id
+        #expect(await handle(ControlRequest(cmd: .sessionMove, target: session.uuidString, args: move), host).ok)
+        var flag = ControlArgs()
+        flag.mode = "on"
+        #expect(await handle(ControlRequest(cmd: .sessionFlag, target: session.uuidString, args: flag), host).ok)
+        let tree = try! #require(await handle(ControlRequest(cmd: .tree), host).result?.tree)
+        let backend = try! #require(tree.workspaces.first { $0.name == "backend" })
+        #expect(backend.sessions.map(\.id) == [session.uuidString] && backend.sessions[0].flagged == true)
+        #expect(await handle(ControlRequest(cmd: .workspaceDelete, target: id), host).ok)
+        #expect(host.localSessions.isEmpty && host.localStore.workspace(named: "backend") == nil)
     }
 
+    @Test func aCompanionNestsUnderItsSessionInTheTree() async {
+        let host = FakeHost()
+        let parent = host.add("a")
+        let companion = await handle(ControlRequest(cmd: .sessionCompanionNew, target: parent.uuidString), host)
+        let id = try! #require(companion.result?.id)
+        let sessions = try! #require(await handle(ControlRequest(cmd: .tree), host).result?.tree?.workspaces.flatMap(\.sessions))
+        #expect(sessions.first { $0.id == id }?.parent == parent.uuidString)
+        #expect(host.localSessions.count == 2)
+    }
+
+    @Test func aServerWorkspacesStructureGoesToItsServer() async {
+        let host = FakeHost()
+        let served = scratchStore()
+        served.ensureRoot()
+        let srv = served.addWorkspace(name: "srv")
+        let remote = NativeControl.remoteWindowID("Ubuntu")
+        host.remotes[remote] = served
+        #expect(await handle(ControlRequest(cmd: .workspaceRename, target: srv.id.uuidString, args: ControlArgs(name: "x")), host).ok)
+        #expect(host.performed.map(\.1) == [remote] && served.workspace(named: "srv") != nil)
+        #expect(await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(workspace: srv.id.uuidString)), host).ok)
+        #expect(host.performed.count == 2 && host.localSessions.isEmpty)
+    }
     @Test func sidebarWidthSetsAndEchoesOnTree() async {
         let host = FakeHost()
         let set = await handle(ControlRequest(cmd: .sidebarWidth, args: ControlArgs(sidebarWidth: 271.3)), host)
@@ -326,22 +401,25 @@ struct NativeControlTests {
 
     @Test func treeReportsALocalSessionsDirectoryAndTitle() async {
         let host = FakeHost()
-        host.localSessions = [NativeControl.Local(id: UUID(), name: "agterm", commandLine: "pwsh.exe", exited: false, attention: false,
+        let id = host.add("agterm", command: "pwsh.exe")
+        host.localSessions = [NativeControl.Local(id: id, name: "agterm", commandLine: "pwsh.exe", exited: false, attention: false,
                                                   cwd: #"C:\dev\agterm"#, title: "vim")]
-        let session = try! #require(await handle(ControlRequest(cmd: .tree), host).result?.tree?.workspaces.first?.sessions.first)
+        let sessions = try! #require(await handle(ControlRequest(cmd: .tree), host).result?.tree?.workspaces.flatMap(\.sessions))
+        let session = try! #require(sessions.first { $0.id == id.uuidString })
         #expect(session.cwd == #"C:\dev\agterm"# && session.title == "vim")
     }
 
-    @Test func newSessionStartsLocallyUnlessTheWorkspaceIsTheServers() async {
+    @Test func newSessionStartsInTheLocalTreeWithItsNameFolderAndCommand() async {
         let host = FakeHost()
-        let workspace = UUID()
-        host.serverWorkspaces = [ControlWorkspaceNode(id: workspace.uuidString, name: "dev", active: false, sessions: [])]
         let local = await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(name: "logs", cwd: #"C:\dev"#, command: "cmd.exe /k")), host)
-        #expect(host.cwds == [#"C:\dev"#])
-        #expect(local.ok && host.localSessions.map(\.name) == ["logs"] && host.selectedSession?.uuidString == local.result?.id)
+        let id = try! #require(local.result?.id.flatMap(UUID.init(uuidString:)))
+        let stored = try! #require(host.localStore.session(withID: id))
+        #expect(stored.initialCwd == #"C:\dev"# && stored.initialCommand == "cmd.exe /k" && stored.customName == "logs")
+        #expect(host.localSessions.map(\.name) == ["logs"] && host.selectedSession == id)
         #expect(await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(workspace: "dev-no")), host).error == "no such workspace: dev-no")
-        #expect(await handle(ControlRequest(cmd: .sessionNew, args: ControlArgs(workspace: workspace.uuidString)), host).ok)
-        #expect(host.serverCreates == 1)
+        let plain = await handle(ControlRequest(cmd: .sessionNew), host)
+        let profile = try! #require(plain.result?.id.flatMap(UUID.init(uuidString:)).flatMap(host.localStore.session(withID:)))
+        #expect(profile.initialCommand == "powershell.exe" && profile.initialCwd == #"C:\home"#)
     }
 
     @Test func newSessionWithNoSelectKeepsTheSelection() async {

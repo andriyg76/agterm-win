@@ -328,6 +328,15 @@ extern "C" int32_t nt_tree_label_edit(intptr_t notification, int64_t *tag, uint1
     return 2;
 }
 
+extern "C" int32_t nt_tree_expanded(intptr_t notification, int64_t *tag, int32_t *expanded) {
+    auto header = reinterpret_cast<const NMHDR *>(notification);
+    if (header->code != TVN_ITEMEXPANDEDW) return 0;
+    auto change = reinterpret_cast<const NMTREEVIEWW *>(notification);
+    *tag = static_cast<int64_t>(change->itemNew.lParam);
+    *expanded = (change->action & TVE_EXPAND) != 0;
+    return 1;
+}
+
 extern "C" void nt_tree_edit(void *tree, void *item) {
     SetFocus(static_cast<HWND>(tree));
     TreeView_EditLabel(static_cast<HWND>(tree), static_cast<HTREEITEM>(item));

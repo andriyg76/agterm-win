@@ -70,11 +70,11 @@ struct WindowsKeymapTests {
     }
 
     @Test func whatWindowsLacksIsReported() {
-        let keymap = WindowsKeymap(text: "map ctrl+alt+d toggle_flag\ncommand \"git\" ctrl+alt+g lazygit")
+        let keymap = WindowsKeymap(text: "map ctrl+alt+d toggle_sidebar\ncommand \"git\" ctrl+alt+g lazygit")
         let messages = keymap.diagnostics.map(\.message)
-        #expect(messages.contains("'toggle_flag' is not available on Windows"))
+        #expect(messages.contains("'toggle_sidebar' is not available on Windows"))
         #expect(messages.contains("custom commands are not supported on Windows yet; 1 skipped"))
-        #expect(keymap.control.actions.allSatisfy { $0.action != "toggle_flag" } && keymap.control.commands.isEmpty)
+        #expect(keymap.control.actions.allSatisfy { $0.action != "toggle_sidebar" } && keymap.control.commands.isEmpty)
     }
 
     @Test func aGlobalHotkeyBecomesRegisterHotKeysChord() {
