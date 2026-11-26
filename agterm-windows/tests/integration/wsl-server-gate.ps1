@@ -19,27 +19,26 @@ $Results = (Resolve-Path $Results).Path
 . (Join-Path $PSScriptRoot "shell-cases.ps1")
 
 $shellPreparations["wsl-ensure-live"] = {
-    param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$Distribution`": `"atLaunch`"}}"
+    param($state) Set-RemoteProperties $state @($Distribution) @{ $Distribution = "atLaunch" }
 }
 $shellCases["wsl-ensure-live"] = {
     param($Shell)
     $state = $Shell.State
     $failures = @()
     $null = Wait-Until { (Invoke-Ctl $state @("tree")).ok } 30
-    $server = Wait-Until {
-        $s = (Invoke-Ctl $state @("wsl", "list")).result.wsl | ? { $_.distribution -eq $Distribution } | Select-Object -First 1
-        if ($s.started -and $s.connected) { $s }
-    } 60
+    $server = Wait-Until { $s = Get-WSLServer $state $Distribution; if ($s.started -and $s.connected) { $s } } 60
     if (-not $server) {
         return @("$Distribution did not connect; check agterm-win.log and the sidebar notice")
     }
     $log = Get-AgtermWinLog $state
-    if (-not $log.Contains("wsl inspect $Distribution")) { $failures += "log lacks wsl inspect" }
+    if (-not $log.Contains("remote inspect $Distribution")) { $failures += "log lacks remote inspect" }
     if ($log.Contains("downloading https://github.com/umputun/agterm/releases") -and $log -notmatch "needs ") {
         # a matching install is fine after a version bump; a probe-only launch should not download needlessly
     }
-    $workspaces = (Invoke-Ctl $state @("tree")).result.tree.wslServers | ? { $_.label -match $Distribution }
-    if (-not $workspaces) { $failures += "tree shows no catalog for $Distribution" }
+    $created = Invoke-Ctl $state @("session", "new", "--remote", $Distribution, "--workspace-name", "gate")
+    if (-not $created.ok) { return $failures + @("session new --remote replied $($created | ConvertTo-Json -Compress)") }
+    $node = Wait-Until { Get-Node $state $created.result.id } 30
+    if ($node.remoteHost -ne $Distribution) { $failures += "the new session reads remoteHost '$($node.remoteHost)'" }
     Save-Snapshot $Shell "live-connected"
     $failures
 }

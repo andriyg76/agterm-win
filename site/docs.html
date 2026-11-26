@@ -1030,6 +1030,19 @@ agtermctl session new --remote srv --window &quot;$win&quot;                   #
 <li>A service edited to use another state directory also needs <code>AGTERM_STATE_DIR</code> set to it.</li>
 <li>A development build has no release to install. From a checkout of this repository, <code>scripts/setup-zmx-linux.sh</code> stages the Linux artifacts once and <code>scripts/install-server.sh HOST</code> builds the server from the tree and installs it the same way. It needs Docker, the toolchain of a <a href="#install">source build</a>, and key-based ssh.</li>
 </ul>
+<h3 id="remote-properties">Hosts reached without ssh</h3>
+<p><code>remote.properties</code>, next to <code>keymap.conf</code>, names hosts that agterm reaches with a command of your own instead of <code>ssh HOST</code>, such as a WSL distribution or a container:</p>
+<pre><code># remote.properties: name = command
+Ubuntu = wsl.exe -d Ubuntu -e
+box = docker exec -i box</code></pre>
+<ul>
+<li>The format is Java properties: <code>#</code> and <code>!</code> start a comment, blank lines are ignored, the name ends at the first <code>=</code>, <code>:</code> or space, and a trailing <code>\</code> continues the line. The command splits into words at spaces; quotes keep one word.</li>
+<li>Every remote command agterm runs on that host becomes the command followed by <code>/bin/sh -c SCRIPT</code>, so the command must run the words after it as a program (<code>wsl.exe -e</code>, not <code>wsl.exe --</code>).</li>
+<li>Use the name wherever a host goes: <code>agtermctl window remote open Ubuntu</code>, <code>session new --remote Ubuntu</code>, <code>server install Ubuntu</code>, and <code>window list</code> reports it. Any other destination is an ssh host.</li>
+<li>Such a host gets no ssh connection sharing, keepalive or port forward: a page served on its localhost opens at its own port, which WSL2 shares with Windows. <code>server install</code> takes none of ssh's <code>-p</code>, <code>-i</code>, <code>-J</code> or <code>-F</code> for it.</li>
+<li>agterm re-reads the file when it changes; a bad line is skipped and a notification counts the issues.</li>
+<li>agterm for Windows writes the file with a line per WSL distribution when it does not exist, and never rewrites it.</li>
+</ul>
 <h3 id="remote-window">Open a remote window</h3>
 <p><strong>File ▸ Open Remote Window…</strong> offers the hosts in <code>remotes.conf</code>, the same list Attach Remote… reads, and opens the only one without asking. It is the <code>open_remote_window</code> keymap action, with no default key. <code>agtermctl window remote open HOST</code> does the same and prints the window id. A window already showing that host is raised rather than opened twice.</p>
 <p>The sidebar is the server's: creating, renaming, splitting, moving and closing sessions and workspaces happen on the server. Selection, focus, font size, split dividers and the window frame stay on this Mac.</p>

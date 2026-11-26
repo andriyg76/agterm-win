@@ -63,7 +63,11 @@ installing its client. Each case leaves `screen.txt`, its state directory (`agte
 `cases.json` under the results folder.
 `wsl-cases.ps1` start a distribution no machine has, so they need no WSL and run in Sandbox and on CI too: they read
 back what was started, asked and saved, and how WSL auto-ensure probes and reports failures. Cases `wsl-ensure-probe`,
-`wsl-ensure-reprobe`, and `wsl-install-unreachable` pin that behaviour; only a live install connects. `notice-bar` uses
+`wsl-ensure-reprobe`, and `wsl-install-unreachable` pin that behaviour; only a live install connects. Each seeds
+`config\remote.properties` with `agterm-test-absent = wsl.exe -d agterm-test-absent -e`, except `wsl-not-at-launch`,
+which checks the file agterm writes from `wsl -l -q`. They read a remote through `window list` as its remote window,
+open it with `window remote open`, try `session new --remote`, and change its start at launch in Settings ▸ General;
+`wsl-install-unreachable` also runs `agtermctl server install` and expects the reason the notice showed. `notice-bar` uses
 that failure to drag the notice bar to the bottom and back, check the terminal reflows and the bar follows the theme,
 press Retry, and close it, reading the bar's text, position and pixels.
 

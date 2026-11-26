@@ -61,6 +61,8 @@ public final class SshConnectionPool {
     /// that one start. False when there is no master, and the caller then fails its attempt rather than connect.
     @discardableResult
     public func ready(_ path: String) async -> Bool {
+        // a remote.properties host runs its own command per channel, which every builder sends without the master
+        if !closed, RemoteCommands.current.command(for: host) != nil { return true }
         guard !closed, RemoteSession.isHost(host), let slot = slots.first(where: { $0.path == path }) else { return false }
         if let preparing = slot.preparing { return await preparing.value }
         let task = Task { @MainActor [weak self, runner, host] in
@@ -83,7 +85,7 @@ public final class SshConnectionPool {
     /// close drops every lease and returns the commands that end the pool's masters.
     public func close() -> [[String]] {
         closed = true
-        let commands = slots.map { Self.exitCommand(host: host, path: $0.path) }
+        let commands = RemoteCommands.current.command(for: host) != nil ? [] : slots.map { Self.exitCommand(host: host, path: $0.path) }
         slots.removeAll()
         return commands
     }

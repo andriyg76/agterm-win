@@ -172,12 +172,6 @@ public enum Command: String, Codable, Sendable, CaseIterable {
     /// sessionOverlayPageServe is a viewer's helper claiming a handed-over page by its single-use token; after an
     /// ok reply the connection carries page channel frames.
     case sessionOverlayPageServe = "session.overlay.page.serve"
-    #if os(Windows)
-    /// The WSL agterm-servers agterm-win can start: listed, started, and chosen to start at launch (`ControlWSL`).
-    case wslList = "wsl.list"
-    case wslStart = "wsl.start"
-    case wslLaunch = "wsl.launch"
-    #endif
     /// UI-TEST-ONLY: forces the app-level appearance (`light`|`dark` via `args.name`) so an XCUITest can
     /// simulate a macOS light/dark flip; with NO name it READS the side the last config feed applied, so a
     /// test can assert the flip drove the reload. Refused outside an XCUITest launch, and EXEMPT from the
@@ -812,8 +806,6 @@ public struct ControlResult: Codable, Sendable, Equatable {
     public var remoteGroup: ControlRemoteGroup?
     /// updates is the Sparkle schedule on `version`, omitted by a build with no update feed.
     public var updates: ControlUpdateStatus?
-    /// wsl is agterm-win's WSL agterm-servers, for `wsl.list`, `wsl.start` and `wsl.launch`.
-    public var wsl: [ControlWSLServer]?
 
     public init(id: String? = nil, tree: ControlTree? = nil, text: String? = nil,
                 windows: [ControlWindowNode]? = nil, exitCode: Int? = nil, count: Int? = nil,
@@ -835,8 +827,7 @@ public struct ControlResult: Codable, Sendable, Equatable {
                 messageID: String? = nil, delivered: [String]? = nil, rejected: [MessageRejection]? = nil,
                 messages: [BusMessage]? = nil, remaining: Int? = nil, acked: [String]? = nil,
                 remoteGroup: ControlRemoteGroup? = nil, macCatalog: CatalogVersions? = nil,
-                updates: ControlUpdateStatus? = nil, wsl: [ControlWSLServer]? = nil) {
-        self.wsl = wsl
+                updates: ControlUpdateStatus? = nil) {
         self.updates = updates
         self.macCatalog = macCatalog
         self.messageID = messageID
