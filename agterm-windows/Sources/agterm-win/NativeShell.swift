@@ -1765,7 +1765,9 @@ final class NativeShell {
                 return "the origin cannot be reached for this page"
             }
         }
-        let frame = PageOverlayFrame(parent: window, dataFolder: stateDirectory.appendingPathComponent("WebView2"))
+        let frame = PageOverlayFrame(parent: window, dataFolder: stateDirectory.appendingPathComponent("WebView2")) { [weak self] in
+            self?.closeOverlay(sessionID)
+        }
         var overlay = slot.page
         overlay.loadState = .loading
         serverPageOverlays[sessionID] = ServerPageOverlay(page: overlay, sizePercent: page.sizePercent, hidden: false,
@@ -1893,11 +1895,13 @@ final class NativeShell {
 
     private func replicaPageReleased(local: Foundation.UUID, origin: Foundation.UUID) {
         guard let (sessionID, slot) = serverPageOverlays.first(where: { $0.value.page.id == local }) else { return }
+        let focused = slot.frame.hasFocus
         serverPageOverlays.removeValue(forKey: sessionID)
         slot.channel?.close()
         slot.frame.destroy()
         placeOverlays()
         rebuild()
+        if focused { focus() }
         server(of: sessionID)?.remote.answerPresentation(sessionID, .pageClosed(PresentationPageChange(
             page: origin.uuidString, offer: slot.offer)))
     }
@@ -3458,7 +3462,9 @@ extension NativeShell: NativeControlHost {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         guard locals[index].overlay == nil else { return }
         if selected != id { select(id) }
-        let frame = PageOverlayFrame(parent: window, dataFolder: stateDirectory.appendingPathComponent("WebView2"))
+        let frame = PageOverlayFrame(parent: window, dataFolder: stateDirectory.appendingPathComponent("WebView2")) { [weak self] in
+            self?.closeOverlay(id)
+        }
         var page = overlay
         page.loadState = .loading
         switch page.source {
@@ -3475,7 +3481,7 @@ extension NativeShell: NativeControlHost {
 
     private func removePageOverlay(_ id: Foundation.UUID, frame: PageOverlayFrame) {
         guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay?.frame === frame else { return }
-        let focused = hasFocus(id)
+        let focused = frame.hasFocus || hasFocus(id)
         locals[index].pageOverlay = nil
         frame.destroy()
         placeOverlays()
