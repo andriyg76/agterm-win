@@ -179,18 +179,20 @@ typedef struct {
     uint16_t glyph;
     int32_t kind, state;
 } nt_title_button;
-// nt_title_bar_paint answers the window's WM_PAINT: the bar across the top `height` pixels, the background below it.
+// nt_title_bar_paint paints the caption and menu strip above menu_bottom, then the background below them.
 typedef struct {
     int32_t left, right;
     const uint16_t *label;
     int32_t lit;
 } nt_menu_tab;
 /// `icon_width` is the client strip on the left that shows the app icon; `icon_lit` highlights it like a hovered tab.
-void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, int32_t icon_width, int32_t icon_lit,
+void nt_title_bar_paint(void *window, uint32_t dpi, int32_t height, int32_t menu_bottom, int32_t icon_width, int32_t icon_lit,
                         const uint16_t *title, int32_t title_left, int32_t title_right, const nt_title_button *buttons,
                         int32_t count, int32_t active, const nt_menu_tab *tabs, int32_t tab_count);
 // A tooltip over rectangles of `parent`'s client; nt_tooltip_set with an empty text removes the tool `id`.
 void *nt_tooltip_create(void *parent);
+void nt_tooltip_for_control(void *tip, void *parent, void *control, const uint16_t *text);
+void nt_sidebar_button_paint(intptr_t notification, uint32_t dpi, uint16_t glyph, int32_t checked);
 void nt_tooltip_set(void *tip, void *parent, uintptr_t id, int32_t left, int32_t top, int32_t right, int32_t bottom,
                     const uint16_t *text);
 

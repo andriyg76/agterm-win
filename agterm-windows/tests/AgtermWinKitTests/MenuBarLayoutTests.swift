@@ -2,7 +2,7 @@ import AgtermWinKit
 import Testing
 
 struct MenuBarLayoutTests {
-    @Test func allFourMenusFitOnAWideBar() {
+    @Test func allFiveMenusFitOnAWideBar() {
         let limit: Int32 = 1200
         let start: Int32 = 100
         let spans = MenuBarLayout.menuSpans(origin: start, limit: limit, dpi: 96)

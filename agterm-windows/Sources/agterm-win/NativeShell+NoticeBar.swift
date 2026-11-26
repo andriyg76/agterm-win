@@ -7,7 +7,7 @@ extension NativeShell {
     /// contentSpan is the client band the sidebar and the sessions share: under the title bar, less the notice bar
     /// while it shows a notice.
     var contentSpan: (top: Int32, bottom: Int32) {
-        var top = titleBar.height, bottom = clientRect.bottom
+        var top = titleBar.contentTop, bottom = clientRect.bottom
         if let bar = noticeWindow, bar.state.shown != nil {
             if bar.state.position == .top { top += bar.height } else { bottom -= bar.height }
         }

@@ -13,7 +13,7 @@ These defaults are applied by this change. Existing menu/control actions stay av
 | Action | macOS default | Windows default | Behavior / scope |
 |---|---|---|---|
 | New Session | Command+N | Ctrl+N | In the selected session's workspace: Local, or that session's server workspace. With no selected session, use the local default profile. |
-| Close Session | Command+W | Ctrl+W | Dismiss a visible overlay first; otherwise close the session. |
+| Close Session | Command+W | Ctrl+W; Ctrl+F4 | Dismiss a visible overlay first; otherwise close the session. Ctrl+F4 is available when it is free in the keymap. |
 | Previous / next session | Command+Option+Up / Down | Ctrl+Alt+Left / Right | Sidebar order, wrapping; distinct from the future MRU switcher. |
 | Find | Command+F | Ctrl+F | Search terminal output. |
 | Increase font size | Command++ | Ctrl++ | The plus key is Ctrl+Shift+= (`ctrl+shift+=` in keymap.conf); Ctrl+= is not an alias. |
@@ -26,6 +26,7 @@ These defaults are applied by this change. Existing menu/control actions stay av
 | Quick Terminal | Ctrl+backtick | Ctrl+backtick | In-app toggle; a system-wide shortcut requires an explicit `global-hotkey` configuration. |
 | Session Palette | Ctrl+P | Ctrl+P | Intentionally takes Ctrl+P from shell history navigation. |
 | Command Palette | Ctrl+Shift+P | Ctrl+Shift+P | Search application commands. |
+| Show Attention | Ctrl+Shift+I | Ctrl+Alt+I | Open the Attention palette for non-idle agent sessions. Ctrl+Shift+I still pastes on Windows. |
 | Dashboard | Command+Shift+G | Ctrl+Shift+G | Existing local-pane dashboard. |
 | Copy | Command+C | Ctrl+Shift+C; Ctrl+Insert | Ctrl+C also copies while a terminal selection exists; otherwise it reaches the process. |
 | Paste | Command+V | Ctrl+Shift+V; Shift+Insert; Ctrl+Shift+I | All three invoke the same paste action. |
@@ -58,7 +59,6 @@ or control; a documented reservation is not a system-wide or runtime registratio
 | Toggle Flag | Command+Shift+F | Ctrl+Shift+F | Session flags and action. |
 | Fullscreen | Command+Ctrl+F | F11 | True fullscreen/window restoration, not maximization. Win+Shift+F is unassigned. |
 | Toggle Sidebar | Command+Ctrl+S | None | Sidebar visibility action; Ctrl+Alt+S belongs to Settings. |
-| Show Attention | Ctrl+Shift+I | None | Attention overview; Ctrl+Shift+I belongs to Paste. |
 
 ## Overrides and retired defaults
 
