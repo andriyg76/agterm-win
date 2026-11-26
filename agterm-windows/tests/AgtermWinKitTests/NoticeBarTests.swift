@@ -39,16 +39,6 @@ struct NoticeBarTests {
         #expect(state.shown == failed)
     }
 
-    @Test func controlReadBackNamesSeverityActionsAndDismissal() {
-        var state = NoticeBar.State(position: .bottom)
-        state.update([failed, installed])
-        _ = state.dismissShown()
-        #expect(state.control == ControlNoticeBar(position: "bottom", notices: [
-            ControlNotice(text: failed.text, severity: "error", actions: ["retry", "openLog"], dismissed: true),
-            ControlNotice(text: installed.text, severity: "info"),
-        ]))
-    }
-
     @Test func menuOffersTheActionsTheMovesAndDismiss() {
         var state = NoticeBar.State()
         #expect(NoticeBar.menu(state) == [.moveTo(.top), .moveTo(.bottom)])

@@ -1,16 +1,17 @@
 import Foundation
+import AgtermWinKit
 import agtermCore
 
 /// RemoteWindow is one window onto an agterm-server, wired as the Mac wires its remote windows: an AppStore the
-/// catalog mirror keeps equal to the server's catalog, fed by RemoteCatalogClient over the WSL transport.
+/// catalog mirror keeps equal to the server's catalog, fed by RemoteCatalogClient over the remote's own command.
 @MainActor
 final class RemoteWindow: RemoteCatalogEffects {
-    let host: WSLHost
+    let host: RemoteHost
     let store: AppStore
     private(set) var mirror: RemoteCatalogMirror!
     private var client: RemoteCatalogClient!
     private(set) var actions: RemoteCatalogActions!
-    private let transport: WSLTransport
+    private let transport: RemoteTransport
     /// changed runs whenever what the sidebar shows may have moved.
     var changed: () -> Void = {}
     /// onNotification runs with a notification a server session posted, from its program or a `notify` there.
@@ -39,14 +40,14 @@ final class RemoteWindow: RemoteCatalogEffects {
     private var presenters: [UUID: RemotePresentationClient] = [:]
     private var ticking: Task<Void, Never>?
 
-    init(host: WSLHost, stateDirectory: URL) {
+    init(host: RemoteHost, stateDirectory: URL) {
         self.host = host
-        transport = WSLTransport(host: host)
+        transport = RemoteTransport(host: host)
         let windows = stateDirectory.appendingPathComponent("windows")
         try? FileManager.default.createDirectory(at: windows, withIntermediateDirectories: true)
-        store = AppStore(persistence: PersistenceStore(directory: windows, fileName: "wsl-\(host.distribution).json"),
+        store = AppStore(persistence: PersistenceStore(directory: windows, fileName: "remote-\(NativeControl.remoteWindowID(host.name).uuidString).json"),
                          paneFinalizer: nil)
-        mirror = RemoteCatalogMirror(host: "wsl-\(host.distribution)", store: store, effects: self,
+        mirror = RemoteCatalogMirror(host: host.name, store: store, effects: self,
                                      viewState: RemoteWindowViewState())
         mirror.onCatalogMoved = { [weak self] whole in
             log("catalog moved (snapshot: \(whole)), \(self?.store.workspaces.count ?? 0) workspace(s)")
@@ -115,7 +116,7 @@ final class RemoteWindow: RemoteCatalogEffects {
         guard presenters[id] == nil, session.content == .terminal, let binding = session.remotePresentation?.binding else { return }
         let argv: [String]
         do {
-            argv = try RemoteSession.presentCommand(host: "wsl", session: binding.remoteSessionID)
+            argv = try RemoteSession.presentCommand(host: host.name, session: binding.remoteSessionID)
         } catch {
             log("presentation for \(id): \(error)")
             return

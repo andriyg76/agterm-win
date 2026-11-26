@@ -103,6 +103,8 @@ extension ControlServer {
     /// window's pool for one of its rows, in an ssh of its own for a row attached from another host.
     func forwardLoopback(_ page: ForwardedPage, row: UUID, done: @escaping @MainActor (URL?) -> Void) {
         guard let store = library.store(forSession: row), let host = store.session(withID: row)?.remoteHost else { return done(nil) }
+        // a remote.properties host shares this Mac's loopback or reaches it its own way: no ssh to forward through
+        if RemoteCommands.current.command(for: host) != nil { return done(page.url(localPort: page.port)) }
         let pool = catalogPool(forSession: row)
         let key = LinkForwards.Key(window: pool == nil ? nil : library.windowID(for: store), sshHost: host, host: page.host,
                                    port: page.port)

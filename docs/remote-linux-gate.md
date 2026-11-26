@@ -119,7 +119,8 @@ multiplexing, so the pool now removes it before starting one.
 
 CI integration case `overlay-server-program` always runs a disconnected smoke (`agterm-test-absent` started,
 `session.overlay.open` on an unknown id returns `no such session`, `tree` still answers). For the full ctl overlay gate
-on a catalog row, set `AGTERM_WIN_GATE_WSL` to a distribution that starts agterm-server and connects, then run
+on a catalog row, set `AGTERM_WIN_GATE_WSL` to a distribution that starts agterm-server and connects (the case seeds it
+in `remote.properties` as `wsl.exe -d <name> -e`), then run
 `agterm-windows/tests/integration/run.ps1` on a staged build:
 
 ```powershell
@@ -129,7 +130,7 @@ $env:AGTERM_WIN_GATE_WSL = 'Ubuntu'   # or another listed distribution with agte
 
 | step | asserted |
 |---|---|
-| connected | `wsl list` reports `connected` for that distribution |
+| connected | `window list` reports that remote window's `remote.state` as `connected` |
 | presenter | the new server session's `presenters.presenter == true` |
 | program overlay | `session.overlay.open` / `text` / `close`; `tree.overlay` toggles; the session row stays |
 

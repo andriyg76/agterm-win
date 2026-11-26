@@ -87,14 +87,6 @@ public enum NoticeBar {
             dismissed.insert(shown)
             return true
         }
-
-        public var control: ControlNoticeBar {
-            ControlNoticeBar(position: position.rawValue, notices: messages.map { message in
-                ControlNotice(text: message.text, severity: message.severity.rawValue,
-                              actions: message.actions.isEmpty ? nil : message.actions.map(\.rawValue),
-                              dismissed: dismissed.contains(message) ? true : nil)
-            })
-        }
     }
 
     /// MenuItem is a row of the bar's right-click menu.

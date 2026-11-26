@@ -2904,10 +2904,20 @@ the signal when ssh was killed), and 64 for a usage error. Failures before the c
 - `ssh exited N; xterm-ghostty was not installed` — any other remote failure; ssh's own stderr above it
   says what happened.
 
+## remote.properties
+
+`<config dir>/remote.properties` (beside `keymap.conf`; `<stateDir>/config` under an isolated state dir) names hosts
+reached by a command instead of `ssh HOST`, one `name = command` per line in Java properties format (`#`/`!` comments):
+`Ubuntu = wsl.exe -d Ubuntu -e`. A destination that is a defined name runs every remote command as that command's
+words followed by `/bin/sh -c SCRIPT`, so the command must exec its arguments; any other destination stays ssh. The name
+works unchanged in `window remote open`, `session new --remote`, `server install` and `window list`. A defined remote
+gets no ssh connection sharing, keepalive or `-L` forward: a loopback page opens at its own port. agterm on Windows
+writes the file from `wsl -l -q` when it is absent and never rewrites it.
+
 ## server
 
-`agtermctl server install DESTINATION [--from FILE] [-p PORT] [-i FILE ...] [-J HOST] [-F FILE]` — macOS only: install or
-upgrade agterm-server on a Linux host. Local-only like `terminfo install`, with the same `DESTINATION`, the
+`agtermctl server install DESTINATION [--from FILE] [-p PORT] [-i FILE ...] [-J HOST] [-F FILE]` — install or
+upgrade agterm-server on a Linux host. On Windows it takes only a `remote.properties` name. Local-only like `terminfo install`, with the same `DESTINATION`, the
 same four ssh options, the same installer-owned execution settings and the same interactive connection.
 
 - It installs the release matching the app bundle this `agtermctl` belongs to: `uname -m` on the host picks

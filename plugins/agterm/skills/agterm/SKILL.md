@@ -1151,7 +1151,8 @@ HUD, ask and pick commands and refuses the ones that change a Mac window (`windo
 the read-back and what the server refuses. `session overlay open --page|--companion` there makes a page row
 from a file on the host or a URL, which a Mac's remote window shows as a page row.
 `agtermctl server install HOST`, run on the Mac, installs or upgrades the server release matching that app's own
-bundle (reference.md "server").
+bundle (reference.md "server"). A host reached by a command instead of ssh (a WSL distribution, a container) is
+named in `remote.properties` (reference.md "remote.properties").
 The same `window remote open` also opens one window of another Mac in Live sessions mode (`--origin-window W`
 picks it when that Mac has several); reference.md "remote server" says what differs from agterm-server.
 

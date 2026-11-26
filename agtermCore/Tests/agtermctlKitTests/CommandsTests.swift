@@ -1739,10 +1739,6 @@ struct CommandsTests {
         #expect(try request(["theme", "list"]) == ControlRequest(cmd: .themeList))
     }
 
-    @Test func settingsIsNoCommandOffWindows() {
-        #expect(throws: (any Error).self) { try Agtermctl.parseAsRoot(["settings", "open"]) }
-    }
-
     @Test func themeRejectsWindowSelector() {
         #expect(throws: (any Error).self) { try Agtermctl.parseAsRoot(["theme", "set", "Nord", "--window", "w1"]) }
     }

@@ -30,7 +30,7 @@ struct Server: ParsableCommand {
             the agent hooks are incomplete, and 1 on installation failure, with the reason on stderr. A development build \
             has no release to install; scripts/install-server.sh installs from a source tree.
             """)
-        @Argument(help: "The host, as ssh would take it: host, user@host, or an alias from ~/.ssh/config.")
+        @Argument(help: "The host, as ssh would take it: host, user@host, or an alias from ~/.ssh/config; or a remote.properties name.")
         var destination: String
         @Option(name: .short, help: ArgumentHelp("Port to connect to on the remote host.", valueName: "port"))
         var port: Int?
@@ -53,6 +53,7 @@ struct Server: ParsableCommand {
 
         // a bad destination is a refusal with exit 1 like every other, so it is checked in run, not validate
         func run() throws {
+            RemoteCommands.useConfigured()
             let code = try ServerInstaller(effects: .live).install(connection, source: source)
             if code != 0 { throw ExitCode(code) }
         }
@@ -93,6 +94,8 @@ struct ServerInstaller {
         let probe: [String]
         do {
             probe = try ServerInstall.probeCommand(connection)
+        } catch ServerInstall.Failure.sshOptionsForDefinedRemote(let name) {
+            throw SocketClientError("'\(name)' is defined in \(RemoteCommands.fileName), which takes no ssh options")
         } catch {
             throw SocketClientError("destination must be a host, user@host or an ssh alias, not '\(connection.destination)'")
         }

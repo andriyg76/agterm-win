@@ -13,6 +13,8 @@ public enum ServerInstall {
         case checksumMalformed(line: Int)
         /// checksumDuplicate means the checksum file names the asset more than once.
         case checksumDuplicate(asset: String)
+        /// sshOptionsForDefinedRemote means ssh options were given for a destination `remote.properties` defines.
+        case sshOptionsForDefinedRemote(String)
     }
 
     public static let architectures = ["aarch64", "x86_64"]
@@ -68,16 +70,32 @@ public enum ServerInstall {
     /// installerCommand runs the tarball's installer from where the unpack put it.
     static let installerCommand = #"bash "$HOME/.local/lib/agterm-server/install.sh""#
 
-    public static func probeCommand(_ connection: TerminfoInstall.Connection, ssh: String = "ssh") throws -> [String] {
-        try TerminfoInstall.sshCommand(connection, ssh: ssh) + ["uname -m"]
+    public static func probeCommand(_ connection: TerminfoInstall.Connection, ssh: String = "ssh",
+                                    remotes: RemoteCommands = .current) throws -> [String] {
+        try command(connection, ssh: ssh, remotes: remotes, line: "uname -m", script: "uname -m")
     }
 
-    public static func unpackCommand(_ connection: TerminfoInstall.Connection, ssh: String = "ssh") throws -> [String] {
-        try TerminfoInstall.sshCommand(connection, ssh: ssh) + ["sh -c '\(unpackScript)'"]
+    public static func unpackCommand(_ connection: TerminfoInstall.Connection, ssh: String = "ssh",
+                                     remotes: RemoteCommands = .current) throws -> [String] {
+        try command(connection, ssh: ssh, remotes: remotes, line: "sh -c '\(unpackScript)'", script: unpackScript)
     }
 
-    public static func installerCommand(_ connection: TerminfoInstall.Connection, ssh: String = "ssh") throws -> [String] {
-        try TerminfoInstall.sshCommand(connection, ssh: ssh) + [installerCommand]
+    public static func installerCommand(_ connection: TerminfoInstall.Connection, ssh: String = "ssh",
+                                        remotes: RemoteCommands = .current) throws -> [String] {
+        try command(connection, ssh: ssh, remotes: remotes, line: installerCommand, script: installerCommand)
+    }
+
+    /// command is ssh with `line` for the account's login shell, or a `remote.properties` remote's own command running
+    /// `script` under `/bin/sh -c`. ssh's port, identity, jump and config options have no meaning for the latter.
+    private static func command(_ connection: TerminfoInstall.Connection, ssh: String, remotes: RemoteCommands, line: String,
+                                script: String) throws -> [String] {
+        guard let prefix = remotes.command(for: connection.destination) else {
+            return try TerminfoInstall.sshCommand(connection, ssh: ssh) + [line]
+        }
+        guard connection == TerminfoInstall.Connection(destination: connection.destination) else {
+            throw Failure.sshOptionsForDefinedRemote(connection.destination)
+        }
+        return prefix + ["/bin/sh", "-c", script]
     }
 
     /// exitCode maps the installer's outcome to the command's: 0 installed, 3 installed with the agent hooks

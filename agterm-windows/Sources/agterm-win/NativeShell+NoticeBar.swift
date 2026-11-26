@@ -2,7 +2,7 @@ import AgtermWinKit
 import Foundation
 import WinSDK
 
-/// The notice bar's place in the window: what it takes from the content band, and the commands that move and close it.
+/// The notice bar's place in the window: what it takes from the content band, and what moves and closes it.
 extension NativeShell {
     /// contentSpan is the client band the sidebar and the sessions share: under the title bar, less the notice bar
     /// while it shows a notice.
@@ -15,8 +15,6 @@ extension NativeShell {
         }
         return (top, max(bottom, top + 1))
     }
-
-    var noticeBar: NoticeBar.State { noticeWindow?.state ?? NoticeBar.State(position: settings.noticeBarPosition) }
 
     func setNoticePosition(_ position: NoticeBar.Position) {
         log("native shell: notice bar at \(position.rawValue)")

@@ -72,14 +72,4 @@ public enum WSLServerEnsure {
         guard error?.isEmpty == false || (exitCode != 0 && exitCode != 3) else { return NoticeBar.Message(source: source, text: text, severity: .info) }
         return NoticeBar.Message(source: source, text: text, severity: .error, actions: [.install, .openLog])
     }
-
-    /// wslText decodes what wsl.exe printed: its own messages are UTF-16LE, the distribution's output UTF-8.
-    public static func wslText(_ data: Data) -> String {
-        let bytes = [UInt8](data)
-        guard bytes.count >= 2, bytes.count % 2 == 0, bytes[1] == 0 || bytes.starts(with: [0xFF, 0xFE]) else {
-            return String(decoding: bytes, as: UTF8.self)
-        }
-        let units = stride(from: 0, to: bytes.count, by: 2).map { UInt16(bytes[$0]) | UInt16(bytes[$0 + 1]) << 8 }
-        return String(decoding: units.first == 0xFEFF ? Array(units.dropFirst()) : units, as: UTF16.self)
-    }
 }

@@ -152,9 +152,6 @@ public protocol ControlActions {
     func sendNotification(_ target: String?, window: String?, title: String?, body: String) -> ControlResponse
     func setTheme(args: ControlArgs?) -> ControlResponse
     func listThemes() -> ControlResponse
-    #if os(Windows)
-    func openSettings(tab: SettingsTab) -> ControlResponse
-    #endif
     func setSidebarVisibility(_ mode: ControlToggleMode) -> ControlResponse
     func setSidebarViewMode(_ mode: ControlSidebarViewMode) -> ControlResponse
     func setFlaggedViewLayout(_ mode: ControlFlaggedLayoutMode) -> ControlResponse

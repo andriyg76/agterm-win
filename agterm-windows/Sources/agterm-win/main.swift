@@ -5,13 +5,13 @@ import WinSDK
 import agtermCore
 
 // The native Win32 implementation is the only application path:
-//   agterm-win.exe [--wsl <distribution>] [--profile <name>]...
-//   agterm-win.exe [--install-server] [--wsl <distribution>]
+//   agterm-win.exe [--wsl <remote>] [--profile <name>]...
+//   agterm-win.exe [--install-server] [--wsl <remote>]
 //   agterm-win.exe --local [<name>]
 //   agterm-win.exe -- <command line>
 //
-// A distribution's agterm-server starts only on `--wsl`, `--install-server`, the menu, or the choice to start it at launch.
-// Unless `--install-server` is set, agterm-win probes the distribution first and installs or starts agterm-server when needed.
+// A remote.properties remote's agterm-server starts only on `--wsl`, `--install-server`, the menu, or the choice to start it at launch.
+// Unless `--install-server` is set, agterm-win probes the remote first and installs or starts agterm-server when needed.
 // `--native` is accepted as a compatibility no-op for commands written while the implementation was introduced.
 // AGTERM_WIN_STATE_DIR isolates a test or second instance; AGTERM_WIN_TEST_SCREEN makes a command window write its
 // terminal text there when the program exits, then close.
@@ -92,6 +92,11 @@ MainActor.assumeIsolated {
     let configDirectory = ConfigPaths.configDirectory(setting: nil, stateDir: stateDirectory.path,
                                                       home: FileManager.default.homeDirectoryForCurrentUser)
     Keys.load(configDirectory: configDirectory)
+    RemoteCommands.use(configDirectory: configDirectory) { diagnostics in
+        for diagnostic in diagnostics { log("remote.properties line \(diagnostic.line): \(diagnostic.message)") }
+    }
+    // the agtermctl this app runs (server install) resolves the same state directory, and with it remote.properties
+    _ = SetEnvironmentVariableW(Array("AGTERM_STATE_DIR".utf16) + [0], Array(stateDirectory.path.utf16) + [0])
     TerminalAppearance.themes = TerminalThemes(userDirectory: configDirectory.appendingPathComponent("themes"),
                                                bundledDirectory: bundled("themes", source: "Resources/themes"))
     // a window without the sidebar draws and takes the mouse as Settings say too

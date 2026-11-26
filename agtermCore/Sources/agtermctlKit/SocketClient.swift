@@ -273,12 +273,6 @@ struct SocketClient {
         if let keymap = response.result?.keymap {
             return formatKeymap(keymap)
         }
-        if let wsl = response.result?.wsl {
-            return formatWSL(wsl)
-        }
-        if let bar = response.result?.noticeBar {
-            return formatNoticeBar(bar)
-        }
         if let hooks = response.result?.hooks {
             return formatHooks(hooks)
         }
@@ -356,25 +350,6 @@ struct SocketClient {
         bare.result?.receipt = nil
         let base = formatResponse(bare, echoID: echoID)
         return base == "ok" ? formatReceipt(receipt) : base + "\n" + formatReceipt(receipt)
-    }
-
-    /// formatWSL is one line a distribution: its name, whether its server runs, and whether it starts at launch.
-    static func formatWSL(_ servers: [ControlWSLServer]) -> String {
-        guard !servers.isEmpty else { return "no WSL distributions" }
-        return servers.map { server in
-            let state = server.connected ? "connected" : server.started ? "started" : "stopped"
-            let launch = server.launch.map { $0 == "atLaunch" ? "starts at launch" : "manual" } ?? "asks on first start"
-            return "\(server.distribution)\t\(state)\t\(launch)"
-        }.joined(separator: "\n")
-    }
-
-    /// formatNoticeBar is the bar's position, then a line a notice: severity, text, its actions, and whether it is dismissed.
-    static func formatNoticeBar(_ bar: ControlNoticeBar) -> String {
-        let lines = bar.notices.map { notice in
-            ([notice.severity, notice.text, notice.actions?.joined(separator: ","), notice.dismissed == true ? "dismissed" : nil]
-                .compactMap { $0 }).joined(separator: "\t")
-        }
-        return (["bar at \(bar.position)"] + (lines.isEmpty ? ["no notices"] : lines)).joined(separator: "\n")
     }
 
     /// formatReceipt names an operation's outcome and the catalog epoch it belongs to.
