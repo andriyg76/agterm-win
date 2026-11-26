@@ -46,12 +46,15 @@ public static class AgtermWin32 {
     }
 
     // Visible is the process's visible top-level windows of a class: its main window, a menu (#32768), a dialog (#32770).
-    public static IntPtr[] Visible(int pid, string className) {
+    public static IntPtr[] Visible(int pid, string className) { return Owned(pid, className, true); }
+
+    // Owned also lists hidden windows: in session 0, where ssh runs, a window never reads visible.
+    public static IntPtr[] Owned(int pid, string className, bool visibleOnly) {
         var found = new List<IntPtr>();
         EnumProc each = delegate(IntPtr window, IntPtr data) {
             uint owner;
             GetWindowThreadProcessId(window, out owner);
-            if (owner == pid && IsWindowVisible(window) && ClassOf(window) == className) found.Add(window);
+            if (owner == pid && (!visibleOnly || IsWindowVisible(window)) && ClassOf(window) == className) found.Add(window);
             return true;
         };
         EnumWindows(each, IntPtr.Zero);
