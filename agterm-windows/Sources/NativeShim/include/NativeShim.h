@@ -112,6 +112,11 @@ int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y);
 // Positive tags index the dimmed sessions. Negative tags index workspace launch buttons.
 intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count,
                              const uint8_t *launchable, int64_t group_count);
+// nt_tree_decorate gives a session row an agent's status glyph (0xRRGGBB, pulsing when `blink`) at its right edge and an
+// info line under its title, which makes it two lines tall; null or empty strings draw nothing. A clear drops them.
+void nt_tree_decorate(void *tree, void *item, const uint16_t *glyph, uint32_t rgb, int32_t blink, const uint16_t *info);
+// nt_tree_blink sets the pulse phase and repaints when a row blinks; 1 while any does.
+int32_t nt_tree_blink(void *tree, int32_t dimmed);
 // The find bar: an edit control posting NT_FIND_NEXT (wParam 1 with Shift) on Enter and NT_FIND_CLOSE on Escape to
 // its parent; its text changes arrive as the parent's EN_CHANGE.
 // The shim's messages sit at WM_APP + 0x100 and up; the Swift side numbers its own WM_APP + n below that.

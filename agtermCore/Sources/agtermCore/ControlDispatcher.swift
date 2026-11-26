@@ -266,31 +266,10 @@ public struct ControlDispatcher {
         case .sessionSeen:
             return actions.markSessionSeen(request.target, window: request.args?.window)
         case .sessionStatus:
-            guard let status = AgentStatus(rawValue: request.args?.status ?? "") else {
-                return ControlResponse(ok: false, error: "invalid status")
+            switch ControlSessionMetadata.status(request.args) {
+            case .failure(let rejection): return ControlResponse(ok: false, error: rejection.message)
+            case .success(let update): return await actions.setSessionStatus(request.target, window: request.args?.window, update: update)
             }
-            if let color = request.args?.color, !WatermarkConfig.isValidColorHex(color) {
-                return ControlResponse(ok: false, error: "invalid color (expected #rrggbb)")
-            }
-            var shape: StatusShape?
-            if let raw = request.args?.shape {
-                guard let parsed = StatusShape(rawValue: raw) else {
-                    return ControlResponse(ok: false, error: "invalid shape: \(raw) (\(StatusShape.validNamesList))")
-                }
-                shape = parsed
-            }
-            let pane: StatusPane?
-            switch parsePane(request.args?.pane) {
-            case .pane(let parsed): pane = parsed
-            case .rejected(let rejection): return rejection
-            }
-            let update = ControlSessionStatusUpdate(status: status, blink: request.args?.blink,
-                                                    autoReset: request.args?.autoReset,
-                                                    sound: request.args?.sound, color: request.args?.color,
-                                                    shape: shape,
-                                                    pane: pane, paneID: request.args?.paneID,
-                                                    ifIdle: request.args?.ifIdle ?? false)
-            return await actions.setSessionStatus(request.target, window: request.args?.window, update: update)
         case .sessionRestore:
             return dispatchSessionRestore(request)
         default:

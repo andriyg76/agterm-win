@@ -50,6 +50,18 @@ extension NativeShell {
         terminal.onNotification = { [unowned self] in deliver(id, title: $0, body: $1, source: .terminal) }
         terminal.onNaming = { [unowned self, weak terminal] in if let terminal { localNaming(id, terminal) } }
         terminal.onFocus = { [unowned self, weak terminal] in if let terminal { paneFocused(id, terminal) } }
+        terminal.onKeystroke = { [unowned self, weak terminal] in if let terminal { paneTyped(id, terminal, $0) } }
+    }
+
+    /// paneTyped clears an agent's status by the keystroke, in the pane the terminal is now: Settings has no status
+    /// reset choice yet, so it is a Mac's default, the first key.
+    private func paneTyped(_ id: Foundation.UUID, _ terminal: NativeTerminal, _ keystroke: StatusKeystroke) {
+        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
+        let session = locals[index]
+        let pane: StatusPane = terminal === session.scratch ? .scratch : terminal === session.splitTerminal ? .right : .left
+        let before = session.activity
+        locals[index].activity.clear(by: keystroke, pane: pane, reset: .firstKey)
+        if locals[index].activity.indicator != before.indicator { rebuild() }
     }
 
     // MARK: placement
@@ -134,7 +146,7 @@ extension NativeShell {
         // placed first, so the shell starts at its pane's grid
         placeSessions()
         terminal.start(ShellIntegration.commandLine(locals[index].commandLine), directory: existingFolder(directory),
-                       environment: sessionEnvironment(id))
+                       environment: sessionEnvironment(id, pane: .right))
         log("native shell: split \(split.axisName) in [\(id)]")
         if dashboard != nil { dashboardSessionsChanged() }
     }
@@ -146,6 +158,7 @@ extension NativeShell {
         locals[index].splitTerminal = nil
         locals[index].splitTitle = nil
         locals[index].splitDirectory = nil
+        locals[index].activity.paneEnded(.right)
         retire(terminal)
         placeSessions()
         rebuild()
@@ -162,6 +175,7 @@ extension NativeShell {
         session.directory = session.splitDirectory ?? directory
         session.splitDirectory = directory
         session.split?.focused.toggle()
+        session.activity.swapped()
         locals[index] = session
         placeSessions()
         rebuild()
@@ -313,10 +327,11 @@ extension NativeShell {
             placeSessions()
             if let command {
                 let launch = NativeOverlay.launch(command, sessionCommandLine: session.commandLine, cwd: nil, directory: session.directory)
-                terminal.start(launch.commandLine, directory: existingFolder(launch.directory), environment: sessionEnvironment(id))
+                terminal.start(launch.commandLine, directory: existingFolder(launch.directory),
+                               environment: sessionEnvironment(id, pane: .scratch))
             } else {
                 terminal.start(ShellIntegration.commandLine(session.commandLine), directory: existingFolder(session.directory),
-                               environment: sessionEnvironment(id))
+                               environment: sessionEnvironment(id, pane: .scratch))
             }
             log("native shell: scratch in [\(id)]")
         } else {
@@ -330,6 +345,7 @@ extension NativeShell {
         let hadFocus = hasFocus(locals[index].id)
         locals[index].scratch = nil
         locals[index].scratchShown = false
+        locals[index].activity.paneEnded(.scratch)
         retire(scratch)
         placeSessions()
         if hadFocus { focus() }

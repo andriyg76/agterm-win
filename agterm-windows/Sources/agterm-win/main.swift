@@ -63,6 +63,23 @@ func serverRelease() throws -> (version: String, checksums: String) {
     return (version.split(whereSeparator: \.isNewline).first.map(String.init) ?? "", checksums)
 }
 
+/// installAgentHooks puts the Claude Code and Codex status adapters in place on the first run and on each new version
+/// or agtermctl path. An isolated instance never writes the user's agent config, as a Mac's Debug build must not.
+private func installAgentHooks(version: String) {
+    guard environment["AGTERM_WIN_STATE_DIR"] == nil else { return }
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    // a packaged install's own folder is not on PATH and not readable by the agents' shells; its alias is
+    let alias = URL(fileURLWithPath: environment["LOCALAPPDATA"] ?? "").appendingPathComponent("Microsoft/WindowsApps/agtermctl.exe")
+    let tool = executableFolder.path.contains("WindowsApps") ? alias.path : executableFolder.appendingPathComponent("agtermctl.exe").path
+    guard AgentHooksSetup.needsInstall(home: home, version: version, tool: tool) else { return }
+    let source = bundled("agent-status", source: "Resources/agent-status")
+    let codexHome = environment["CODEX_HOME"].map { URL(fileURLWithPath: $0) }
+    DispatchQueue.global(qos: .utility).async {
+        let report = AgentHooksSetup.install(home: home, codexHome: codexHome, source: source, version: version, tool: tool)
+        log("agent hooks: \(report.installed ? "installed" : "incomplete") for \(version) with \(tool): \(report.lines.joined(separator: " "))")
+    }
+}
+
 // Swift's main actor is the main dispatch queue, which nothing drains while a Win32 message loop blocks; these are
 // the hooks CoreFoundation's run loop uses for the same purpose on Windows.
 @_silgen_name("_dispatch_get_main_queue_handle_4CF") private func mainQueueHandle() -> HANDLE?
@@ -103,8 +120,10 @@ MainActor.assumeIsolated {
         let profiles = arguments.indices
             .filter { arguments[$0] == "--profile" && $0 + 1 < arguments.count }
             .map { arguments[$0 + 1] }
+        let version = (try? serverRelease().version) ?? "dev"
+        installAgentHooks(version: version)
         NativeShell.open(settings: stateDirectory.appendingPathComponent("native.json"), profiles: profiles,
-                         version: (try? serverRelease().version) ?? "dev", server: server, installServer: installServer)
+                         version: version, server: server, installServer: installServer)
     }
 }
 

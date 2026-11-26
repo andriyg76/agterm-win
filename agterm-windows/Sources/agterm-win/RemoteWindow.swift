@@ -122,10 +122,26 @@ final class RemoteWindow: RemoteCatalogEffects {
             return
         }
         let effects = RemotePresentationEffects(
-            status: { _ in }, snapshotStatus: { _ in },
+            // the agents running on the server report there; its stream carries their status, context and info here
+            status: { [weak self] status in
+                self?.store.applyRemoteStatus(status, forSession: id)
+                self?.changed()
+            },
+            snapshotStatus: { [weak self] status in
+                self?.store.applyRemoteSnapshotStatus(status, forSession: id)
+                self?.changed()
+            },
             hud: { [weak self] hud in self?.onReplicaHud?(id, hud) },
             notify: { [weak self] in self?.onNotification(id, $0) },
             connection: { log("presentation for \(id): \($0)") },
+            context: { [weak self] context in
+                self?.store.applyRemoteContext(context, forSession: id)
+                self?.changed()
+            },
+            info: { [weak self] info in
+                self?.store.applyRemoteInfo(info, forSession: id)
+                self?.changed()
+            },
             askRequest: { [weak self] ask in
                 guard let self else { return false }
                 return self.onReplicaAsk?(id, ask) ?? false

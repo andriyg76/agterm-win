@@ -38,6 +38,9 @@ whole desktop after a `notify` to show its banner; CI uploads them in the `integ
 `panes-cases.ps1` drives split panes, the scratch, the quick terminal and the dashboard with agtermctl, the title bar's
 buttons and the keymap's chords, and reads back the tree, each pane's text and which terminals are on screen.
 
+`agent-status-cases.ps1` sets agent status, context and info and reads them back through the tree and the title bar,
+then runs the staged Claude Code and Codex adapters with a hook's JSON on stdin, as the agents run them.
+
 `title-bar-cases.ps1` sends the window the messages Windows sends its title bar (hit tests, clicks, presses on
 minimize, maximize and close), then reads the outcome back and checks the pixels the bar painted.
 

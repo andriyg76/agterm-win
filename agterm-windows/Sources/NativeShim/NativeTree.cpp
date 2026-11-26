@@ -14,6 +14,67 @@
 
 namespace {
 
+// Decoration is what an agent reported for a session row: a status glyph drawn at the row's right edge and an info
+// line drawn under its title, which makes the row two lines tall.
+// A fixed table, since NativeShim links no C++ library; a sidebar past its size draws its later rows plain.
+struct Decoration {
+    HTREEITEM item;
+    wchar_t glyph[8];
+    COLORREF color;
+    bool blink;
+    wchar_t info[256];
+};
+
+constexpr int maxDecorations = 512;
+Decoration decorations[maxDecorations];
+int decorationCount = 0;
+bool blinkDimmed = false;
+
+const Decoration *findDecoration(HTREEITEM item) {
+    for (int index = 0; index < decorationCount; index++) {
+        if (decorations[index].item == item) return &decorations[index];
+    }
+    return nullptr;
+}
+
+// drawDecoration paints a session row's glyph and, for a row with an info line, both of its lines over the default
+// label, which was drawn in the background color
+void drawDecoration(const NMTVCUSTOMDRAW *draw, HTREEITEM handle, const Decoration &decoration, COLORREF text) {
+    HWND window = draw->nmcd.hdr.hwndFrom;
+    HDC dc = draw->nmcd.hdc;
+    RECT row{}, label{};
+    TreeView_GetItemRect(window, handle, &row, FALSE);
+    TreeView_GetItemRect(window, handle, &label, TRUE);
+    const auto oldMode = SetBkMode(dc, TRANSPARENT);
+    const auto oldColor = GetTextColor(dc);
+    SIZE glyphSize{};
+    int margin = MulDiv(8, GetDpiForWindow(window), 96);
+    if (decoration.glyph[0]) {
+        GetTextExtentPoint32W(dc, decoration.glyph, static_cast<int>(wcslen(decoration.glyph)), &glyphSize);
+        RECT at{row.right - margin - glyphSize.cx, row.top, row.right - margin, row.bottom};
+        SetTextColor(dc, decoration.blink && blinkDimmed ? nt_chrome_sb_dim() : decoration.color);
+        DrawTextW(dc, decoration.glyph, -1, &at, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
+    if (decoration.info[0]) {
+        wchar_t title[512] = {};
+        TVITEMW item{};
+        item.mask = TVIF_TEXT;
+        item.hItem = handle;
+        item.pszText = title;
+        item.cchTextMax = 512;
+        SendMessageW(window, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&item));
+        int right = row.right - margin - (glyphSize.cx ? glyphSize.cx + margin / 2 : 0);
+        int middle = (row.top + row.bottom) / 2;
+        RECT top{label.left + 2, row.top, right, middle}, bottom{label.left + 2, middle, right, row.bottom};
+        SetTextColor(dc, text);
+        DrawTextW(dc, title, -1, &top, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        SetTextColor(dc, nt_chrome_sb_dim());
+        DrawTextW(dc, decoration.info, -1, &bottom, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+    SetTextColor(dc, oldColor);
+    SetBkMode(dc, oldMode);
+}
+
 int64_t itemTag(HWND tree, HTREEITEM node) {
     if (!node) return 0;
     TVITEMW item{};
@@ -99,7 +160,37 @@ extern "C" void nt_tree_apply_colors(void *tree) {
 
 extern "C" void nt_find_bar_set_dpi(void *bar, uint32_t dpi) { setFont(static_cast<HWND>(bar), dpi); }
 
-extern "C" void nt_tree_clear(void *tree) { TreeView_DeleteAllItems(static_cast<HWND>(tree)); }
+extern "C" void nt_tree_clear(void *tree) {
+    decorationCount = 0;
+    TreeView_DeleteAllItems(static_cast<HWND>(tree));
+}
+
+extern "C" void nt_tree_decorate(void *tree, void *item, const uint16_t *glyph, uint32_t rgb, int32_t blink, const uint16_t *info) {
+    bool hasGlyph = glyph && glyph[0], hasInfo = info && info[0];
+    if ((!hasGlyph && !hasInfo) || decorationCount == maxDecorations) return;
+    Decoration &decoration = decorations[decorationCount++];
+    decoration.item = static_cast<HTREEITEM>(item);
+    decoration.glyph[0] = decoration.info[0] = 0;
+    if (hasGlyph) wcsncpy_s(decoration.glyph, reinterpret_cast<const wchar_t *>(glyph), _TRUNCATE);
+    if (hasInfo) wcsncpy_s(decoration.info, reinterpret_cast<const wchar_t *>(info), _TRUNCATE);
+    decoration.color = RGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+    decoration.blink = blink != 0;
+    if (hasInfo) {
+        TVITEMEXW change{};
+        change.mask = TVIF_INTEGRAL;
+        change.hItem = decoration.item;
+        change.iIntegral = 2;
+        SendMessageW(static_cast<HWND>(tree), TVM_SETITEMW, 0, reinterpret_cast<LPARAM>(&change));
+    }
+}
+
+extern "C" int32_t nt_tree_blink(void *tree, int32_t dimmed) {
+    blinkDimmed = dimmed != 0;
+    bool any = false;
+    for (int index = 0; index < decorationCount; index++) any = any || decorations[index].blink;
+    if (any) InvalidateRect(static_cast<HWND>(tree), nullptr, FALSE);
+    return any ? 1 : 0;
+}
 
 extern "C" void *nt_tree_add(void *tree, void *parent, const uint16_t *text, int64_t tag, int32_t expanded) {
     TVINSERTSTRUCTW insert{};
@@ -153,16 +244,24 @@ extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *di
         }
         return CDRF_DODEFAULT;
     }
-    if (draw->nmcd.dwDrawStage != CDDS_ITEMPREPAINT) return CDRF_DODEFAULT;
+    const auto handle = reinterpret_cast<HTREEITEM>(draw->nmcd.dwItemSpec);
+    const Decoration *found = tag > 0 ? findDecoration(handle) : nullptr;
     bool dim = tag > 0 && tag <= count && dimmed[tag - 1];
-    draw->clrText = dim ? nt_chrome_sb_dim() : nt_chrome_sb_text();
+    const COLORREF text = dim ? nt_chrome_sb_dim() : nt_chrome_sb_text();
+    if (draw->nmcd.dwDrawStage == CDDS_ITEMPOSTPAINT && found) {
+        drawDecoration(draw, handle, *found, text);
+        return CDRF_DODEFAULT;
+    }
+    if (draw->nmcd.dwDrawStage != CDDS_ITEMPREPAINT) return CDRF_DODEFAULT;
+    draw->clrText = text;
     draw->clrTextBk = nt_chrome_sb_bg();
     // the unthemed tree paints its selection in the light system colors unless the state is taken away
     if (draw->nmcd.uItemState & CDIS_SELECTED) {
         draw->clrTextBk = nt_chrome_sb_highlight();
         draw->nmcd.uItemState &= ~(CDIS_SELECTED | CDIS_FOCUS);
     }
-    return group ? CDRF_NOTIFYPOSTPAINT : CDRF_DODEFAULT;
+    if (found && found->info[0]) draw->clrText = draw->clrTextBk;
+    return group || found ? CDRF_NOTIFYPOSTPAINT : CDRF_DODEFAULT;
 }
 
 extern "C" int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y) {
