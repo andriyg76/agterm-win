@@ -100,8 +100,7 @@ final class PaneObserver {
     }
 
     /// settle ends the panes whose daemons are gone: a shell that exited closes its pane as the Mac's exit does,
-    /// promoting a live split or respawning a parent; a lost daemon ends that pane alone, and a session left with no
-    /// live pane after a loss stays as ended.
+    /// promoting a live split or respawning a parent. A session left with no live pane stays ended until explicitly closed.
     private func settle(_ session: Session, gone: [UUID]) {
         let exited = gone.filter(consumeExitRecord)
         let primaryGone = gone.contains(session.paneIdentity)
@@ -111,7 +110,7 @@ final class PaneObserver {
                 store.markSessionEnded(session.id)
                 return
             }
-            guard store.closePrimaryPane(session.id, alreadyFinalized: session.paneIdentity) == .respawned else { return }
+            guard store.closePrimaryPane(session.id, alreadyFinalized: session.paneIdentity, retainEndedSession: true) == .respawned else { return }
             let workspace = store.sessionLocation(ofSession: session.id)?.workspace
             guard panes.start(.init(identity: session.paneIdentity, session: session, workspace: workspace, pane: .left,
                                     directory: session.effectiveCwd)) == nil else {

@@ -35,6 +35,9 @@ function ShellCaseSkipReason([string]$Name) {
         return "arm64: Ctrl+W closes the session under a program overlay instead of dismissing the overlay (x64 passes; SendChord/GetFocus on windows-11-arm). Re-enable when fixed."
     }
     if ($Name -eq "docker-remote") { return DockerRemoteSkipReason }
+    if ($Name -eq "remote-exit-buffer" -and -not $env:AGTERM_WIN_GATE_WSL) {
+        return "set AGTERM_WIN_GATE_WSL for the remote exit-buffer GUI gate"
+    }
     return $null
 }
 

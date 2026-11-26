@@ -28,6 +28,7 @@ public enum SessionContent: Equatable, Sendable {
 
 /// PrimaryPaneExit is what a primary pane's exit did to its session.
 public enum PrimaryPaneExit: Equatable, Sendable {
+    case ended
     case closed
     case promoted
     case respawned

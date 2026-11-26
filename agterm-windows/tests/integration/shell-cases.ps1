@@ -381,6 +381,7 @@ $shellTeardowns = @{}
 
 . (Join-Path $PSScriptRoot "wsl-cases.ps1")
 . (Join-Path $PSScriptRoot "docker-remote-cases.ps1")
+. (Join-Path $PSScriptRoot "session-exit-cases.ps1")
 
 # Note marks a step in the log, so a case that stops shows where.
 function Note([string]$Text) { Write-Host ("  {0:HH:mm:ss} {1}" -f (Get-Date), $Text) }

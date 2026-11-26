@@ -295,15 +295,20 @@ extension AppStore {
     /// addressable as the MAIN/left pane everywhere: `session.type`/`session.text --pane left` (and omitted)
     /// reach it, `{AGT_PANE}` reports `left`, and a later `session.split` opens a fresh RIGHT pane instead of
     /// displacing it. Called by the primary surface's `onExit`.
-    /// A local parent with companions respawns when its last pane exits.
+    /// A local parent with companions respawns when its last pane exits. A server can retain the ended row for its viewers.
     @discardableResult
-    public func closePrimaryPane(_ sessionID: UUID, alreadyFinalized: UUID? = nil, now: Date = Date()) -> PrimaryPaneExit {
+    public func closePrimaryPane(_ sessionID: UUID, alreadyFinalized: UUID? = nil, now: Date = Date(),
+                                 retainEndedSession: Bool = false) -> PrimaryPaneExit {
         guard let session = session(withID: sessionID) else { return .closed }
         let survivor = session.splitSurface
         guard hasLiveSplit(session, survivor: survivor) else {
             if respawnsOnLastPaneExit(session, now: now) {
                 respawnPrimaryPane(session, now: now)
                 return .respawned
+            }
+            if retainEndedSession {
+                markSessionEnded(sessionID)
+                return .ended
             }
             closeLastPaneRow(sessionID, alreadyFinalized: alreadyFinalized)
             return .closed
@@ -409,7 +414,7 @@ extension AppStore {
         return session.splitPaneIdentity.map(session.daemonBackedPanes.contains) ?? false
     }
 
-    /// markSessionEnded keeps a headless session whose last live pane's daemon was lost, rather than closing it:
+    /// markSessionEnded keeps a headless session whose last pane ended, rather than closing it:
     /// the row stays as ended until `session.close` removes it.
     public func markSessionEnded(_ sessionID: UUID) {
         guard let session = session(withID: sessionID), !session.ended else { return }
