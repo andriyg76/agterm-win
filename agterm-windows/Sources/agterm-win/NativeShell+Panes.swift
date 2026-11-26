@@ -85,8 +85,10 @@ extension NativeShell {
             placeDashboard(dashboard, in: area)
         } else {
             let localInView = local(selected) != nil
-            remoteTerminal.move(x: area.x, y: area.y, width: area.width, height: area.height)
-            show(remoteTerminal, !localInView)
+            for terminal in remoteTerminals {
+                terminal.move(x: area.x, y: area.y, width: area.width, height: area.height)
+                show(terminal, terminal === remoteTerminal && !localInView)
+            }
             for session in locals {
                 let inView = session.id == selected
                 let covered = session.scratchShown && session.scratch != nil

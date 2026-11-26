@@ -37,6 +37,7 @@ final class NativeTerminal {
     static var scrollLines = GeneralSettings.defaultScrollLines
     /// onExit runs with the exit code when the started program exits.
     var onExit: ((Int) -> Void)?
+    var isRunning: Bool { console != nil }
     /// onCloseKey, once the program has exited, takes the next key instead of dropping it: `overlay open --wait`.
     var onCloseKey: (() -> Void)?
     /// background is this terminal's own background as 0xRRGGBB over the theme's: an overlay's `--color`.

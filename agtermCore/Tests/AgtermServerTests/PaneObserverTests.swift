@@ -103,14 +103,22 @@ struct PaneObserverTests {
         #expect(harness.store.snapshot().workspaces.flatMap(\.sessions).first { $0.id == session.id }?.ended == true)
     }
 
-    @Test func anExitedLastPaneClosesTheSessionAndUsesItsRecord() throws {
+    @Test func anExitedLastPaneStaysEndedUntilExplicitlyClosed() throws {
         let session = try session()
         exited(session.paneIdentity)
 
         observer.apply([], listedAt: later)
 
-        #expect(harness.store.session(withID: session.id) == nil)
+        #expect(harness.store.session(withID: session.id) === session)
+        #expect(session.ended)
+        #expect(session.daemonBackedPanes.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: harness.panes.exitRecord(session.paneIdentity)))
+        #expect(harness.store.snapshot().workspaces.flatMap(\.sessions).first { $0.id == session.id }?.ended == true)
+
+        observer.apply([], listedAt: later)
+        #expect(harness.store.session(withID: session.id) === session)
+        #expect(harness.actions.closeSession(session.id.uuidString, window: nil).ok)
+        #expect(harness.store.session(withID: session.id) == nil)
     }
 
     @Test func aParentWithCompanionsRespawnsItsExitedShell() async throws {
@@ -306,12 +314,13 @@ struct PaneObserverTests {
         #expect(ProcForeground.parseCmdline(Data()) == nil)
     }
 
-    @Test func aKilledStandalonePaneClosesItsSession() throws {
+    @Test func aKilledStandalonePaneLeavesItsSessionEnded() throws {
         let session = try session()
 
         observer.settleExited(session, identity: session.paneIdentity)
 
-        #expect(harness.store.session(withID: session.id) == nil)
+        #expect(harness.store.session(withID: session.id) === session)
+        #expect(session.ended)
         #expect(!FileManager.default.fileExists(atPath: harness.panes.exitRecord(session.paneIdentity)))
     }
 
@@ -330,14 +339,15 @@ struct PaneObserverTests {
         #expect(harness.store.session(withID: companion.id)?.parentID == parent.id)
     }
 
-    @Test func aKilledCompanionCloses() async throws {
+    @Test func aKilledCompanionStaysEndedBesideItsParent() async throws {
         let parent = try session()
         let companion = try harness.session(await harness.actions.createCompanion(parent.id.uuidString, options: CompanionOptions(),
                                                                                   window: nil))
 
         observer.settleExited(companion, identity: companion.paneIdentity)
 
-        #expect(harness.store.session(withID: companion.id) == nil)
+        #expect(harness.store.session(withID: companion.id) === companion)
+        #expect(companion.ended)
         #expect(harness.store.session(withID: parent.id) === parent)
     }
 

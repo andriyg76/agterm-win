@@ -25,6 +25,18 @@ struct AppStoreHeadlessPaneTests {
         #expect(store.session(withID: session.id) == nil)
     }
 
+    @Test func anExitedLastPaneCanStayEndedUntilTheUserClosesIt() {
+        let (store, session) = makeHeadlessSession(split: false)
+
+        #expect(store.closePrimaryPane(session.id, retainEndedSession: true) == .ended)
+        #expect(store.session(withID: session.id) === session)
+        #expect(session.ended)
+        #expect(session.daemonBackedPanes.isEmpty)
+
+        store.closeSession(session.id)
+        #expect(store.session(withID: session.id) == nil)
+    }
+
     @Test func aHeadlessCloseSplitDropsTheSplitDaemon() {
         let (store, session) = makeHeadlessSession(split: true)
         let primary = session.paneIdentity

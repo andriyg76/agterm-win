@@ -49,16 +49,13 @@ final class RemoteWindow: RemoteCatalogEffects {
                          paneFinalizer: nil)
         mirror = RemoteCatalogMirror(host: host.name, store: store, effects: self,
                                      viewState: RemoteWindowViewState())
-        client = RemoteCatalogClient(mirror: mirror, transport: transport, runner: transport.runner)
-        actions = RemoteCatalogActions(mirror: mirror, runner: transport.runner)
-        store.remoteActions = actions
-        // RemoteCatalogActions installs its own hook; chain it, or deltas never redraw the sidebar
-        let actionsMoved = mirror.onCatalogMoved
         mirror.onCatalogMoved = { [weak self] whole in
-            actionsMoved?(whole)
             log("catalog moved (snapshot: \(whole)), \(self?.store.workspaces.count ?? 0) workspace(s)")
             self?.changed()
         }
+        client = RemoteCatalogClient(mirror: mirror, transport: transport, runner: transport.runner)
+        actions = RemoteCatalogActions(mirror: mirror, runner: transport.runner)
+        store.remoteActions = actions
     }
 
     var connected: Bool { mirror.state == .connected }
@@ -102,7 +99,8 @@ final class RemoteWindow: RemoteCatalogEffects {
 
     func catalogRowRemoved(_ id: UUID) {
         stopPresentation(id)
-        changed()
+        // The mirror calls this before removing the row; release its retained terminal after reconciliation.
+        DispatchQueue.main.async { [weak self] in self?.changed() }
     }
 
     func catalogRowEnded(_ id: UUID) {
