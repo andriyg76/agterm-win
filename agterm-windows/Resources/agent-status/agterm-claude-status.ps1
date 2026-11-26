@@ -7,7 +7,7 @@
 # A consecutive run of one name counts once. Any unreadable ancestry reports, since a false silence has no symptom.
 try {
     if (-not $env:AGTERM_SESSION_ID) { exit 0 }
-    . (Join-Path $PSScriptRoot 'agterm-status-lib.ps1')
+    . "$PSScriptRoot\agterm-status-lib.ps1"
 
     # the agents agterm-claude-status.sh counts, the same list as its shell integration's AGTERM_AGENT_RE
     $agents = @('claude', 'codex', 'kimi', 'opencode', 'pi', 'gemini', 'cursor-agent', 'aider', 'crush', 'goose')
@@ -27,6 +27,7 @@ try {
         return $null
     }
     try {
+        Import-Module "$PSHOME\Modules\CimCmdlets\CimCmdlets.psd1"
         $table = @{}
         foreach ($process in Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, Name, CommandLine -ErrorAction Stop) {
             $table[[int] $process.ProcessId] = $process

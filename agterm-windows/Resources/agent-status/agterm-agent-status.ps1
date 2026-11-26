@@ -10,7 +10,7 @@
 # prints nothing and always exits 0.
 try {
     if ($env:AGTERM_SESSION_ID) {
-        . (Join-Path $PSScriptRoot 'agterm-status-lib.ps1')
+        . "$PSScriptRoot\agterm-status-lib.ps1"
         Send-AgtermStatus -StatusArgs @($args)
     }
 } catch { }

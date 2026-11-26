@@ -7,7 +7,7 @@
 #
 # AGTERM_CODEX_WATCH_FILE, AGTERM_CODEX_WATCH_MAX_CHECKS and AGTERM_CODEX_WATCH_INTERVAL tune the watcher as on a Mac.
 try {
-    . (Join-Path $PSScriptRoot 'agterm-status-lib.ps1')
+    . "$PSScriptRoot\agterm-status-lib.ps1"
 
     function Test-Question([string] $Message) {
         $prose = New-Object System.Collections.Generic.List[string]
@@ -76,6 +76,7 @@ try {
         $line = 'powershell.exe ' + (($argv | ForEach-Object { '"' + ([string] $_ -replace '"', '\"') + '"' }) -join ' ')
         # created by WMI, outside any job the agent runs its hooks in and closes when the hook returns
         try {
+            Import-Module "$PSHOME\Modules\CimCmdlets\CimCmdlets.psd1"
             $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16] 0 }
             $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -ErrorAction Stop `
                 -Arguments @{ CommandLine = $line; ProcessStartupInformation = $startup }

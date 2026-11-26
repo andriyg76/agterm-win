@@ -1,6 +1,12 @@
 # Shared by agterm-win's agent-status adapters, the Windows twins of agterm's macOS hook scripts. Windows
 # PowerShell 5.1 compatible and ASCII only, since 5.1 reads a BOM-less script in the ANSI code page.
 #
+# Auto-loading a cmdlet scans every PSModulePath folder, over 20 s per hook where many modules are installed (Az on
+# GitHub's windows-11-arm), so the adapters import what they use from $PSHOME and never auto-load.
+$PSModuleAutoLoadingPreference = 'None'
+Import-Module "$PSHOME\Modules\Microsoft.PowerShell.Management\Microsoft.PowerShell.Management.psd1"
+Import-Module "$PSHOME\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1"
+
 # agtermctl resolution, as agterm-agent-status.sh does it: $env:AGTERMCTL, else the path agterm-win wrote below
 # at install, else agtermctl on PATH once that path is gone (an uninstalled or moved build).
 $AgtermCtl = 'agtermctl' # agterm-win installs its agtermctl path here
