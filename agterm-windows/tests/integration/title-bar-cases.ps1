@@ -409,7 +409,11 @@ $shellCases["title-bar-menus"] = {
         if (-not (Click-MenuItem $helpMenu 0)) { $failures += "could not click Help → About" }
         $about = Wait-Until { [AgtermWin32]::Visible($processId, "#32770") | Where-Object { [AgtermWin32]::TextOf($_) -eq "About agterm" } | Select-Object -First 1 } 5
         if ($about) {
-            [AgtermWin32]::PostMessageW($about, 0x0111, [IntPtr]1, [IntPtr]::Zero) | Out-Null
+            $ok = [AgtermSettings]::GetDlgItem($about, 1)
+            $button = New-Object AgtermWin32+Rect
+            if ($ok -and [AgtermWin32]::GetWindowRect($ok, [ref]$button)) {
+                [AgtermInput]::Click([int](($button.Left + $button.Right) / 2), [int](($button.Top + $button.Bottom) / 2))
+            } else { $failures += "About has no OK button" }
             if (-not (Wait-Until { -not [AgtermWin32]::IsWindowVisible($about) } 5)) { $failures += "About did not close" }
         } else { $failures += "Help → About opened no About dialog" }
     } else { $failures += "Help did not reopen for About" }
