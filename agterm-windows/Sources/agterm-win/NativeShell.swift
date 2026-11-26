@@ -2818,7 +2818,7 @@ final class NativeShell {
         case .maximize: ShowWindow(window, IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE)
         case .close: PostMessageW(window, UINT(WM_CLOSE), 0, 0)
         case .split: if enabled(button) { splitKey(nil) }
-        case .quick, .dashboard, .scratch, .overlays:
+        case .sidebar, .quick, .dashboard, .scratch, .overlays:
             if enabled(button), let command = button.command { windowCommand(command) }
         }
     }
