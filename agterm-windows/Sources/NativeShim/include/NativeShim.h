@@ -101,6 +101,9 @@ void *nt_tree_add(void *tree, void *parent, const uint16_t *text, int64_t tag, i
 void nt_tree_select(void *tree, void *item);
 // nt_tree_selection_changed reads a WM_NOTIFY lParam: 1 with the item's tag when the user moved the selection.
 int32_t nt_tree_selection_changed(intptr_t notification, int64_t *tag);
+// nt_tree_selection_changing reads a WM_NOTIFY lParam: 1 when the user moves onto a group row, which the caller refuses by
+// answering 1; `tag` is the session row an arrow key reaches past it, else 0.
+int32_t nt_tree_selection_changing(intptr_t notification, int64_t *tag);
 // nt_tree_label_edit reads a WM_NOTIFY lParam for in-place renaming: 1 an edit begins (answer 1 to refuse it), 2 it
 // ended with the new name in `text`, 3 it was cancelled, 0 any other notification; `tag` is the item's.
 int32_t nt_tree_label_edit(intptr_t notification, int64_t *tag, uint16_t *text, int32_t capacity);
@@ -111,9 +114,8 @@ int32_t nt_tree_expanded(intptr_t notification, int64_t *tag, int32_t *expanded)
 void nt_tree_set_edit_text(void *tree, const uint16_t *text);
 // nt_tree_item_at returns the row's tag, or 0 off any row. For a keyboard menu it moves the point to the caret row.
 int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y);
-// Positive tags index the dimmed sessions. Negative tags index workspace launch buttons.
-intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count,
-                             const uint8_t *launchable, int64_t group_count);
+// Positive tags index the dimmed sessions.
+intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count);
 // nt_tree_decorate gives a session row an agent's status glyph (0xRRGGBB, pulsing when `blink`) at its right edge and an
 // info line under its title, which makes it two lines tall; null or empty strings draw nothing. A clear drops them.
 void nt_tree_decorate(void *tree, void *item, const uint16_t *glyph, uint32_t rgb, int32_t blink, const uint16_t *info);
@@ -219,7 +221,6 @@ int32_t nt_notice_bar_text_width(uint32_t dpi, const uint16_t *text);
 // Page overlays (WebView2) in a child HWND. `state` is 0 loading, 1 loaded, 2 failed; each change posts
 // NT_PAGE_STATE to the top-level window, which reads it back.
 #define NT_PAGE_STATE 0x8105
-#define NT_TREE_LAUNCH 0x8106
 // `data_folder` is the WebView2 user data folder; null keeps WebView2's default beside the executable.
 void *nt_page_create(void *parent, const uint16_t *data_folder);
 void nt_page_destroy(void *page);
