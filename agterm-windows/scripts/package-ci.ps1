@@ -23,7 +23,7 @@ New-Item -ItemType Directory -Force $Output | Out-Null
 
 $stage = Join-Path $env:TEMP "agterm-release-stage-$Arch"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
-& (Join-Path $PSScriptRoot "stage.ps1") -Configuration release -Output $stage
+& (Join-Path $PSScriptRoot "stage.ps1") -Configuration release -Output $stage -Version $Version
 $zmxRev = (Get-Content (Join-Path $stage "zmx\current") -TotalCount 1).Trim()
 if (-not $zmxRev) { throw "staged without zmx; run scripts\fetch-zmx.ps1 -Arch $Arch" }
 
