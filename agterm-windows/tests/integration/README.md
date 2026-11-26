@@ -71,6 +71,17 @@ open it with `window remote open`, try `session new --remote`, and change its st
 that failure to drag the notice bar to the bottom and back, check the terminal reflows and the bar follows the theme,
 press Retry, and close it, reading the bar's text, position and pixels.
 
+`docker-remote-cases.ps1` builds `docker-remote\Dockerfile` (Ubuntu LTS, systemd as pid 1, a lingering user, since
+agterm-server runs only as a systemd user unit), starts it under a unique name with no published port, and defines it in
+`remote.properties` as `agterm-docker`, reached by `docker exec` through `docker-tty.exe`, which the case compiles from
+`DockerTty.cs` and which adds `-t` only when stdin is a console. With the window minimized it runs `agtermctl server
+install`, opens the remote window, makes a session and reads its prompt, types a command and reads it back with the
+pane's pty and size, closes the session and checks its daemons ended, stops the container and checks the remote
+disconnects, then starts it and checks it reconnects and makes a session again. It records, rather than asserts, that the
+container's loopback is not reachable from Windows: a defined remote gets no `-L` forward. The container and image are
+removed whether the case passed or not. It needs Docker running Linux containers and skips without them, as on CI; run
+it alone with `-Case docker-remote`.
+
 On a machine with a working agterm-server in WSL, run the optional gate (not part of CI):
 
 ```powershell

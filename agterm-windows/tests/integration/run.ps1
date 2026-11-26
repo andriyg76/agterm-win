@@ -34,6 +34,7 @@ function ShellCaseSkipReason([string]$Name) {
     if ($Name -eq "overlay-keys" -and $native -eq "ARM64") {
         return "arm64: Ctrl+W closes the session under a program overlay instead of dismissing the overlay (x64 passes; SendChord/GetFocus on windows-11-arm). Re-enable when fixed."
     }
+    if ($Name -eq "docker-remote") { return DockerRemoteSkipReason }
     return $null
 }
 
