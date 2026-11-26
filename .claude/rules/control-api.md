@@ -2548,6 +2548,8 @@ a remote window, refuses an undefined one, and writes the file from `wsl -l -q` 
 
 - agterm-server (`AgtermServerKit`, product `agterm-server`) keeps a windowless `AppStore` on Linux.
   Every pane is a zmx daemon in a systemd user scope of its own, so a server restart or crash keeps it.
+  The scope is chosen per pane (`ServerPlacement.detect`): WSL can mount its own `/run/user/<uid>` over the
+  user manager's after the server started, and a pane started then runs unscoped rather than failing.
 - `ServerCommandPolicy.served` is default-deny: a protocol command reaches the server's store only once it
   is listed there, and `HeadlessCommandPolicy` gives the physical-window reason for the rest.
 - The Linux rendezvous is `ControlResolve.defaultStateDirectory`: `$XDG_STATE_HOME/agterm` (absolute only)

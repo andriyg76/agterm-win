@@ -59,8 +59,10 @@ struct RemoteHost {
         guard !installed.isEmpty else {
             return WSLServerInspection(health: .versionUnknown("version reply had no server number"), detail: version.stdout)
         }
+        // the version reply came from the running server; systemctl prints nothing when it cannot reach the user manager,
+        // as when WSL mounts its own /run/user/<uid> over the one holding the bus
         let active = runLine("systemctl --user is-active agterm-server 2>/dev/null").stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        if active == "active" {
+        if active == "active" || active.isEmpty {
             return WSLServerInspection(health: .ready(installedVersion: installed), detail: installed)
         }
         return WSLServerInspection(health: .serviceStopped(installedVersion: installed),
