@@ -551,7 +551,8 @@ extension NativeShell {
     /// startQuickShell runs the default profile in the selected local session's folder, else the user's home.
     private func startQuickShell(_ terminal: NativeTerminal) {
         let commandLine = quickProfileCommandLine ?? "cmd.exe"
-        var environment = ProcessInfo.processInfo.environment
+        var environment = ProcessInfo.processInfo.environment.merging(
+            SurfaceEnvironment.quickTerminal(socketPath: socketPath, programVersion: version)) { $1 }
         environment["AGTERM_STATE_DIR"] = stateDirectory.path
         terminal.start(ShellIntegration.commandLine(commandLine), directory: existingFolder(local(selected)?.directory), environment: environment)
         log("native shell: quick terminal started")

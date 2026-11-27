@@ -823,13 +823,20 @@ final class NativeShell {
 
     private var socketPath: String { stateDirectory.appendingPathComponent("agterm.sock").path }
 
-    /// sessionEnvironment is what a local session's programs inherit: the state directory, so agtermctl finds this
-    /// window's socket, the session's id and pane, and agtermctl's folder on PATH.
-    func sessionEnvironment(_ id: Foundation.UUID, pane: StatusPane = .left) -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
+    /// sessionEnvironment is what a local session's programs inherit: agtermCore's `SurfaceEnvironment.session` set, the
+    /// state directory, so agtermctl finds this window's socket, and agtermctl's folder on PATH. `pane` is nil for an overlay.
+    func sessionEnvironment(_ id: Foundation.UUID, pane: StatusPane? = .left) -> [String: String] {
+        let stored = localStore.session(withID: id)
+        let token: Foundation.UUID? = switch pane {
+        case .left: stored?.paneIdentity
+        case .right: stored?.splitPaneIdentity
+        case .scratch, nil: nil
+        }
+        var environment = ProcessInfo.processInfo.environment.merging(
+            SurfaceEnvironment.session(sessionID: id, windowID: LocalWindow.id, workspaceID: localStore.workspace(forSession: id)?.id,
+                                       socketPath: socketPath, programVersion: version, pane: pane, paneToken: token?.uuidString)
+        ) { $1 }
         environment["AGTERM_STATE_DIR"] = stateDirectory.path
-        environment["AGTERM_SESSION_ID"] = id.uuidString
-        environment["AGTERM_PANE"] = pane.rawValue
         if let folder = Bundle.main.executableURL?.deletingLastPathComponent().path {
             let key = environment.keys.first { $0.uppercased() == "PATH" } ?? "Path"
             environment[key] = folder + ";" + (environment[key] ?? "")
@@ -3543,7 +3550,7 @@ extension NativeShell: NativeControlHost {
         let launch = NativeOverlay.launch(open.command, sessionCommandLine: session.commandLine, cwd: open.cwd, directory: session.directory)
         log("native shell: overlay over \(session.name) [\(id)]: \(launch.commandLine)")
         terminal.start(launch.commandLine, directory: launch.directory.flatMap { Self.isFolder($0) ? $0 : nil } ?? Self.home,
-                       environment: sessionEnvironment(id))
+                       environment: sessionEnvironment(id, pane: nil))
         if focused { focus() }
     }
 
