@@ -2336,7 +2336,17 @@ final class NativeShell {
             store.clearStatus(by: keystroke, pane: .left, reset: .firstKey, forSession: id)
             if session.agentIndicator != before { rebuild() }
         }
+        terminal.onNaming = { [unowned self, weak terminal] in if let terminal { serverNaming(id, terminal) } }
         return terminal
+    }
+
+    /// serverNaming records the title a server session's program reported on its replica; the server does not render
+    /// the pane, so only the viewer sees it. A ConPTY executable-path title reads as none.
+    private func serverNaming(_ id: Foundation.UUID, _ terminal: NativeTerminal) {
+        guard let session = server(of: id)?.remote.store.session(withID: id) else { return }
+        let before = session.displayName
+        session.recordReportedTitle(SessionNaming.programTitle(terminal.title) ?? "", pane: .left)
+        if session.displayName != before { rebuild() }
     }
 
     // MARK: window
