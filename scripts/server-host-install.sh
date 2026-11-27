@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # agterm-server's host-side install, shipped in its tarball as install.sh and run on the host from the directory the
 # tarball was swapped into: the user unit (written once), linger, start or restart, the running server's answer, the
-# agent hooks. Exit 0 installed, 3 installed with the agent hooks incomplete, anything else failed.
+# agent hooks. Exit 0 installed, 3 installed with the agent hooks incomplete, 4 installed and enabled but not started
+# because the user manager runs without a reachable bus, anything else failed.
 set -euo pipefail
 lib="$HOME/.local/lib/agterm-server"
 unit="$HOME/.config/systemd/user/agterm-server.service"
@@ -39,6 +40,24 @@ if [[ "$(loginctl show-user "$user" -p Linger --value 2>/dev/null || true)" != y
   echo "enabled lingering for $user"
 fi
 
+# lingering just enabled starts the user manager in the background, and a command with no login session (docker exec,
+# wsl.exe) can get here before its bus answers
+for _ in $(seq 50); do systemctl --user show-environment >/dev/null 2>&1 && break; sleep 0.2; done
+if ! systemctl --user show-environment >/dev/null 2>&1; then
+  if ! pgrep -u "$(id -u)" -x systemd >/dev/null; then
+    echo "install-server: no systemd user manager runs for $user; agterm-server needs one." >&2
+    exit 1
+  fi
+  # the manager runs but its bus is hidden, as WSLg's mount over /run/user/<uid> does: enable the unit the way systemctl
+  # would, and the manager starts it at its next start
+  wants="$(dirname "$unit")/default.target.wants"
+  mkdir -p "$wants"
+  ln -sfn "$unit" "$wants/agterm-server.service"
+  echo "install-server: the systemd user manager runs, but its bus in ${XDG_RUNTIME_DIR:-/run/user/$(id -u)} is unreachable." >&2
+  echo "agterm-server is enabled and starts the next time the user manager starts; restart it, or the host, to start it now." >&2
+  exit 4
+fi
+
 systemctl --user daemon-reload
 systemctl --user enable agterm-server >/dev/null 2>&1
 if systemctl --user is-active --quiet agterm-server; then
@@ -52,7 +71,8 @@ fi
 pid=0
 for _ in $(seq 50); do
   pid="$(systemctl --user show -p MainPID --value agterm-server)"
-  [[ "$pid" != 0 && -r "/proc/$pid/environ" ]] && break
+  # before the exec, MainPID can be systemd's executor, whose environment is not the server's
+  [[ "$pid" != 0 && "$(readlink "/proc/$pid/exe" 2>/dev/null)" == "$lib/agterm-server" ]] && break
   sleep 0.2
 done
 [[ "$pid" != 0 ]] || { echo "install-server: agterm-server did not start" >&2; exit 1; }

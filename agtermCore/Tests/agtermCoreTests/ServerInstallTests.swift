@@ -113,7 +113,7 @@ struct ServerInstallTests {
     }
     #endif
 
-    @Test(arguments: [(ForegroundSpawn.Outcome.exited(0), Int32(0)), (.exited(3), 3), (.exited(1), 1), (.exited(255), 1), (.signaled(9), 1)])
+    @Test(arguments: [(ForegroundSpawn.Outcome.exited(0), Int32(0)), (.exited(3), 3), (.exited(4), 4), (.exited(1), 1), (.exited(255), 1), (.signaled(9), 1)])
     func theInstallerOutcomeMapsToTheCommandsExitCode(_ outcome: ForegroundSpawn.Outcome, _ code: Int32) {
         #expect(ServerInstall.exitCode(outcome) == code)
     }

@@ -523,10 +523,11 @@ final class NativeShell {
         let errors = String(decoding: install.readErrorsToEnd(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         install.waitUntilExit()
         let code = install.terminationStatus
-        log(code == 0 || code == 3 ? "server install exited \(code)" : "server install failed (exit \(code)): \(errors)")
+        let installed = code == 0 || code == 3 || code == 4
+        log(installed ? "server install exited \(code)" : "server install failed (exit \(code)): \(errors)")
         // ArgumentParser prefixes a thrown error; the notice names the failure itself
         let reason = errors.hasPrefix("Error: ") ? String(errors.dropFirst("Error: ".count)) : errors
-        return WSLServerEnsure.installNotice(exitCode: code, error: code == 0 || code == 3 || reason.isEmpty ? nil : reason, label: label,
+        return WSLServerEnsure.installNotice(exitCode: code, error: installed || reason.isEmpty ? nil : reason, label: label,
                                              source: host.name)
     }
 
@@ -2102,13 +2103,26 @@ final class NativeShell {
         noticeWindow = bar
     }
 
-    /// noticeAction runs a notice's button: Retry probes its server again, Install reinstalls it, Open Log opens the log.
+    /// noticeAction runs a notice's button: Retry probes its server again, Install reinstalls it, Restart WSL terminates
+    /// the distribution so lingering starts its user manager and the server again before the probe, Open Log opens the log.
     private func noticeAction(_ message: NoticeBar.Message, _ action: NoticeBar.Action) {
         log("native shell: notice action \(action.rawValue) for \(message.source)")
         switch action {
         case .openLog: openLog()
         case .retry, .install:
             if let server = server(message.source) { prepareAndConnect(server, forceInstall: action == .install) }
+        case .restartDistribution:
+            guard let server = server(message.source) else { return }
+            server.bootstrapNotice = NoticeBar.Message(source: server.name, text: "\(server.label): restarting the distribution…", severity: .progress)
+            layout()
+            let command = RemoteCommands.current.command(for: server.name).map(RemoteHost.commandLine) ?? ""
+            let distribution = NativeOverlay.distribution(of: command) ?? server.name
+            DispatchQueue.global().async {
+                let line = "wsl.exe --terminate " + WindowsCommandLine.quoted(distribution)
+                let status = (try? HiddenProcess(commandLine: line, captureErrors: false)).map { $0.closeInput(); $0.waitUntilExit(); return $0.terminationStatus }
+                log("native shell: \(line) exited \(status.map(String.init) ?? "before start")")
+                DispatchQueue.main.async { MainActor.assumeIsolated { shell.prepareAndConnect(server, forceInstall: false) } }
+            }
         }
     }
 

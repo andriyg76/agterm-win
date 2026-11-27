@@ -99,11 +99,12 @@ public enum ServerInstall {
     }
 
     /// exitCode maps the installer's outcome to the command's: 0 installed, 3 installed with the agent hooks
-    /// incomplete, 1 for anything else.
+    /// incomplete, 4 installed but not started, 1 for anything else.
     public static func exitCode(_ outcome: ForegroundSpawn.Outcome) -> Int32 {
         switch outcome {
         case .exited(0): 0
         case .exited(3): 3
+        case .exited(4): 4
         default: 1
         }
     }

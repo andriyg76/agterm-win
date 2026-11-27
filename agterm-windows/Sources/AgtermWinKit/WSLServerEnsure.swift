@@ -62,14 +62,19 @@ public enum WSLServerEnsure {
         switch exitCode {
         case 0: return "\(label): agterm-server installed."
         case 3: return "\(label): agterm-server installed; agent hooks are incomplete (run agterm-server install-hooks in WSL)."
+        case 4: return "\(label): agterm-server installed, but WSLg hides the systemd user bus; restart the distribution to start it."
         default: return "\(label): install exited \(exitCode). See agterm-win.log."
         }
     }
 
-    /// installNotice is `installOutcome` as the notice bar shows it: an error offering the install again and the log.
+    /// installNotice is `installOutcome` as the notice bar shows it: an error offering the install again and the log, or for
+    /// exit 4 a restart of the distribution, whose user manager then starts the enabled server.
     public static func installNotice(exitCode: Int32, error: String?, label: String, source: String) -> NoticeBar.Message {
         let text = installOutcome(exitCode: exitCode, error: error, label: label)
         guard error?.isEmpty == false || (exitCode != 0 && exitCode != 3) else { return NoticeBar.Message(source: source, text: text, severity: .info) }
+        if exitCode == 4, error?.isEmpty != false {
+            return NoticeBar.Message(source: source, text: text, severity: .error, actions: [.restartDistribution, .openLog])
+        }
         return NoticeBar.Message(source: source, text: text, severity: .error, actions: [.install, .openLog])
     }
 }
