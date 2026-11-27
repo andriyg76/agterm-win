@@ -29,7 +29,7 @@ $merges = @(git log $range --merges --pretty=format:"%h %s" 2>$null)
 
 $since = ""
 if (git rev-parse --verify "${prevTag}^{commit}" 2>$null) {
-    $since = git log -1 --format=%Y-%m-%dT%H:%M:%SZ $prevTag
+    $since = git log -1 --format=%cI $prevTag
 }
 $repo = (git -C $root remote get-url origin) -replace '^https://github\.com/', '' -replace '\.git$', ''
 $prs = @()
@@ -38,7 +38,7 @@ if (Get-Command gh -ErrorAction SilentlyContinue) {
         "--json", "number,title,body,mergedAt,url")
     if ($since) { $ghArgs += @("--search", "merged:>=$($since.Substring(0, 10))") }
     $raw = gh @ghArgs 2>$null | ConvertFrom-Json
-    if ($raw) { $prs = @($raw) }
+    if ($raw) { $prs = @($raw | Where-Object { -not $since -or [datetimeoffset]$_.mergedAt -gt [datetimeoffset]$since }) }
 }
 
 $header = @"
@@ -53,16 +53,9 @@ function Format-Fallback {
         foreach ($pr in $prs) {
             $lines.Add("- #$($pr.number) [$($pr.title)]($($pr.url))")
         }
-        $lines.Add("")
-    }
-    if ($commits.Count) {
+    } elseif ($commits.Count) {
         $lines.Add("### Commits")
         foreach ($line in $commits) { $lines.Add("- $line") }
-        $lines.Add("")
-    }
-    if ($merges.Count -and -not $prs.Count) {
-        $lines.Add("### Merge commits")
-        foreach ($line in $merges) { $lines.Add("- $line") }
     }
     $lines -join "`n"
 }
@@ -79,10 +72,12 @@ function Invoke-OpenAiNotes {
     } | ConvertTo-Json -Depth 6 -Compress
     $system = @"
 You write GitHub release notes for agterm-win (Windows port of agterm).
-Group changes under Markdown headings:
-- **Features** — user-visible behavior; each bullet names the feature briefly and cites task/plan/issue references ONLY when they appear in a PR title or body (e.g. stage D0, docs/plans/..., #NN).
-- **Refactoring and infrastructure** — modules or areas touched without a user-facing feature (e.g. agtermCore, NativeShell, CI).
-Skip merge-commit noise and duplicate bullets. Do not invent issue numbers. Keep bullets short. Do not repeat the version line (it is added separately).
+Describe what changed for users; do not list commits. Base each bullet on the merged pull requests (title and body), using commits only for work no PR covers.
+Group changes under Markdown headings, omitting empty ones:
+- **Features** — new or changed user-visible behavior, one short bullet per feature, ending with its PR link (#NN).
+- **Fixes** — user-visible bugs fixed: what was wrong and is now right, ending with its PR link (#NN).
+- **Refactoring and infrastructure** — one short bullet per area touched without a user-facing change (e.g. agtermCore, tests, CI, packaging).
+Merge related PRs and commits into one bullet. Skip merge commits and duplicates. Do not invent issue numbers. Keep bullets short. Do not repeat the version line (it is added separately).
 "@
     $user = "Summarize this release payload as release notes body (Markdown only, no top-level H1):`n$payload"
     $body = @{
@@ -103,7 +98,7 @@ Skip merge-commit noise and duplicate bullets. Do not invent issue numbers. Keep
 }
 
 $body = if ($env:OPENAI_API_KEY) {
-    $model = if ($env:OPENAI_MODEL) { $env:OPENAI_MODEL } else { "GPT-6.1-terra" }
+    $model = if ($env:OPENAI_MODEL) { $env:OPENAI_MODEL } else { "gpt-6.1-terra" }
   try {
       Invoke-OpenAiNotes -ApiKey $env:OPENAI_API_KEY -Model $model
   } catch {
