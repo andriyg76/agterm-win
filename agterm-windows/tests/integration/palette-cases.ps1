@@ -121,6 +121,8 @@ public static class AgtermInput {
                 SetCursorPos(fromX + (toX - fromX) * step / 16, fromY + (toY - fromY) * step / 16);
                 System.Threading.Thread.Sleep(20);
             }
+            // a hand holds still before letting go; without the pause the release can outrun the last move's handling
+            System.Threading.Thread.Sleep(150);
         } finally {
             mouse_event(0x04, 0, 0, 0, UIntPtr.Zero);
         }
