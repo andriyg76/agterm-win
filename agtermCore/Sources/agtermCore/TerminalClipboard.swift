@@ -38,7 +38,17 @@ public enum TerminalClipboard {
     /// path. PATH is not searched: only the bundled zmx is known to match this build.
     static func zmxPath(clientPath: String?, fileManager: FileManager = .default) throws -> String {
         guard let clientPath else { throw Failure.zmxNotFound(path: nil) }
-        let path = ((clientPath as NSString).deletingLastPathComponent as NSString).appendingPathComponent("zmx")
+        let folder = (clientPath as NSString).deletingLastPathComponent as NSString
+        #if os(Windows)
+        // agterm-win stages zmx in zmx\<rev>, which zmx\current names, so an update never replaces a running daemon's
+        let staged = folder.appendingPathComponent("zmx") as NSString
+        let current = try? String(contentsOfFile: staged.appendingPathComponent("current"), encoding: .utf8)
+        let path = current.flatMap { $0.split(whereSeparator: \.isNewline).first }
+            .map { (staged.appendingPathComponent(String($0)) as NSString).appendingPathComponent("zmx.exe") }
+            ?? folder.appendingPathComponent("zmx.exe")
+        #else
+        let path = folder.appendingPathComponent("zmx")
+        #endif
         guard fileManager.isExecutableFile(atPath: path) else { throw Failure.zmxNotFound(path: path) }
         return path
     }
