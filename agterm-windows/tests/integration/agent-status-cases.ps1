@@ -102,3 +102,33 @@ $shellCases["agent-hooks"] = {
     if ((& $status) -ne "completed") { $failures += "the last Stop left '$(& $status)'" }
     $failures
 }
+
+# events.read: a `session wait` started in another process returns once the status lands, and a running
+# `agtermctl events` prints it
+$shellCases["events-wait"] = {
+    param($Shell)
+    $state = $Shell.State
+    $id = New-PowerShellSession $state
+    if (-not $id) { return @("the session did not start") }
+    $failures = @()
+    $out = Join-Path $Shell.Dir "events.jsonl"
+    $env:AGTERM_STATE_DIR = $state
+    try {
+        $wait = Start-Process -FilePath $ctl -ArgumentList @("session", "wait", "--until", "completed", "--timeout", "10", "--target", $id) `
+            -NoNewWindow -PassThru
+        $stream = Start-Process -FilePath $ctl -ArgumentList @("events", "--kind", "status", "--json") -NoNewWindow -PassThru `
+            -RedirectStandardOutput $out
+    } finally { Remove-Item Env:AGTERM_STATE_DIR }
+    # a PassThru process reports no ExitCode unless its handle was taken before it exited
+    $wait.Handle | Out-Null
+    Start-Sleep -Seconds 2
+    Invoke-Ctl $state @("session", "status", "completed", "--target", $id) | Out-Null
+    if (-not $wait.WaitForExit(15000)) {
+        $failures += "session wait never returned"
+        Stop-Process -Id $wait.Id -Force -ErrorAction SilentlyContinue
+    } elseif ($wait.ExitCode -ne 0) { $failures += "session wait exited $($wait.ExitCode)" }
+    $printed = Wait-Until { if (Test-Path $out) { $text = Get-Content $out -Raw; if ($text -match '"completed"') { $text } } } 10
+    if (-not $printed) { $failures += "agtermctl events printed '$(if (Test-Path $out) { Get-Content $out -Raw })'" }
+    Stop-Process -Id $stream.Id -Force -ErrorAction SilentlyContinue
+    $failures
+}

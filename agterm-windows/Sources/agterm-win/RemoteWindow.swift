@@ -40,13 +40,13 @@ final class RemoteWindow: RemoteCatalogEffects {
     private var presenters: [UUID: RemotePresentationClient] = [:]
     private var ticking: Task<Void, Never>?
 
-    init(host: RemoteHost, stateDirectory: URL) {
+    init(host: RemoteHost, stateDirectory: URL, controlEventSink: ((ControlEventDraft) -> Void)? = nil) {
         self.host = host
         transport = RemoteTransport(host: host)
         let windows = stateDirectory.appendingPathComponent("windows")
         try? FileManager.default.createDirectory(at: windows, withIntermediateDirectories: true)
         store = AppStore(persistence: PersistenceStore(directory: windows, fileName: "remote-\(NativeControl.remoteWindowID(host.name).uuidString).json"),
-                         paneFinalizer: nil)
+                         controlEventSink: controlEventSink, paneFinalizer: nil)
         mirror = RemoteCatalogMirror(host: host.name, store: store, effects: self,
                                      viewState: RemoteWindowViewState())
         client = RemoteCatalogClient(mirror: mirror, transport: transport, runner: transport.runner)

@@ -156,7 +156,11 @@ final class NativeShell {
     var remoteTerminal: NativeTerminal {
         selected.flatMap { serverTerminals[$0] } ?? emptyRemoteTerminal
     }
-    var locals: [LocalSession] = []
+    var locals: [LocalSession] = [] {
+        didSet { syncEvents() }
+    }
+    /// events is the `events.read` history; `syncEvents` reports what the local sessions' runtime changed.
+    let events: NativeEvents
     /// serverOverlays holds a program overlay per catalog session the presentation stream opened.
     private var serverOverlays: [Foundation.UUID: ServerOverlay] = [:]
     private var serverPageOverlays: [Foundation.UUID: ServerPageOverlay] = [:]
@@ -226,7 +230,10 @@ final class NativeShell {
         zmxClient = client
         log("native shell: restore mode \(zmx.decision.requested.rawValue), active \(zmx.decision.active.rawValue)"
             + (zmx.decision.liveUnavailableReason.map { ", live unavailable: \($0)" } ?? "") + ", zmx \(zmx.executablePath) in \(zmx.socketDirectory)")
+        let events = NativeEvents()
+        self.events = events
         let loaded = LocalWindow.load(stateDirectory: stateDirectory, legacy: settings.localSessions, legacySelected: settings.selectedLocal,
+                                      controlEventSink: events.sink(window: LocalWindow.id),
                                       paneFinalizer: { identities in MainActor.assumeIsolated { _ = client.kill(paneIdentities: identities) } })
         localStore = loaded.store
         client.reap(knownPaneIdentities: loaded.paneIdentities, decision: zmx.decision)
@@ -274,6 +281,7 @@ final class NativeShell {
         emptyRemoteTerminal = makeTerminal()
         PickRegistry.shared.register(shellWindowID, controller: pickController)
         control = ControlSocket.start(path: socketPath, host: self, version: version)
+        if control != nil { events.launched() }
         startToasts()
         Keys.onReload = { [unowned self] in
             WinKeyHook.update(window: self.window)
@@ -344,7 +352,8 @@ final class NativeShell {
             askServerLaunch(name)
             asking.remove(name)
         }
-        let started = Server(RemoteWindow(host: RemoteHost(name: name), stateDirectory: stateDirectory))
+        let started = Server(RemoteWindow(host: RemoteHost(name: name), stateDirectory: stateDirectory,
+                                          controlEventSink: events.sink(window: NativeControl.remoteWindowID(name))))
         started.remote.changed = { [weak self] in self?.catalogChanged() }
         started.remote.onNotification = { [weak self] id, notification in
             self?.deliver(id, title: notification.title, body: notification.body, source: notification.source == "control" ? .control : .terminal)
@@ -883,6 +892,17 @@ final class NativeShell {
         }
     }
 
+    func syncEvents() {
+        events.sync(locals.map { local -> (id: Foundation.UUID, name: String, pane: NativeEvents.Pane) in
+            let inSplit = local.split?.focused == true && local.splitTerminal != nil
+            let focused: NativeTerminal = inSplit ? local.splitTerminal! : local.terminal
+            return (id: local.id, name: local.name, pane: NativeEvents.Pane(indicator: local.activity.indicator,
+                                                            splitShown: local.splitTerminal != nil && local.split?.shown == true,
+                                                            scratchShown: local.scratchShown && local.scratch != nil,
+                                                            focusedPane: inSplit ? .right : .left, focusedTerminal: ObjectIdentifier(focused)))
+        }, store: localStore)
+    }
+
     /// mirror writes what a local session's panes report into its store session, which saves it.
     func mirror(_ session: LocalSession) {
         guard let stored = localStore.session(withID: session.id) else { return }
@@ -945,6 +965,9 @@ final class NativeShell {
             log("notification: dropped for \(id), the session is in view")
             return nil
         }
+        // `.terminal` keeps a mirrored row's store from publishing the note back to viewers
+        let owner = localStore.session(withID: id) != nil ? localStore : server(of: id)?.remote.store
+        _ = owner?.recordNotificationEvent(forSession: id, title: title, body: body, origin: .terminal)
         if selected != id || !inFront {
             if let index = locals.firstIndex(where: { $0.id == id }) {
                 locals[index].unseen += 1

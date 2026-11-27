@@ -3,7 +3,7 @@ import agtermCore
 /// The requirements NativeControl answers itself; the dispatcher never reaches them for `NativeStructure.commands`.
 extension NativeStructure {
     public func controlTree(window: String?) -> ControlResponse { unserved("controlTree") }
-    public func readEvents(_ options: ControlEventReadOptions) -> ControlResponse { unserved("readEvents") }
+    public func readEvents(_ options: ControlEventReadOptions) -> ControlResponse { events?.read(options) ?? unserved("readEvents") }
     public func duplicateSession(_ target: String?, window: String?) -> ControlResponse { unserved("duplicateSession") }
     public func selectSession(_ target: String?, window: String?) -> ControlResponse { unserved("selectSession") }
     public func goSession(window: String?, direction: SessionNavigation) -> ControlResponse { unserved("goSession") }
