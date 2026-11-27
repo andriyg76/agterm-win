@@ -36,10 +36,12 @@ The files are under `%LOCALAPPDATA%\agterm-win`, or the folder `AGTERM_WIN_STATE
 | `agterm-win.log` | A diagnostic log: start and stop, sessions opened and closed, the commands that started them, the title and text of notifications posted to a session, errors. It does not record what you type or what programs print. |
 | `crash.log` | Written only when agterm-win crashes: the error and where it happened. |
 | `HKCU\Software\Classes\AppUserModelId\andriyg76.agterm-win` (registry, installs outside the Store) | The name and icon Windows shows on agterm-win's notifications. |
+| `zmx\<id>` | With Settings ▸ General ▸ Restore sessions set to Live sessions, the sockets of the `zmx` processes that keep each local session's shell running between starts. Only your account and administrators can open them. |
 | `agterm.sock` | The local control socket `agtermctl` talks to. It sits in your profile's local app data, which Windows opens only to your account and administrators, and it carries nothing off the machine. |
 
 Terminal contents and scrollback stay in memory: they are not written to disk and are gone when a session
-closes.
+closes. With Live sessions, a `zmx` process per pane keeps its shell and screen in memory after agterm-win closes,
+until you close the session, start agterm-win with Fresh shells, or sign out.
 
 So that Claude Code and Codex can show their status in the sidebar, agterm-win installs status hooks on its first
 start and after each update, as agterm on a Mac does. It copies its PowerShell status scripts to

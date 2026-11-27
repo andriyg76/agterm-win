@@ -17,6 +17,8 @@ public struct GeneralSettings: Codable, Equatable, Sendable {
     public var rightClickPastes = false
     /// scrollLines is how far a wheel notch scrolls, macOS's `mouse-scroll-multiplier`.
     public var scrollLines = GeneralSettings.defaultScrollLines
+    /// restoreMode is how a restart brings sessions back, read once at launch as on macOS.
+    public var restoreMode = RestoreMode.none
 
     public static let defaultScrollLines = 3
     public static let scrollLineRange = 1...10
@@ -32,6 +34,7 @@ public struct GeneralSettings: Codable, Equatable, Sendable {
         rightClickPastes = try container.decodeIfPresent(Bool.self, forKey: .rightClickPastes) ?? false
         let lines = try container.decodeIfPresent(Int.self, forKey: .scrollLines) ?? Self.defaultScrollLines
         scrollLines = Self.scrollLineRange.contains(lines) ? lines : Self.defaultScrollLines
+        restoreMode = try container.decodeIfPresent(RestoreMode.self, forKey: .restoreMode) ?? .none
     }
 
     public var directory: AppSettings.NewSessionDirectory {

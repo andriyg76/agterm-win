@@ -38,6 +38,9 @@ final class NativeShell {
         var splitTerminal: NativeTerminal?
         var splitTitle: String?
         var splitDirectory: String?
+        /// backedByZmx and splitBackedByZmx are whether that pane attached to a Live sessions daemon at its start.
+        var backedByZmx = false
+        var splitBackedByZmx = false
         /// scratch is the session's third shell, kept while hidden; it covers the panes while `scratchShown`.
         var scratch: NativeTerminal?
         var scratchShown = false
@@ -125,6 +128,9 @@ final class NativeShell {
     var settings: NativeSettings
     /// localStore is the local window's tree: its workspaces and the order and grouping of `locals`.
     let localStore: AppStore
+    /// zmx is this launch's restore decision, frozen for the process as on macOS, and zmxClient reaches its daemons.
+    let zmx: ZmxLaunch
+    let zmxClient: ZmxClient
     var window: HWND?
     var tree: UnsafeMutableRawPointer?
     var noticeWindow: NoticeBarWindow?
@@ -214,8 +220,16 @@ final class NativeShell {
         self.settingsURL = settingsURL
         self.version = version
         settings = NativeSettings.load(from: settingsURL)
-        localStore = LocalWindow.load(stateDirectory: settingsURL.deletingLastPathComponent(), legacy: settings.localSessions,
-                                      legacySelected: settings.selectedLocal)
+        let stateDirectory = settingsURL.deletingLastPathComponent()
+        zmx = ZmxLaunch(executablePath: localZmx(), stateDirectory: stateDirectory.path, requested: settings.general.restoreMode)
+        let client = ZmxClient(executablePath: zmx.executablePath, socketDirectory: zmx.socketDirectory, runner: Self.runZmx, log: { log($0) })
+        zmxClient = client
+        log("native shell: restore mode \(zmx.decision.requested.rawValue), active \(zmx.decision.active.rawValue)"
+            + (zmx.decision.liveUnavailableReason.map { ", live unavailable: \($0)" } ?? "") + ", zmx \(zmx.executablePath) in \(zmx.socketDirectory)")
+        let loaded = LocalWindow.load(stateDirectory: stateDirectory, legacy: settings.localSessions, legacySelected: settings.selectedLocal,
+                                      paneFinalizer: { identities in MainActor.assumeIsolated { _ = client.kill(paneIdentities: identities) } })
+        localStore = loaded.store
+        client.reap(knownPaneIdentities: loaded.paneIdentities, decision: zmx.decision)
         if !settings.localSessions.isEmpty || settings.selectedLocal != nil {
             settings.localSessions = []
             settings.selectedLocal = nil
@@ -554,7 +568,8 @@ final class NativeShell {
         let listed = ServerLaunch.listed(available: remotes, choices: settings.serverLaunch)
         SettingsWindow.show(owner: window, values: .init(appearance: settings.appearance, points: settings.fontPoints,
                                                          notifications: settings.notifications, general: settings.general,
-                                                         serverAtLaunch: Set(ServerLaunch.atLaunch(settings.serverLaunch))),
+                                                         serverAtLaunch: Set(ServerLaunch.atLaunch(settings.serverLaunch)),
+                                                         liveUnavailable: zmx.decision.requested == .live ? zmx.decision.liveUnavailableReason : nil),
                             themes: TerminalAppearance.themes.catalog.names, fonts: TerminalAppearance.monospaceFonts,
                             distributions: listed, tab: tab,
                             preview: { [unowned self] in applyAppearance($0) },
@@ -609,7 +624,9 @@ final class NativeShell {
 
     /// confirmQuit asks before running local sessions end with the window.
     fileprivate func confirmQuit() -> Bool {
-        guard let question = NativeMenu.quitQuestion(runningLocalSessions: locals.filter { !$0.exited }.count) else { return true }
+        // a session whose panes all run under Live sessions daemons keeps running
+        let ending = locals.filter { !$0.exited && !($0.backedByZmx && ($0.splitTerminal == nil || $0.splitBackedByZmx)) }
+        guard let question = NativeMenu.quitQuestion(runningLocalSessions: ending.count) else { return true }
         return MessageBoxW(window, Array(question.utf16) + [0], Array("agterm".utf16) + [0],
                            UINT(MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)) == IDOK
     }
@@ -814,9 +831,38 @@ final class NativeShell {
     private func launch(_ session: LocalSession) {
         var isFolder: ObjCBool = false
         let last = session.directory.flatMap { FileManager.default.fileExists(atPath: $0, isDirectory: &isFolder) && isFolder.boolValue ? $0 : nil }
-        session.terminal.start(ShellIntegration.commandLine(session.commandLine),
+        let backed = startPane(session.terminal, commandLine: session.commandLine,
                                directory: last ?? ProcessInfo.processInfo.environment["USERPROFILE"],
-                               environment: sessionEnvironment(session.id))
+                               environment: sessionEnvironment(session.id), paneIdentity: localStore.session(withID: session.id)?.paneIdentity)
+        if let index = locals.firstIndex(where: { $0.id == session.id }) { locals[index].backedByZmx = backed }
+    }
+
+    /// startPane starts a primary or split pane's program, under its Live sessions daemon when this launch is Live, and
+    /// answers whether it did.
+    func startPane(_ terminal: NativeTerminal, commandLine: String, directory: String?, environment: [String: String],
+                   paneIdentity: Foundation.UUID?) -> Bool {
+        if let paneIdentity, let wrapped = zmx.start(commandLine, paneIdentity: paneIdentity, environment: environment) {
+            terminal.start(wrapped.commandLine, directory: directory, environment: wrapped.environment)
+            return true
+        }
+        terminal.start(ShellIntegration.commandLine(commandLine), directory: directory, environment: environment)
+        return false
+    }
+
+    /// runZmx runs zmx.exe hidden, ending it when it outlives `timeout`, as macOS `ZmxClient.run` does.
+    private static func runZmx(_ executable: String, _ invocation: ZmxClient.Invocation) -> (status: Int32, output: String)? {
+        let line = RemoteHost.commandLine([executable] + invocation.arguments)
+        guard let process = try? HiddenProcess(commandLine: line, captureErrors: invocation.mergesStderr,
+                                               environment: invocation.environment) else { return nil }
+        process.closeInput()
+        nonisolated(unsafe) let running = process
+        let overran = DispatchWorkItem { if running.isRunning { running.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: overran)
+        let output = process.readToEnd()
+        let errors = invocation.mergesStderr ? process.readErrorsToEnd() : Data()
+        process.waitUntilExit()
+        overran.cancel()
+        return (process.terminationStatus, String(decoding: output + errors, as: UTF8.self))
     }
 
     /// startLocal starts the terminal of store session `stored`, with the split it was saved with.
@@ -3124,6 +3170,20 @@ private let shellWindowProcedure: WNDPROC = { window, message, wParam, lParam in
 // MARK: control
 
 extension NativeShell: NativeControlHost {
+    var zmxContext: NativeZmx.Context {
+        NativeZmx.Context(store: localStore, client: zmxClient, decision: zmx.decision, configured: settings.general.restoreMode,
+                          setConfigured: { [unowned self] mode in
+                              settings.general.restoreMode = mode
+                              do {
+                                  try settings.save(to: settingsURL)
+                                  return true
+                              } catch {
+                                  log("native shell: saving \(settingsURL.path) failed: \(error)")
+                                  return false
+                              }
+                          })
+    }
+
     var localSessions: [NativeControl.Local] {
         locals.map {
             var local = NativeControl.Local(id: $0.id, name: $0.name, commandLine: $0.commandLine, exited: $0.exited, attention: $0.attention,
@@ -3133,6 +3193,7 @@ extension NativeShell: NativeControlHost {
             local.pageOverlaySizePercent = $0.pageOverlay?.sizePercent
             local.split = $0.splitTerminal == nil ? nil : $0.split
             local.splitCwd = $0.splitDirectory
+            local.backedByZmx = $0.backedByZmx && ($0.splitTerminal == nil || $0.splitBackedByZmx)
             local.scratch = $0.scratchShown && $0.scratch != nil
             local.scratchRunning = $0.scratch != nil
             local.scratchCwd = $0.scratchDirectory
@@ -3306,6 +3367,15 @@ extension NativeShell: NativeControlHost {
     /// restartSession runs a local session's program again, ended or not, as `session.restart` replaces a live pane's.
     func restartSession(_ id: Foundation.UUID) async -> ControlResponse {
         if let index = locals.firstIndex(where: { $0.id == id }) {
+            // a running daemon would take the attach back to the same program
+            if locals[index].backedByZmx, !locals[index].exited, let identity = localStore.session(withID: id)?.paneIdentity {
+                let name = ZmxSupport.daemonName(for: identity)
+                switch zmxClient.killConfirmed(name: name) {
+                case .killed: break
+                case .staleSocket: return ControlResponse(ok: false, error: "\(name) did not confirm the kill; the daemon may still be running")
+                case .failed(let reason): return ControlResponse(ok: false, error: "could not kill \(name): \(reason)")
+                }
+            }
             locals[index].exited = false
             launch(locals[index])
             rebuild()

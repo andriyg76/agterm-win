@@ -16,18 +16,28 @@ public enum LocalWindow {
     }
 
     /// load reads the window's saved tree. Without one it imports `legacy`, the sessions a build before workspaces kept
-    /// in `native.json`, into the root, selecting `legacySelected` as that build did.
-    public static func load(stateDirectory: URL, legacy: [NativeSettings.LocalSession], legacySelected: Int?) -> AppStore {
+    /// in `native.json`, into the root, selecting `legacySelected` as that build did. `paneIdentities` are the panes the
+    /// saved tree claims, each given an identity a file from before Live sessions lacked, as a Mac window's are; nil
+    /// when the file could not be read, so a Live launch reaps nothing.
+    public static func load(stateDirectory: URL, legacy: [NativeSettings.LocalSession], legacySelected: Int?,
+                            paneFinalizer: (([UUID]) -> Void)? = nil) -> (store: AppStore, paneIdentities: Set<UUID>?) {
         let persistence = persistence(stateDirectory: stateDirectory)
-        let store = AppStore(persistence: persistence, paneFinalizer: nil)
-        if FileManager.default.fileExists(atPath: file(stateDirectory: stateDirectory).path) {
-            store.restore(from: persistence.load())
-            store.ensureRoot()
-        } else {
+        let store = AppStore(persistence: persistence, paneFinalizer: paneFinalizer)
+        guard FileManager.default.fileExists(atPath: file(stateDirectory: stateDirectory).path) else {
             store.ensureRoot()
             importLegacy(legacy, selected: legacySelected, into: store)
+            return (store, [])
         }
-        return store
+        guard var snapshot = try? persistence.loadChecked() else {
+            store.restore(from: persistence.load())
+            store.ensureRoot()
+            return (store, nil)
+        }
+        let upgrade = PaneIdentityInventory.upgrade(&snapshot)
+        store.restore(from: snapshot)
+        store.ensureRoot()
+        if upgrade.changed { store.save() }
+        return (store, upgrade.identities)
     }
 
     static func importLegacy(_ legacy: [NativeSettings.LocalSession], selected: Int?, into store: AppStore) {

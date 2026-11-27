@@ -53,7 +53,13 @@ public enum ZmxSupport {
         public let executablePath: String
         public let sessionHostExecutablePath: String?
         public var attachArguments: [String] { [executablePath, "attach", daemonName] }
-        public var command: String { CommandRestore.shellQuotedLine(attachArguments) }
+        public var command: String {
+            #if os(Windows)
+            attachArguments.map(WindowsCommandLine.quoted).joined(separator: " ")
+            #else
+            CommandRestore.shellQuotedLine(attachArguments)
+            #endif
+        }
         public let environment: [String: String]
         public let daemonName: String
         public let socketDirectory: String
@@ -101,12 +107,15 @@ public enum ZmxSupport {
         guard FileManager.default.isExecutableFile(atPath: executable) else {
             return .failure(.executableUnavailable)
         }
+        // a Windows pane's payload is its profile command line, which carries its own shell integration
+        #if !os(Windows)
         guard let shell = inputs.commandShell ?? inputs.passwordDatabaseShell, let shellKind = shellKind(for: shell) else {
             return .failure(.unsupportedLoginShell)
         }
         guard let resources = inputs.resourcesDirectory else {
             return .failure(shellKind.missingIntegrationRejection)
         }
+        #endif
 
         let daemonName = daemonName(for: inputs.paneIdentity)
         let socketDirectory = socketDirectory(forStateDirectory: inputs.stateDirectory)
@@ -114,6 +123,7 @@ public enum ZmxSupport {
         let paneID = inputs.paneIdentity.uuidString
         var environment = inputs.baseEnvironment
         environment["AGTERM_PANE_ID"] = paneID
+        #if !os(Windows)
         environment["SHELL"] = shell
         switch shellKind {
         case .zsh:
@@ -135,6 +145,7 @@ public enum ZmxSupport {
             }
             environment["GHOSTTY_SHELL_INTEGRATION_XDG_DIR"] = integrationRoot
         }
+        #endif
         environment["ZMX_DIR"] = socketDirectory
         environment["ZMX_SESSION"] = ""
         environment["ZMX_SESSION_PREFIX"] = ""
@@ -177,6 +188,10 @@ public enum ZmxSupport {
                                      denylist: Set<String>) -> String {
         let creation = paneCommand.map(Creation.endingPane) ?? creationCommand.map(Creation.returningToShell)
         let payload = creationArguments(configuration, replaying: argv, creation: creation, denylist: denylist)
+        #if os(Windows)
+        // the payload is a command line already: CreateProcess takes one, and zmx's argv round-trips it
+        return (configuration.attachArguments.map(WindowsCommandLine.quoted) + payload).joined(separator: " ")
+        #else
         var arguments = configuration.attachArguments + payload
         if let host = configuration.sessionHostExecutablePath {
             let endsPane = argv == nil && paneCommand != nil && !payload.isEmpty
@@ -192,6 +207,7 @@ public enum ZmxSupport {
             arguments = ["/usr/bin/env"] + assignments + wrapper + arguments
         }
         return CommandRestore.shellQuotedLine(arguments)
+        #endif
     }
 
     /// commandShell is the shell a ghostty `command` value names when Live can run it in place of the login
@@ -235,6 +251,14 @@ public enum ZmxSupport {
 
     private static func creationArguments(_ configuration: Configuration, replaying argv: [String]?,
                                           creation: Creation?, denylist: Set<String>) -> [String] {
+        #if os(Windows)
+        // the creation line is the pane's shell, so it starts whichever way it was given; argv replay is not
+        // read on Windows yet
+        switch creation {
+        case .returningToShell(let line), .endingPane(let line): return [line]
+        case nil: return []
+        }
+        #else
         guard let shell = configuration.environment["SHELL"], let shellKind = shellKind(for: shell) else {
             return []
         }
@@ -279,6 +303,7 @@ public enum ZmxSupport {
             }
         }
         return [shell, "-lic", script]
+        #endif
     }
 
     private enum ShellKind {
@@ -302,7 +327,13 @@ public enum ZmxSupport {
     }
 
     public static func socketDirectory(forStateDirectory stateDirectory: String) -> String {
+        #if os(Windows)
+        // short because zmx binds AF_UNIX sockets, whose paths stop at 107 bytes with the daemon name
+        let root = ProcessInfo.processInfo.environment["LOCALAPPDATA"] ?? NSTemporaryDirectory()
+        return "\(root)\\agterm-win\\zmx\\\(stateHash(stateDirectory))"
+        #else
         "/tmp/agterm-zmx-\(stateHash(stateDirectory))"
+        #endif
     }
 
     /// socketDirectory under `runtimeDirectory` is agterm-server's: `XDG_RUNTIME_DIR` is kept for a lingering

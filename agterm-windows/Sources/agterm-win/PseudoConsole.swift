@@ -45,10 +45,7 @@ final class PseudoConsole {
         var info = PROCESS_INFORMATION()
         var line = Array(commandLine.utf16) + [0]
         let folder = directory.map { Array($0.utf16) + [0] }
-        // a Unicode block of NAME=value strings, each NUL-ended, the block ending in one more NUL
-        var block: [UInt16] = environment.map { variables in
-            variables.sorted { $0.key.uppercased() < $1.key.uppercased() }.flatMap { Array("\($0.key)=\($0.value)".utf16) + [0] } + [0]
-        } ?? []
+        var block = environment.map(Self.environmentBlock) ?? []
         let flags = DWORD(EXTENDED_STARTUPINFO_PRESENT) | (block.isEmpty ? 0 : DWORD(CREATE_UNICODE_ENVIRONMENT))
         let started = withUnsafeMutablePointer(to: &startup) { pointer in
             pointer.withMemoryRebound(to: STARTUPINFOW.self, capacity: 1) { startupInfo in
@@ -106,6 +103,11 @@ final class PseudoConsole {
     func close() {
         ClosePseudoConsole(console)
         CloseHandle(input)
+    }
+
+    /// environmentBlock is CreateProcessW's Unicode block: NAME=value strings, each NUL-ended, the block ending in one more NUL.
+    static func environmentBlock(_ variables: [String: String]) -> [UInt16] {
+        variables.sorted { $0.key.uppercased() < $1.key.uppercased() }.flatMap { Array("\($0.key)=\($0.value)".utf16) + [0] } + [0]
     }
 
     enum Failure: Error, CustomStringConvertible {

@@ -1,4 +1,5 @@
 import AgtermWinKit
+import agtermCore
 import Testing
 
 struct NativeOverlayTests {

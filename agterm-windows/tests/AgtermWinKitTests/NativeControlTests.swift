@@ -54,6 +54,13 @@ private final class FakeHost: NativeControlHost {
         NativeStructure.NewSession(cwd: #"C:\home"#, command: defaultCommand) { _, _ in nil }
     }
 
+    var restoreMode = RestoreMode.none
+    var zmxClient: ZmxClient?
+    var zmxContext: NativeZmx.Context {
+        NativeZmx.Context(store: localStore, client: zmxClient, decision: RestoreMode.live.launchDecision(liveUnavailableReason: nil),
+                          configured: restoreMode, setConfigured: { [unowned self] in restoreMode = $0; return true })
+    }
+
     var remotes: [UUID: AppStore] = [:]
     func remoteStore(_ window: UUID) -> AppStore? { remotes[window] }
 
@@ -809,5 +816,39 @@ struct NativeControlTests {
         let host = FakeHost()
         let id = host.add("a")
         #expect(await handle(ControlRequest(cmd: .sessionSeen, target: id.uuidString), host).ok && host.seen == [id])
+    }
+
+    @Test func restoreModeSavesLiveAndRefusesRerunOnWindows() async {
+        let host = FakeHost()
+        let live = await handle(ControlRequest(cmd: .restoreMode, args: ControlArgs(mode: "live")), host)
+        #expect(live.ok && host.restoreMode == .live)
+        let rerun = await handle(ControlRequest(cmd: .restoreMode, args: ControlArgs(mode: "rerun")), host)
+        #expect(!rerun.ok && host.restoreMode == .live)
+        #expect(await handle(ControlRequest(cmd: .restoreMode), host).result?.restore?.configured == "live")
+    }
+
+    @Test func zmxKillEndsOnlyTheDaemonItsPaneClaims() async throws {
+        let host = FakeHost()
+        let id = host.add("a")
+        let daemon = ZmxSupport.daemonName(for: try #require(host.localStore.session(withID: id)).paneIdentity)
+        let stranger = ZmxSupport.daemonName(for: UUID())
+        var calls: [[String]] = []
+        host.zmxClient = ZmxClient(executablePath: #"C:\zmx.exe"#, socketDirectory: #"C:\zmx"#) { _, invocation in
+            calls.append(invocation.arguments)
+            if invocation.arguments == ["list"] { return (0, "name=\(daemon)\tclients=1\nname=\(stranger)\tclients=0\n") }
+            return (0, "killed session \(invocation.arguments[1])\n")
+        }
+        let kill = { (pane: String) in
+            await self.handle(ControlRequest(cmd: .zmxKill, target: id.uuidString, args: ControlArgs(force: true, pane: pane)), host)
+        }
+        #expect(await kill("left").ok)
+        #expect(calls.last == ["kill", daemon, "--force"])
+        #expect(await !kill("right").ok)
+        #expect(!calls.contains { $0.contains(stranger) })
+    }
+
+    @Test func zmxCommandsWithoutZmxSayItIsUnavailable() async {
+        let response = await handle(ControlRequest(cmd: .zmxList), FakeHost())
+        #expect(!response.ok && response.error == "zmx is unavailable in this instance")
     }
 }
