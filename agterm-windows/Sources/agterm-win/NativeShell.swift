@@ -194,7 +194,7 @@ final class NativeShell {
     var darkBrush = CreateSolidBrush(0x262525)
     var dpi: UInt32 = 96
     private var control: ControlSocket?
-    private let version: String
+    let version: String
     /// quick is the quick terminal's panel, made on its first show.
     var quick: QuickWindow?
     /// dashboard is the open dashboard, nil while closed; captions are its cells' name strips.
@@ -821,7 +821,7 @@ final class NativeShell {
 
     var stateDirectory: URL { settingsURL.deletingLastPathComponent() }
 
-    private var socketPath: String { stateDirectory.appendingPathComponent("agterm.sock").path }
+    var socketPath: String { stateDirectory.appendingPathComponent("agterm.sock").path }
 
     /// sessionEnvironment is what a local session's programs inherit: agtermCore's `SurfaceEnvironment.session` set, the
     /// state directory, so agtermctl finds this window's socket, and agtermctl's folder on PATH. `pane` is nil for an overlay.
