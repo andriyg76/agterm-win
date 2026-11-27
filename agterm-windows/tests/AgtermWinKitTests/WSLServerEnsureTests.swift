@@ -35,4 +35,10 @@ struct WSLServerEnsureTests {
         #expect(WSLServerEnsure.installNotice(exitCode: 3, error: nil, label: "WSL Ubuntu", source: "Ubuntu").severity == .info)
         #expect(WSLServerEnsure.installNotice(exitCode: 0, error: nil, label: "WSL Ubuntu", source: "Ubuntu").actions.isEmpty)
     }
+
+    @Test func anInstallLeftForTheUserManagerOffersARestart() {
+        let notice = WSLServerEnsure.installNotice(exitCode: 4, error: nil, label: "WSL Ubuntu", source: "Ubuntu")
+        #expect(notice.severity == .error && notice.actions == [.restartDistribution, .openLog])
+        #expect(WSLServerEnsure.installNotice(exitCode: 4, error: "no network", label: "WSL Ubuntu", source: "Ubuntu").actions == [.install, .openLog])
+    }
 }

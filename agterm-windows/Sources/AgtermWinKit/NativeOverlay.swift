@@ -67,7 +67,7 @@ public struct NativeOverlay: Equatable, Sendable {
     }
 
     /// distribution is the `-d`/`--distribution` a wsl.exe command line names, nil for the default one.
-    static func distribution(of commandLine: String) -> String? {
+    public static func distribution(of commandLine: String) -> String? {
         let words = WindowsCommandLine.split(commandLine)
         guard let flag = words.firstIndex(where: { $0 == "-d" || $0 == "--distribution" }), flag + 1 < words.count else { return nil }
         return words[flag + 1]

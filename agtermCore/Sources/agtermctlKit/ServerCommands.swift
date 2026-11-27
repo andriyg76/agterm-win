@@ -27,7 +27,8 @@ struct Server: ParsableCommand {
 
             The connection is interactive, as with terminfo install: a password or host-key prompt is answered on \
             this terminal, and other settings belong in ~/.ssh/config. Exits 0 when installed, 3 when installed but \
-            the agent hooks are incomplete, and 1 on installation failure, with the reason on stderr. A development build \
+            the agent hooks are incomplete, 4 when installed but left to start with the next start of the host's user manager, \
+            and 1 on installation failure, with the reason on stderr. A development build \
             has no release to install; scripts/install-server.sh installs from a source tree.
             """)
         @Argument(help: "The host, as ssh would take it: host, user@host, or an alias from ~/.ssh/config; or a remote.properties name.")
@@ -136,6 +137,7 @@ struct ServerInstaller {
         switch code {
         case 0: effects.print("installed agterm-server \(release.version) on \(connection.destination)")
         case 3: effects.print("installed agterm-server \(release.version) on \(connection.destination); the agent hooks are incomplete")
+        case 4: effects.print("installed agterm-server \(release.version) on \(connection.destination); it starts with the next start of the user manager")
         default: throw SocketClientError("the installer on \(connection.destination) failed: \(installed)")
         }
         return code

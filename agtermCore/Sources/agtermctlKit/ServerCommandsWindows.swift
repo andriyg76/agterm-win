@@ -16,7 +16,7 @@ struct Server: ParsableCommand {
             from GitHub, checks it against the sha256 agterm-win was built with, unpacks it into \
             ~/.local/lib/agterm-server and runs its installer, each through the remote's command. --from FILE uses a \
             tarball already on this PC instead. Exits 0 when installed, 3 when installed but the agent hooks are \
-            incomplete, and 1 on failure, with the reason on stderr.
+            incomplete, 4 when installed but left to start with the next start of the remote's user manager, and 1 on failure, with the reason on stderr.
             """)
         @Argument(help: "The remote's name in remote.properties.") var destination: String
         @Option(name: .customLong("from"),
@@ -89,6 +89,7 @@ enum RemoteServerInstaller {
         switch installed.status {
         case 0: say("installed agterm-server \(release.version) on \(destination)")
         case 3: say("installed agterm-server \(release.version) on \(destination); the agent hooks are incomplete")
+        case 4: say("installed agterm-server \(release.version) on \(destination); it starts with the next start of the user manager")
         default: throw SocketClientError("the installer on \(destination) exited \(installed.status)")
         }
         return installed.status

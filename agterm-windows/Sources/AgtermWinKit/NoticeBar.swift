@@ -30,12 +30,13 @@ public enum NoticeBar {
     }
 
     public enum Action: String, Sendable, CaseIterable {
-        case retry, install, openLog
+        case retry, install, restartDistribution, openLog
 
         public var title: String {
             switch self {
             case .retry: "Retry"
             case .install: "Install"
+            case .restartDistribution: "Restart WSL"
             case .openLog: "Open Log"
             }
         }
