@@ -330,7 +330,7 @@ public enum ZmxSupport {
         #if os(Windows)
         // short because zmx binds AF_UNIX sockets, whose paths stop at 107 bytes with the daemon name
         let root = ProcessInfo.processInfo.environment["LOCALAPPDATA"] ?? NSTemporaryDirectory()
-        return "\(root)\\agterm-win\\zmx\\\(stateHash(stateDirectory))"
+        return "\(root)\\agterm-win\\s\\\(stateHash(stateDirectory))"
         #else
         "/tmp/agterm-zmx-\(stateHash(stateDirectory))"
         #endif

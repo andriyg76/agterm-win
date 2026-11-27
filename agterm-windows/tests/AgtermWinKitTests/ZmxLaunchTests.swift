@@ -31,6 +31,6 @@ struct ZmxLaunchTests {
     @Test func theSocketDirectoryIsShortAndPerStateDirectory() {
         let one = ZmxLaunch(executablePath: zmx, stateDirectory: #"C:\a"#, requested: .live).socketDirectory
         let other = ZmxLaunch(executablePath: zmx, stateDirectory: #"C:\b"#, requested: .live).socketDirectory
-        #expect(one != other && one.contains(#"\agterm-win\zmx\"#))
+        #expect(one != other && one.contains(#"\agterm-win\s\"#))
     }
 }
