@@ -26,9 +26,8 @@ public struct ZmxLaunch: Sendable {
     }
 
     /// start is how pane `paneIdentity` starts `commandLine`: through zmx while Live is active, nil for a plain start.
-    /// A WSL profile stays a plain start, since its distribution can stop under a daemon that outlives agterm-win.
     public func start(_ commandLine: String, paneIdentity: UUID, environment: [String: String]) -> Start? {
-        guard decision.active == .live, !TerminalInput.runsInWSL(commandLine),
+        guard decision.active == .live,
               case .success(let configuration) = ZmxSupport.configuration(for: inputs(paneIdentity, environment)) else { return nil }
         let line = ZmxSupport.attachCommand(configuration, replaying: nil, paneCommand: ShellIntegration.commandLine(commandLine),
                                             denylist: [])

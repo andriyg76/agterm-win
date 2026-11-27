@@ -6,7 +6,7 @@ import agtermCore
 struct ZmxLaunchTests {
     private let zmx = (ProcessInfo.processInfo.environment["SystemRoot"] ?? #"C:\Windows"#) + #"\System32\cmd.exe"#
 
-    @Test func aLiveLaunchWrapsAProfileInItsPanesDaemonAndLeavesWSLPlain() throws {
+    @Test func aLiveLaunchWrapsAProfileInItsPanesDaemon() throws {
         let launch = ZmxLaunch(executablePath: zmx, stateDirectory: #"C:\state"#, requested: .live)
         #expect(launch.decision.active == .live)
         let identity = UUID()
@@ -17,7 +17,8 @@ struct ZmxLaunchTests {
         #expect(line.lowercased().hasPrefix("\(zmx) attach \(start.daemonName) ".lowercased()))
         #expect(start.commandLine.contains("powershell.exe"))
         #expect(start.environment["A"] == "1" && start.environment["ZMX_DIR"] == launch.socketDirectory)
-        #expect(launch.start("wsl.exe -d Ubuntu", paneIdentity: identity, environment: [:]) == nil)
+        let wsl = try #require(launch.start("wsl.exe -d Ubuntu", paneIdentity: identity, environment: [:]))
+        #expect(wsl.commandLine.contains("wsl.exe -d Ubuntu") && wsl.daemonName == start.daemonName)
     }
 
     @Test func freshShellsAndAMissingZmxStartPlain() {
