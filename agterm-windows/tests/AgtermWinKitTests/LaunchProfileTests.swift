@@ -1,6 +1,7 @@
 import AgtermWinKit
 import Foundation
 import Testing
+import agtermCore
 
 struct LaunchProfileTests {
     @Test func windowsShellsComeFirstThenEachDistribution() {
@@ -31,5 +32,34 @@ struct LaunchProfileTests {
         let profiles = LaunchProfiles.available(wslDistributions: ["Ubuntu"], powerShell7: nil)
         #expect(LaunchProfiles.named("wsl ubuntu", in: profiles)?.commandLine == "wsl.exe -d Ubuntu --cd ~")
         #expect(LaunchProfiles.named("Bash", in: profiles) == nil)
+    }
+
+    @Test func gitBashFollowsCommandPromptAsALoginShell() {
+        let profiles = LaunchProfiles.available(wslDistributions: ["Ubuntu"], powerShell7: nil, gitBash: #"C:\Program Files\Git\bin\bash.exe"#)
+        #expect(profiles.map(\.name) == ["Windows PowerShell", "Command Prompt", "Git Bash", "WSL Ubuntu"])
+        #expect(profiles[2].commandLine == #""C:\Program Files\Git\bin\bash.exe" --login -i"#)
+    }
+
+    @Test func theFileReplacesHidesAndAddsProfiles() {
+        let detected = LaunchProfiles.available(wslDistributions: ["Ubuntu"], powerShell7: nil)
+        let text = "# comment\r\n! also a comment\nwsl ubuntu = wsl.exe -d Ubuntu --cd ~ -- tmux\nCommand Prompt =\n\nMSYS2 UCRT = C:\\msys64\\usr\\bin\\bash.exe --login -i\n"
+        let (overrides, diagnostics) = LaunchProfiles.overrides(fromProperties: text)
+        #expect(diagnostics.isEmpty)
+        let profiles = LaunchProfiles.applying(overrides, to: detected)
+        #expect(profiles.map(\.name) == ["Windows PowerShell", "WSL Ubuntu", "MSYS2 UCRT"])
+        #expect(profiles[1].commandLine == "wsl.exe -d Ubuntu --cd ~ -- tmux")
+        #expect(profiles[2].commandLine == #"C:\msys64\usr\bin\bash.exe --login -i"#)
+    }
+
+    @Test func aBadOrRepeatedLineIsDiagnosedAndSkipped() {
+        let (overrides, diagnostics) = LaunchProfiles.overrides(fromProperties: "no separator\n= cmd.exe\nA = one\na = two\n")
+        #expect(overrides.map(\.name) == ["A"] && overrides.first?.commandLine == "one")
+        #expect(diagnostics.map(\.line) == [1, 2, 4])
+    }
+
+    @Test func theStarterListsWhatWasDetectedCommentedOut() {
+        let template = LaunchProfiles.template(detected: LaunchProfiles.available(wslDistributions: ["Ubuntu"], powerShell7: nil))
+        #expect(template.contains("# WSL Ubuntu = wsl.exe -d Ubuntu --cd ~\n"))
+        #expect(LaunchProfiles.overrides(fromProperties: template).overrides.isEmpty)
     }
 }

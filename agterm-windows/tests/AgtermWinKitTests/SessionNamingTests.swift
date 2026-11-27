@@ -51,4 +51,19 @@ struct SessionNamingTests {
         #expect(ShellIntegration.commandLine("cmd.exe /k") == "cmd.exe /k")
         #expect(ShellIntegration.commandLine("wsl.exe -d Ubuntu --cd ~") == "wsl.exe -d Ubuntu --cd ~")
     }
+
+    @Test func gitBashAndAWSLShellReportTheirFolderThroughPromptCommand() {
+        let bash = ShellIntegration.environment(for: #""C:\Program Files\Git\bin\bash.exe" --login -i"#, merging: ["A": "1"])
+        #expect(bash["A"] == "1" && bash["CHERE_INVOKING"] == "1" && bash["PROMPT_COMMAND"]?.contains("cygpath -w") == true)
+        let wsl = ShellIntegration.environment(for: "wsl.exe -d Ubuntu --cd ~", merging: ["WSLENV": "USERPROFILE/p"])
+        #expect(wsl["PROMPT_COMMAND"]?.contains("wslpath -w") == true && wsl["WSLENV"] == "USERPROFILE/p:PROMPT_COMMAND/u")
+        #expect(ShellIntegration.environment(for: "wsl.exe -d Ubuntu", merging: [:])["WSLENV"] == "PROMPT_COMMAND/u")
+    }
+
+    @Test func aGivenProgramOrAnotherShellKeepsItsEnvironment() {
+        for line in ["wsl.exe -d Ubuntu -e htop", "wsl.exe -d Ubuntu -- ls", #"C:\Windows\System32\bash.exe"#, "bash.exe -c ls", "cmd.exe",
+                     "powershell.exe -NoLogo"] {
+            #expect(ShellIntegration.environment(for: line, merging: ["A": "1"]) == ["A": "1"])
+        }
+    }
 }

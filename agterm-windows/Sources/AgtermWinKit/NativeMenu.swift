@@ -8,7 +8,7 @@ public enum NativeMenu {
              editKeymap, reloadKeymap, settings, sessionPalette, commandPalette, toggleSplit, toggleHorizontalSplit, closeSplit, swapPanes,
              focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard, toggleOverlay, newWorkspace, renameWorkspace,
              deleteWorkspace, toggleFlag, toggleFlaggedView, focusWorkspace, toggleWorkspaceFilter, previousWorkspace, nextWorkspace,
-             newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar
+             newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar, editProfiles
 
         public var title: String {
             switch self {
@@ -29,6 +29,7 @@ public enum NativeMenu {
             case .find: "Find…"
             case .quit: "Quit"
             case .editKeymap: "Edit Keymap…"
+            case .editProfiles: "Edit Launch Profiles…"
             case .reloadKeymap: "Reload Keymap"
             case .settings: "Settings…"
             case .selectTheme: "Select Theme…"
@@ -322,7 +323,7 @@ public enum NativeMenu {
                             localDefaultShortcut: Bool = true, shortcuts: Shortcuts = [:]) -> [Entry] {
         let named = structure.workspace == true
         let settings = Entry(title: "Settings", shortcut: "", pick: nil, enabled: true,
-                             children: [.command(.settings), .command(.editKeymap), .command(.reloadKeymap)])
+                             children: [.command(.settings), .command(.editKeymap), .command(.editProfiles), .command(.reloadKeymap)])
         return [.command(.newWorkspace, shortcuts), .command(.renameWorkspace, enabled: named, shortcuts),
                 .command(.deleteWorkspace, enabled: named, shortcuts), .separator]
             + sessions(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession,

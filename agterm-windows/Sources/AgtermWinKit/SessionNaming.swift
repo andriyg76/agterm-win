@@ -83,6 +83,32 @@ public enum ShellIntegration {
     }
     """#
 
+    /// environment is `environment` with what a bash profile needs to report its folder, which bash takes from the
+    /// environment, not its command line: Git Bash's PROMPT_COMMAND with CHERE_INVOKING, which keeps its login profile from
+    /// changing to HOME, and a WSL login shell's PROMPT_COMMAND, carried across by WSLENV. A shell of another kind, or one
+    /// given a program to run, starts with `environment` unchanged.
+    public static func environment(for commandLine: String, merging environment: [String: String]) -> [String: String] {
+        let (program, arguments) = split(commandLine)
+        let lowered = program.lowercased().replacingOccurrences(of: "/", with: "\\")
+        let name = lowered.split(separator: "\\").last.map(String.init) ?? ""
+        var result = environment
+        // System32's bash.exe is WSL's launcher, not a bash of its own
+        if ["bash.exe", "bash"].contains(name), !lowered.contains("\\system32\\"), !arguments.contains("-c") {
+            result["PROMPT_COMMAND"] = folderReport("cygpath")
+            result["CHERE_INVOKING"] = "1"
+        } else if ["wsl.exe", "wsl"].contains(name), !arguments.contains(where: { ["-e", "--exec", "--"].contains($0) }) {
+            result["PROMPT_COMMAND"] = folderReport("wslpath")
+            let key = environment.keys.first { $0.uppercased() == "WSLENV" } ?? "WSLENV"
+            result[key] = ([environment[key]].compactMap { $0 }.filter { !$0.isEmpty } + ["PROMPT_COMMAND/u"]).joined(separator: ":")
+        }
+        return result
+    }
+
+    /// folderReport prints the folder as OSC 9;9 in its Windows form, which `converter -w` gives.
+    static func folderReport(_ converter: String) -> String {
+        #"printf '\033]9;9;%s\033\\' "$(\#(converter) -w "$PWD")""#
+    }
+
     /// encoded is `-EncodedCommand`'s form: base64 of the UTF-16LE script, which no quoting can break.
     static func encoded(_ script: String) -> String {
         Data(script.utf16.flatMap { [UInt8($0 & 0xFF), UInt8($0 >> 8)] }).base64EncodedString()
