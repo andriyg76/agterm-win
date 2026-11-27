@@ -32,7 +32,7 @@ struct NativeMenuTests {
         #expect(file.first { $0.pick == .command(.newCompanion) }?.enabled == true)
         #expect(file.first { $0.pick == .command(.convertCompanion) }?.enabled == true)
         #expect(file.last?.title == "Settings")
-        #expect(file.last?.children.compactMap(\.pick) == [.command(.settings), .command(.editKeymap), .command(.reloadKeymap)])
+        #expect(file.last?.children.compactMap(\.pick) == [.command(.settings), .command(.editKeymap), .command(.editProfiles), .command(.reloadKeymap)])
         #expect(!file.contains { $0.pick == .command(.copy) || $0.pick == .command(.nextSession) })
     }
 
@@ -81,7 +81,7 @@ struct NativeMenuTests {
                                                                                       .toggleHorizontalSplit, .closeSplit, .swapPanes, .toggleScratch,
                                                                                       .newWorkspace, .renameWorkspace, .deleteWorkspace, .toggleFlag, .toggleFlaggedView,
                                                                                       .focusWorkspace, .toggleWorkspaceFilter, .previousWorkspace, .nextWorkspace,
-                                                                                      .newCompanion, .convertCompanion, .selectTheme, .about, .toggleSidebar])
+                                                                                      .newCompanion, .convertCompanion, .selectTheme, .about, .toggleSidebar, .editProfiles])
     }
 
     @Test func viewOwnsDisplayActionsAndNavigateOwnsSessionAndPaneMovement() {

@@ -173,7 +173,11 @@ final class NativeShell {
     private let pickController = PickController()
     /// pickPalette is set while the palette lists a replica pick; it shares the palette with the session and command lists.
     private var pickPalette: PendingPick?
-    private var profiles = LaunchProfiles.available(wslDistributions: [], powerShell7: NativeShell.powerShell7())
+    /// detectedProfiles is what this launch found; `profiles` is that with profiles.properties over it.
+    private var detectedProfiles = LaunchProfiles.available(wslDistributions: [], powerShell7: NativeShell.powerShell7(),
+                                                            gitBash: NativeShell.gitBash())
+    private var profiles = LaunchProfiles.available(wslDistributions: [], powerShell7: NativeShell.powerShell7(),
+                                                    gitBash: NativeShell.gitBash())
     var selected: Foundation.UUID?
     private var pendingCreatedSession: (server: Foundation.UUID, session: Foundation.UUID)?
     private var running: Foundation.UUID?
@@ -285,6 +289,7 @@ final class NativeShell {
         if control != nil { events.launched() }
         startToasts()
         Keys.onReload = { [unowned self] in
+            self.applyProfileFile()
             WinKeyHook.update(window: self.window)
             self.registerGlobalHotkey()
             self.updateTips()
@@ -702,10 +707,49 @@ final class NativeShell {
         return paths.first { FileManager.default.fileExists(atPath: $0) }
     }
 
+    /// gitBash is Git for Windows' bash.exe: beside the git.exe PATH finds (`cmd\git.exe` or `mingw64\bin\git.exe`), else
+    /// in a machine or per-user install.
+    private static func gitBash() -> String? {
+        let environment = ProcessInfo.processInfo.environment
+        let parent = { (folder: Substring, levels: Int) in folder.split(separator: "\\").dropLast(levels).joined(separator: "\\") }
+        let besideGit = (environment["PATH"] ?? "").split(separator: ";")
+            .filter { FileManager.default.fileExists(atPath: "\($0)\\git.exe") }
+            .flatMap { ["\(parent($0, 1))\\bin\\bash.exe", "\(parent($0, 2))\\bin\\bash.exe"] }
+        let installs = [environment["ProgramFiles"], environment["LOCALAPPDATA"].map { "\($0)\\Programs" }].compactMap { $0 }
+            .map { "\($0)\\Git\\bin\\bash.exe" }
+        return (besideGit + installs).first { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    /// applyProfileFile puts profiles.properties over the detected profiles, writing the commented starter when there
+    /// is none; it runs once WSL has listed its distributions and again on Reload Keymap.
+    func applyProfileFile() {
+        let url = LaunchProfiles.path(configDirectory: Keys.configDirectory)
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.createDirectory(at: Keys.configDirectory, withIntermediateDirectories: true)
+            try? Data(LaunchProfiles.template(detected: detectedProfiles).utf8).write(to: url, options: .withoutOverwriting)
+        }
+        let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let (overrides, diagnostics) = LaunchProfiles.overrides(fromProperties: text)
+        for diagnostic in diagnostics { log("profiles: line \(diagnostic.line): \(diagnostic.message)") }
+        profiles = LaunchProfiles.applying(overrides, to: detectedProfiles)
+        log("native shell: \(profiles.count) launch profile(s): \(profiles.map(\.name).joined(separator: ", "))")
+        refreshFallbacks()
+        rebuild()
+    }
+
+    /// editProfiles opens profiles.properties as Edit Keymap opens keymap.conf; Reload Keymap applies it.
+    private func editProfiles() {
+        applyProfileFile()
+        let verb = Array("open".utf16) + [0], file = Array(LaunchProfiles.path(configDirectory: Keys.configDirectory).path.utf16) + [0]
+        if Int(bitPattern: ShellExecuteW(window, verb, file, nil, nil, SW_SHOWNORMAL)) <= 32 {
+            _ = ShellExecuteW(window, verb, Array("notepad.exe".utf16) + [0], file, nil, SW_SHOWNORMAL)
+        }
+    }
+
     /// discoverProfiles adds the WSL distributions once `wsl.exe` lists them, off the UI thread: the first call can
     /// wait for the WSL service.
     private func discoverProfiles(then requested: [String], startServers: @escaping @MainActor () -> Void) {
-        let powerShell7 = Self.powerShell7()
+        let powerShell7 = Self.powerShell7(), gitBash = Self.gitBash()
         DispatchQueue.global().async {
             // without WSL, or with no distribution, wsl.exe prints why on stdout and fails; that text names none
             var listing = Data()
@@ -718,12 +762,11 @@ final class NativeShell {
             let distributions = LaunchProfiles.distributions(fromWSLList: listing)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    shell.profiles = LaunchProfiles.available(wslDistributions: distributions, powerShell7: powerShell7)
-                    shell.refreshFallbacks()
-                    shell.rebuild()
+                    shell.detectedProfiles = LaunchProfiles.available(wslDistributions: distributions, powerShell7: powerShell7,
+                                                                      gitBash: gitBash)
+                    shell.applyProfileFile()
                     shell.seedRemoteCommands(LaunchProfiles.serverDistributions(distributions))
                     startServers()
-                    log("native shell: \(shell.profiles.count) launch profile(s): \(shell.profiles.map(\.name).joined(separator: ", "))")
                     for name in requested {
                         if let profile = LaunchProfiles.named(name, in: shell.profiles) {
                             shell.newSession(profile)
@@ -859,6 +902,7 @@ final class NativeShell {
     /// answers whether it did.
     func startPane(_ terminal: NativeTerminal, commandLine: String, directory: String?, environment: [String: String],
                    paneIdentity: Foundation.UUID?) -> Bool {
+        let environment = ShellIntegration.environment(for: commandLine, merging: environment)
         if let paneIdentity, let wrapped = zmx.start(commandLine, paneIdentity: paneIdentity, environment: environment) {
             terminal.start(wrapped.commandLine, directory: directory, environment: wrapped.environment)
             return true
@@ -1314,7 +1358,7 @@ final class NativeShell {
     func windowCommand(_ command: NativeMenu.Command) {
         log("native shell: \(command)")
         if command == .attentionPalette, pickPalette != nil { return }
-        if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .selectTheme, .about, .quit, .editKeymap, .reloadKeymap, .commandPalette, .toggleSidebar].contains(command) {
+        if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .selectTheme, .about, .quit, .editKeymap, .editProfiles, .reloadKeymap, .commandPalette, .toggleSidebar].contains(command) {
             closeDashboard()
         }
         switch command {
@@ -1349,6 +1393,7 @@ final class NativeShell {
             let description = appBuildInfo(serverVersion: version).aboutText
             MessageBoxW(window, Array(description.utf16) + [0], Array("About agterm".utf16) + [0], UINT(MB_OK | MB_ICONINFORMATION))
         case .editKeymap: Keys.edit(owner: window)
+        case .editProfiles: editProfiles()
         case .reloadKeymap: Keys.reload(owner: window)
         case .toggleSplit: splitKey(.leftRight)
         case .toggleHorizontalSplit: splitKey(.topBottom)

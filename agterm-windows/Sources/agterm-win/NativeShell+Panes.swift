@@ -374,7 +374,7 @@ extension NativeShell {
                                environment: sessionEnvironment(id, pane: .scratch))
             } else {
                 terminal.start(ShellIntegration.commandLine(session.commandLine), directory: existingFolder(session.directory),
-                               environment: sessionEnvironment(id, pane: .scratch))
+                               environment: ShellIntegration.environment(for: session.commandLine, merging: sessionEnvironment(id, pane: .scratch)))
             }
             log("native shell: scratch in [\(id)]")
         } else {
@@ -554,7 +554,8 @@ extension NativeShell {
         var environment = ProcessInfo.processInfo.environment.merging(
             SurfaceEnvironment.quickTerminal(socketPath: socketPath, programVersion: version)) { $1 }
         environment["AGTERM_STATE_DIR"] = stateDirectory.path
-        terminal.start(ShellIntegration.commandLine(commandLine), directory: existingFolder(local(selected)?.directory), environment: environment)
+        terminal.start(ShellIntegration.commandLine(commandLine), directory: existingFolder(local(selected)?.directory),
+                       environment: ShellIntegration.environment(for: commandLine, merging: environment))
         log("native shell: quick terminal started")
     }
 
