@@ -14,6 +14,7 @@ private func scratchStore() -> AppStore {
 @MainActor
 private final class FakeHost: NativeControlHost {
     let localStore: AppStore
+    let events = NativeEvents()
     var localSessions: [NativeControl.Local] = []
     var selectedSession: UUID?
     var serverWorkspaces: [ControlWorkspaceNode] = []
@@ -251,6 +252,17 @@ private final class FakeHost: NativeControlHost {
 struct NativeControlTests {
     private func handle(_ request: ControlRequest, _ host: FakeHost) async -> ControlResponse {
         await NativeControl.handle(request, host: host, version: "1.2.3")
+    }
+
+    @Test func eventsReadIsServedFromTheHostsRing() async {
+        let host = FakeHost()
+        host.events.launched()
+        let anchor = try! #require(await handle(ControlRequest(cmd: .eventsRead), host).result?.events)
+        #expect(anchor.next == 1 && anchor.items.isEmpty)
+        let page = await handle(ControlRequest(cmd: .eventsRead, args: ControlArgs(after: "0", run: anchor.run.uuidString)), host)
+        #expect(page.result?.events?.items.map(\.kind) == [.appLaunched])
+        #expect(await handle(ControlRequest(cmd: .eventsRead, args: ControlArgs(after: "0")), host).error
+            == "events.read requires --run and --after together")
     }
 
     @Test func windowListReportsEveryRemoteAsARemoteWindow() async {

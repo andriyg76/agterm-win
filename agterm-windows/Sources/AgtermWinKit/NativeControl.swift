@@ -18,6 +18,8 @@ public protocol NativeControlHost: AnyObject {
     func serverOverlayState(for id: UUID) -> (overlay: NativeOverlay?, exitCode: Int?)?
     /// serverPageOverlay is the page the shell draws over a catalog session, nil for a program overlay or none.
     func serverPageOverlay(for id: UUID) -> (page: HtmlOverlay, hidden: Bool)?
+    /// events is the `events.read` history.
+    var events: NativeEvents { get }
     /// newSession is what a local `session.new` starts without options.
     var newSession: NativeStructure.NewSession? { get }
     /// zmxContext is what `restore.mode` and the local `zmx` commands act on.
@@ -201,6 +203,10 @@ public enum NativeControl {
             }
         case .version:
             return ControlResponse(ok: true, result: ControlResult(app: AppIdentity(version: version)))
+        case .eventsRead:
+            // the dispatcher parses the cursor, kinds and limit and refuses them as on a Mac
+            return await ControlDispatcher(actions: NativeStructure(store: host.localStore, events: host.events)).dispatch(request)
+                ?? failure("events.read is not supported on Windows")
         case .sessionNew:
             return await structure(request, host: host)
         case .sessionClose, .sessionTerminate:
