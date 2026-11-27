@@ -280,6 +280,7 @@ final class NativeShell {
         findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
         emptyRemoteTerminal = makeTerminal()
         PickRegistry.shared.register(shellWindowID, controller: pickController)
+        try? FileManager.default.createDirectory(atPath: ControlResolve.windowsSocketRoot, withIntermediateDirectories: true)
         control = ControlSocket.start(path: socketPath, host: self, version: version)
         if control != nil { events.launched() }
         startToasts()
@@ -821,7 +822,7 @@ final class NativeShell {
 
     var stateDirectory: URL { settingsURL.deletingLastPathComponent() }
 
-    var socketPath: String { stateDirectory.appendingPathComponent("agterm.sock").path }
+    var socketPath: String { ControlResolve.socketPath(stateDir: stateDirectory.path, appSupport: stateDirectory.path) }
 
     /// sessionEnvironment is what a local session's programs inherit: agtermCore's `SurfaceEnvironment.session` set, the
     /// state directory, so agtermctl finds this window's socket, and agtermctl's folder on PATH. `pane` is nil for an overlay.

@@ -330,8 +330,7 @@ public enum ZmxSupport {
         #if os(Windows)
         // short because zmx binds AF_UNIX sockets, whose paths stop at 107 bytes with the daemon name;
         // `localNamePrefix` is short for the same reason
-        let root = ProcessInfo.processInfo.environment["LOCALAPPDATA"] ?? NSTemporaryDirectory()
-        return "\(root)\\agterm-win\\s\\\(stateHash(stateDirectory))"
+        "\(ControlResolve.windowsSocketRoot)\\s\\\(stateHash(stateDirectory))"
         #else
         "/tmp/agterm-zmx-\(stateHash(stateDirectory))"
         #endif
@@ -343,7 +342,7 @@ public enum ZmxSupport {
         (runtimeDirectory as NSString).appendingPathComponent("agterm-zmx-\(stateHash(stateDirectory))")
     }
 
-    private static func stateHash(_ stateDirectory: String) -> String {
+    static func stateHash(_ stateDirectory: String) -> String {
         let canonical = URL(fileURLWithPath: stateDirectory, isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath().path
         return stableHash(canonical)

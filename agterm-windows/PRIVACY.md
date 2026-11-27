@@ -36,8 +36,11 @@ The files are under `%LOCALAPPDATA%\agterm-win`, or the folder `AGTERM_WIN_STATE
 | `agterm-win.log` | A diagnostic log: start and stop, sessions opened and closed, the commands that started them, the title and text of notifications posted to a session, errors. It does not record what you type or what programs print. |
 | `crash.log` | Written only when agterm-win crashes: the error and where it happened. |
 | `HKCU\Software\Classes\AppUserModelId\andriyg76.agterm-win` (registry, installs outside the Store) | The name and icon Windows shows on agterm-win's notifications. |
-| `s\<id>` | With Settings ▸ General ▸ Restore sessions set to Live sessions, the sockets of the `zmx` processes that keep each local session's shell running between starts. Only your account and administrators can open them. |
-| `agterm.sock` | The local control socket `agtermctl` talks to. It sits in your profile's local app data, which Windows opens only to your account and administrators, and it carries nothing off the machine. |
+
+Its sockets are under `%USERPROFILE%\.local\state\agterm-win`, which Windows opens only to your account and
+administrators, and carry nothing off the machine: `agterm-<id>.sock`, the control socket `agtermctl` talks to,
+and, with Settings ▸ General ▸ Restore sessions set to Live sessions, `s\<id>`, the sockets of the `zmx`
+processes that keep each local session's shell running between starts.
 
 Terminal contents and scrollback stay in memory: they are not written to disk and are gone when a session
 closes. With Live sessions, a `zmx` process per pane keeps its shell and screen in memory after agterm-win closes,

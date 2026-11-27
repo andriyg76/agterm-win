@@ -65,8 +65,22 @@ public enum ControlResolve {
     /// with the same inputs, so they always rendezvous on the same path.
     public static func socketPath(stateDir: String?, appSupport: String) -> String {
         let base = stateDir ?? appSupport
+        #if os(Windows)
+        return "\(windowsSocketRoot)\\agterm-\(ZmxSupport.stateHash(base)).sock"
+        #else
         return (base as NSString).appendingPathComponent("agterm.sock")
+        #endif
     }
+
+    #if os(Windows)
+    /// windowsSocketRoot holds agterm-win's AF_UNIX sockets, its control socket and its zmx daemons'. It is out of
+    /// AppData, where an MSIX package's bind fails under file system virtualization, so a packaged agterm-win and an
+    /// unpackaged agtermctl meet on the same real path.
+    public static var windowsSocketRoot: String {
+        let home = ProcessInfo.processInfo.environment["USERPROFILE"] ?? NSTemporaryDirectory()
+        return "\(home)\\.local\\state\\agterm-win"
+    }
+    #endif
 
     /// defaultStateDirectory is the state directory when `AGTERM_STATE_DIR` is unset:
     /// `~/Library/Application Support/agterm` on macOS; on Linux, where agterm-server lives, `$XDG_STATE_HOME/agterm`
