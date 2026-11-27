@@ -34,12 +34,12 @@ struct ZmxLaunchTests {
         #expect(one != other && one.contains(#"\agterm-win\s\"#))
     }
 
-    @Test func aLocalDaemonIsTheBarePaneIdentityAndServerDaemonsKeepTheirPrefix() {
+    @Test func aLocalDaemonTakesTheShortPrefixAndServerDaemonsKeepTheirs() {
         let identity = UUID()
         let local = ZmxSupport.localDaemonName(for: identity)
-        #expect(local.utf8.count == 32 && ZmxSupport.isDaemonName(local) && ZmxSupport.paneIdentity(fromDaemonName: local) == identity)
-        #expect(ZmxSupport.daemonName(for: identity) == "agterm-" + local)
-        #expect(ZmxSupport.paneIdentity(fromDaemonName: ZmxSupport.daemonName(for: identity)) == identity)
-        #expect(!ZmxSupport.isDaemonName(local.uppercased()))
+        let server = ZmxSupport.daemonName(for: identity)
+        #expect(local.hasPrefix("agt-") && local.utf8.count == 36 && server == "agterm-" + local.dropFirst(4))
+        #expect(ZmxSupport.paneIdentity(fromDaemonName: local) == identity && ZmxSupport.paneIdentity(fromDaemonName: server) == identity)
+        #expect(!ZmxSupport.isDaemonName(String(local.dropFirst(4))) && !ZmxSupport.isDaemonName(local.uppercased()))
     }
 }

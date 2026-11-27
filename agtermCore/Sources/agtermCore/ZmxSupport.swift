@@ -329,7 +329,7 @@ public enum ZmxSupport {
     public static func socketDirectory(forStateDirectory stateDirectory: String) -> String {
         #if os(Windows)
         // short because zmx binds AF_UNIX sockets, whose paths stop at 107 bytes with the daemon name;
-        // `localDaemonName(for:)` drops the name's prefix for the same reason
+        // `localNamePrefix` is short for the same reason
         let root = ProcessInfo.processInfo.environment["LOCALAPPDATA"] ?? NSTemporaryDirectory()
         return "\(root)\\agterm-win\\s\\\(stateHash(stateDirectory))"
         #else
@@ -349,46 +349,48 @@ public enum ZmxSupport {
         return stableHash(canonical)
     }
 
+    /// agterm-win's own socket directory takes a shorter prefix, since every byte counts toward the AF_UNIX path;
+    /// agterm-server's daemons keep `namePrefix`.
+    #if os(Windows)
+    static let localNamePrefix = "agt-"
+    #else
+    static let localNamePrefix = namePrefix
+    #endif
+
     public static func daemonName(for paneIdentity: UUID) -> String {
         namePrefix + compactUUID(paneIdentity)
     }
 
-    /// localDaemonName names a pane's daemon on this host. Windows drops the prefix, since its socket directory is
-    /// agterm-win's own and every byte counts toward the AF_UNIX path; agterm-server's daemons keep `daemonName(for:)`.
+    /// localDaemonName names a pane's daemon on this host.
     public static func localDaemonName(for paneIdentity: UUID) -> String {
-        #if os(Windows)
-        compactUUID(paneIdentity)
-        #else
-        daemonName(for: paneIdentity)
-        #endif
+        localNamePrefix + compactUUID(paneIdentity)
     }
 
     /// The pane identity `daemonName(for:)` or `localDaemonName(for:)` built `name` from, nil for any other name.
     public static func paneIdentity(fromDaemonName name: String) -> UUID? {
-        guard isDaemonName(name) else { return nil }
-        let hex = Array(name.utf8.count == 32 ? Substring(name) : name.dropFirst(namePrefix.count))
+        guard let body = daemonNameBody(name) else { return nil }
+        let hex = Array(body)
         let groups = [hex[0..<8], hex[8..<12], hex[12..<16], hex[16..<20], hex[20..<32]]
         return UUID(uuidString: groups.map { String($0) }.joined(separator: "-"))
     }
 
-    /// Whether `name` is one of OUR daemons: the exact shape `daemonName(for:)` emits. A prefix test is
-    /// not enough — the namespace is a shared /tmp directory, so a user session called `agterm-notes`
-    /// would otherwise read as an unclaimed app daemon and be pruned.
-    /// On Windows the bare `localDaemonName(for:)` shape counts too.
+    /// Whether `name` is one of OUR daemons: the exact shape `daemonName(for:)` or `localDaemonName(for:)` emits.
+    /// A prefix test is not enough — the namespace is a shared /tmp directory, so a user session called
+    /// `agterm-notes` would otherwise read as an unclaimed app daemon and be pruned.
     public static func isDaemonName(_ name: String) -> Bool {
-        #if os(Windows)
-        let bare = name.utf8.count == 32
-        #else
-        let bare = false
-        #endif
-        guard bare || name.hasPrefix(namePrefix) else { return false }
+        daemonNameBody(name) != nil
+    }
+
+    private static func daemonNameBody(_ name: String) -> Substring? {
+        guard let prefix = [namePrefix, localNamePrefix].first(where: name.hasPrefix) else { return nil }
+        let body = name.dropFirst(prefix.count)
         // ASCII bytes, not `Character.isHexDigit`, which is Unicode-aware: 32 fullwidth digits satisfy it
         // and are neither uppercase nor anything `daemonName(for:)` can emit.
-        let body = bare ? name.utf8.dropFirst(0) : name.utf8.dropFirst(namePrefix.utf8.count)
-        return body.count == 32 && body.allSatisfy {
+        let valid = body.utf8.count == 32 && body.utf8.allSatisfy {
             ($0 >= UInt8(ascii: "0") && $0 <= UInt8(ascii: "9")) ||
                 ($0 >= UInt8(ascii: "a") && $0 <= UInt8(ascii: "f"))
         }
+        return valid ? body : nil
     }
 
     static let scratchNamePrefix = "agterm-scratch-"
