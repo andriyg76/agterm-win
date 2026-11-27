@@ -11,7 +11,7 @@ struct ZmxLaunchTests {
         #expect(launch.decision.active == .live)
         let identity = UUID()
         let start = try #require(launch.start("powershell.exe -NoLogo", paneIdentity: identity, environment: ["A": "1"]))
-        #expect(start.daemonName == ZmxSupport.daemonName(for: identity))
+        #expect(start.daemonName == ZmxSupport.localDaemonName(for: identity))
         // agtermCore standardizes the executable's path, which Foundation spells with forward slashes
         let line = start.commandLine.replacingOccurrences(of: "/", with: #"\"#)
         #expect(line.lowercased().hasPrefix("\(zmx) attach \(start.daemonName) ".lowercased()))
@@ -32,5 +32,14 @@ struct ZmxLaunchTests {
         let one = ZmxLaunch(executablePath: zmx, stateDirectory: #"C:\a"#, requested: .live).socketDirectory
         let other = ZmxLaunch(executablePath: zmx, stateDirectory: #"C:\b"#, requested: .live).socketDirectory
         #expect(one != other && one.contains(#"\agterm-win\s\"#))
+    }
+
+    @Test func aLocalDaemonIsTheBarePaneIdentityAndServerDaemonsKeepTheirPrefix() {
+        let identity = UUID()
+        let local = ZmxSupport.localDaemonName(for: identity)
+        #expect(local.utf8.count == 32 && ZmxSupport.isDaemonName(local) && ZmxSupport.paneIdentity(fromDaemonName: local) == identity)
+        #expect(ZmxSupport.daemonName(for: identity) == "agterm-" + local)
+        #expect(ZmxSupport.paneIdentity(fromDaemonName: ZmxSupport.daemonName(for: identity)) == identity)
+        #expect(!ZmxSupport.isDaemonName(local.uppercased()))
     }
 }

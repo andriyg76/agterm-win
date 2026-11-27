@@ -50,7 +50,7 @@ public struct ZmxClient {
             return true
         }
         guard let sessions = listSessions() else { return false }
-        let known = knownPaneIdentities.map { Set($0.map(ZmxSupport.daemonName(for:))) }
+        let known = knownPaneIdentities.map { Set($0.map(ZmxSupport.localDaemonName(for:))) }
         guard let names = ZmxReapPolicy.namesToKill(sessions: sessions, requestedMode: decision.requested, knownNames: known) else {
             return true
         }
@@ -61,7 +61,7 @@ public struct ZmxClient {
     /// kill force-kills every name in one call; semantic deletion has already taken the panes out of the model.
     @discardableResult
     public func kill(paneIdentities: [UUID]) -> Bool {
-        kill(names: paneIdentities.map(ZmxSupport.daemonName(for:)))
+        kill(names: paneIdentities.map(ZmxSupport.localDaemonName(for:)))
     }
 
     func kill(names: [String]) -> Bool {

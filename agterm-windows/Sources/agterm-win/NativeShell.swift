@@ -3423,7 +3423,7 @@ extension NativeShell: NativeControlHost {
         if let index = locals.firstIndex(where: { $0.id == id }) {
             // a running daemon would take the attach back to the same program
             if locals[index].backedByZmx, !locals[index].exited, let identity = localStore.session(withID: id)?.paneIdentity {
-                let name = ZmxSupport.daemonName(for: identity)
+                let name = ZmxSupport.localDaemonName(for: identity)
                 switch zmxClient.killConfirmed(name: name) {
                 case .killed: break
                 case .staleSocket: return ControlResponse(ok: false, error: "\(name) did not confirm the kill; the daemon may still be running")
