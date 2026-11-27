@@ -286,7 +286,9 @@ extension NativeShell {
         return true
     }
 
-    func endDividerDrag() -> Bool {
+    /// endDividerDrag applies the release point first: Windows can deliver the button-up before the move that reached it.
+    func endDividerDrag(_ lParam: LPARAM) -> Bool {
+        _ = dragDivider(lParam)
         if sidebarDragging {
             sidebarDragging = false
             ReleaseCapture()
