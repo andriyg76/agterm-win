@@ -45,10 +45,11 @@ Copy-Item -Recurse (Join-Path $root "Resources\themes") (Join-Path $Output "them
 Copy-Item -Recurse (Join-Path $root "Resources\agent-status") (Join-Path $Output "agent-status")
 # the icon an installation outside the Store registers for its notifications
 Copy-Item (Join-Path $root "Resources\agterm.png") $Output
-# zmx goes to zmx\<rev>, named by zmx\current: an upgrade adds a folder beside the one a running daemon holds open
+# zmx goes to zmx\<version>-<sha12>, named by zmx\current: an upgrade adds a folder beside the one a running daemon holds open
 $zmx = Join-Path $root "vendor\zmx"
 if (Test-Path (Join-Path $zmx "zmx.exe")) {
-    $rev = (Get-Content (Join-Path $zmx ".version")).Split(" ")[0].Substring(0, 12)
+    $version, $null, $sha256 = (Get-Content (Join-Path $zmx ".version")).Split(" ")
+    $rev = "$version-$($sha256.Substring(0, 12))"
     $folder = Join-Path $Output "zmx\$rev"
     New-Item -ItemType Directory $folder | Out-Null
     Copy-Item (Join-Path $zmx "zmx.exe"), (Join-Path $zmx "LICENSE") $folder
