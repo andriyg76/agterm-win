@@ -31,10 +31,12 @@ public struct NativeStructure: ControlActions {
 
     let store: AppStore
     let newSession: NewSession?
+    let zmxContext: NativeZmx.Context?
 
-    public init(store: AppStore, newSession: NewSession? = nil) {
+    public init(store: AppStore, newSession: NewSession? = nil, zmx: NativeZmx.Context? = nil) {
         self.store = store
         self.newSession = newSession
+        zmxContext = zmx
     }
 
     public static func dispatch(_ request: ControlRequest, store: AppStore, newSession: NewSession? = nil) async -> ControlResponse {

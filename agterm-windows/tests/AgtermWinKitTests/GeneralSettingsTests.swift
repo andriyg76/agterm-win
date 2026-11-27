@@ -30,7 +30,9 @@ struct GeneralSettingsTests {
     @Test func anOlderFileGetsTheDefaultsAndABadScrollIsRefused() throws {
         let decoded = try JSONDecoder().decode(GeneralSettings.self, from: Data(#"{"scrollLines": 40, "newSessionDirectory": "sideways"}"#.utf8))
         #expect(decoded.scrollLines == GeneralSettings.defaultScrollLines && decoded.directory == .home && !decoded.rightClickPastes)
+        #expect(decoded.restoreMode == .none)
         var saved = GeneralSettings()
+        saved.restoreMode = .live
         saved.confirmCloseSession = true
         saved.scrollLines = 5
         #expect(try JSONDecoder().decode(GeneralSettings.self, from: JSONEncoder().encode(saved)) == saved)

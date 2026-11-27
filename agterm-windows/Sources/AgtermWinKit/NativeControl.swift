@@ -20,6 +20,8 @@ public protocol NativeControlHost: AnyObject {
     func serverPageOverlay(for id: UUID) -> (page: HtmlOverlay, hidden: Bool)?
     /// newSession is what a local `session.new` starts without options.
     var newSession: NativeStructure.NewSession? { get }
+    /// zmxContext is what `restore.mode` and the local `zmx` commands act on.
+    var zmxContext: NativeZmx.Context { get }
     /// remoteStore is the mirror of the connected server behind remote window `window`.
     func remoteStore(_ window: UUID) -> AppStore?
     /// structureChanged follows a command that changed `store`: terminals start or end for the sessions that came or
@@ -129,6 +131,8 @@ public enum NativeControl {
         /// split is the session's second pane, nil without one.
         public var split: NativeSplit?
         public var splitCwd: String?
+        /// backedByZmx is whether every pane runs under a Live sessions daemon, as a Mac session node reports it.
+        public var backedByZmx = false
         /// scratch is whether the scratch is shown; scratchRunning whether its shell runs, shown or not.
         public var scratch = false
         public var scratchRunning = false
@@ -185,6 +189,7 @@ public enum NativeControl {
 
     public static func handle(_ request: ControlRequest, host: NativeControlHost, version: String) async -> ControlResponse {
         if NativeStructure.commands.contains(request.cmd) { return await structure(request, host: host) }
+        if NativeZmx.commands.contains(request.cmd) { return await NativeZmx.dispatch(request, context: host.zmxContext) }
         switch request.cmd {
         case .tree:
             switch window(request.args?.window, host: host) {
@@ -469,7 +474,7 @@ public enum NativeControl {
         let indicator = local.activity.indicator
         let shown = indicator.status != .idle
         return ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: shape.active,
-                           split: local.split?.shown == true, hasSplit: local.split != nil, backedByZmx: nil,
+                           split: local.split?.shown == true, hasSplit: local.split != nil, backedByZmx: local.backedByZmx,
                            splitAxis: local.split?.axisName, splitRatio: local.split?.ratio, splitFocused: local.split?.focused,
                            overlay: local.overlay != nil || local.htmlOverlay != nil,
                            overlaySizePercent: local.overlay?.sizePercent ?? local.pageOverlaySizePercent,

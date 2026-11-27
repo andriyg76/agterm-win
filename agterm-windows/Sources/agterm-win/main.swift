@@ -58,7 +58,7 @@ func appBuildInfo(serverVersion: String) -> AppBuildInfo {
 }
 
 /// localZmx is the zmx.exe stage.ps1 put in zmx\<rev>, the folder zmx\current names, else the source tree's.
-private func localZmx() -> String {
+func localZmx() -> String {
     let packaged = executableFolder.appendingPathComponent("zmx")
     if let current = try? String(contentsOf: packaged.appendingPathComponent("current"), encoding: .utf8),
        let rev = current.split(whereSeparator: \.isNewline).first {

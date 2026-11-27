@@ -17,6 +17,8 @@ final class SettingsWindow {
         var general: GeneralSettings
         /// serverAtLaunch are the remotes ticked to start their agterm-server at launch.
         var serverAtLaunch: Set<String> = []
+        /// liveUnavailable is why this launch could not use Live sessions; shown, never edited.
+        var liveUnavailable: String?
     }
 
     private(set) static var current: SettingsWindow?
@@ -41,7 +43,7 @@ final class SettingsWindow {
 
     private enum Control: Int32 {
         case theme = 101, follows, darkTheme, fontFamily, size, sizeArrows, banners, sound, unseenCount, flash
-        case directory, customDirectory, placement, confirmClose, rightClickPastes, scrollLines, scrollArrows
+        case directory, customDirectory, placement, confirmClose, rightClickPastes, scrollLines, scrollArrows, restoreMode
     }
 
     // the check box for `distributions[index]` has this id plus the index
@@ -53,6 +55,8 @@ final class SettingsWindow {
     private static let placements: [(AppSettings.NewSessionPlacement, String)] = [
         (.end, "At the end of the list"), (.afterCurrent, "Right after the selected session"),
     ]
+    // Re-run commands joins once agterm-win reads a pane's foreground command
+    private static let restoreModes: [RestoreMode] = [.none, .live]
 
     /// show opens Settings over `owner`, or brings an open one to the front. `finish` gets the kept values, nil for a
     /// cancel.
@@ -110,7 +114,7 @@ final class SettingsWindow {
         }
         let dpi = owner.map { Int32(GetDpiForWindow($0)) } ?? 96
         let scaled = { (value: Int32) in MulDiv(value, dpi, 96) }
-        var frame = RECT(left: 0, top: 0, right: scaled(520), bottom: scaled(560))
+        var frame = RECT(left: 0, top: 0, right: scaled(520), bottom: scaled(616))
         let style = DWORD(WS_OVERLAPPED) | DWORD(WS_CAPTION) | DWORD(WS_SYSMENU)
         AdjustWindowRectExForDpi(&frame, style, false, 0, UINT(dpi))
         var ownerFrame = RECT()
@@ -142,7 +146,7 @@ final class SettingsWindow {
         }
         let tab = Int32(WS_TABSTOP), checkbox = Int32(BS_AUTOCHECKBOX) | Int32(WS_TABSTOP)
         let list = Int32(CBS_DROPDOWNLIST) | Int32(WS_VSCROLL) | tab
-        tabs = add("SysTabControl32", "", Int32(WS_CLIPSIBLINGS) | tab, 12, 8, 496, 500)
+        tabs = add("SysTabControl32", "", Int32(WS_CLIPSIBLINGS) | tab, 12, 8, 496, 556)
         for (index, tab) in SettingsTab.allCases.enumerated() { addTab(tab.rawValue.capitalized, at: index) }
 
         page = 0
@@ -152,20 +156,24 @@ final class SettingsWindow {
                          id: Control.customDirectory.rawValue, exStyle: Int32(WS_EX_CLIENTEDGE))
         _ = add("STATIC", "New sessions go", 0, 28, 136, 300, 18)
         let placement = add("COMBOBOX", "", list, 28, 156, 300, 200, id: Control.placement.rawValue)
-        let confirmClose = add("BUTTON", "Ask before closing a session", checkbox, 28, 196, 464, 22, id: Control.confirmClose.rawValue)
-        let rightClick = add("BUTTON", "Right-click pastes (Shift+right-click opens the menu)", checkbox, 28, 222, 464, 22,
+        _ = add("STATIC", "Restore sessions", 0, 28, 192, 300, 18)
+        let restore = add("COMBOBOX", "", list, 28, 212, 220, 200, id: Control.restoreMode.rawValue)
+        let restoreHint = ["Changes apply after restarting agterm.", original.liveUnavailable].compactMap { $0 }.joined(separator: " ")
+        _ = add("STATIC", restoreHint, 0, 260, 208, 232, 40)
+        let confirmClose = add("BUTTON", "Ask before closing a session", checkbox, 28, 252, 464, 22, id: Control.confirmClose.rawValue)
+        let rightClick = add("BUTTON", "Right-click pastes (Shift+right-click opens the menu)", checkbox, 28, 278, 464, 22,
                              id: Control.rightClickPastes.rawValue)
-        _ = add("STATIC", "A mouse wheel notch scrolls this many lines", 0, 28, 258, 400, 18)
-        let lines = add("EDIT", "", Int32(ES_NUMBER) | tab, 28, 278, 60, 24, id: Control.scrollLines.rawValue, exStyle: Int32(WS_EX_CLIENTEDGE))
+        _ = add("STATIC", "A mouse wheel notch scrolls this many lines", 0, 28, 314, 400, 18)
+        let lines = add("EDIT", "", Int32(ES_NUMBER) | tab, 28, 334, 60, 24, id: Control.scrollLines.rawValue, exStyle: Int32(WS_EX_CLIENTEDGE))
         let lineArrows = add("msctls_updown32", "", Int32(UDS_SETBUDDYINT) | Int32(UDS_ALIGNRIGHT) | Int32(UDS_ARROWKEYS), 0, 0, 0, 0,
                              id: Control.scrollArrows.rawValue)
-        _ = add("STATIC", "Start agterm-server at launch in", 0, 28, 318, 464, 18)
+        _ = add("STATIC", "Start agterm-server at launch in", 0, 28, 374, 464, 18)
         // two a row, as many as the page holds; the menu starts any of them
         let serverBoxes = distributions.prefix(12).enumerated().map { index, distribution in
-            add("BUTTON", distribution, checkbox, 28 + Int32(index % 2) * 244, 340 + Int32(index / 2) * 26, 220, 22,
+            add("BUTTON", distribution, checkbox, 28 + Int32(index % 2) * 244, 396 + Int32(index / 2) * 26, 220, 22,
                 id: Self.distributionBase + Int32(index))
         }
-        if distributions.isEmpty { _ = add("STATIC", "remote.properties defines no remotes.", 0, 28, 340, 464, 18) }
+        if distributions.isEmpty { _ = add("STATIC", "remote.properties defines no remotes.", 0, 28, 396, 464, 18) }
 
         page = 1
         _ = add("STATIC", "Theme", 0, 28, 48, 220, 18)
@@ -191,8 +199,8 @@ final class SettingsWindow {
         let flash = add("COMBOBOX", "", list, 272, 68, 220, 200, id: Control.flash.rawValue)
 
         page = -1
-        _ = add("BUTTON", "OK", Int32(BS_DEFPUSHBUTTON) | tab, 316, 520, 92, 28, id: Int32(IDOK))
-        _ = add("BUTTON", "Cancel", Int32(BS_PUSHBUTTON) | tab, 416, 520, 92, 28, id: Int32(IDCANCEL))
+        _ = add("BUTTON", "OK", Int32(BS_DEFPUSHBUTTON) | tab, 316, 576, 92, 28, id: Int32(IDOK))
+        _ = add("BUTTON", "Cancel", Int32(BS_PUSHBUTTON) | tab, 416, 576, 92, 28, id: Int32(IDCANCEL))
         nt_skin_controls_end(skinned)
 
         let general = original.general
@@ -201,6 +209,8 @@ final class SettingsWindow {
         EnableWindow(custom, general.directory == .custom ? true : false)
         Self.placements.forEach { addString($0.1, to: placement, message: CB_ADDSTRING) }
         SendMessageW(placement, UINT(CB_SETCURSEL), WPARAM(Self.placements.firstIndex { $0.0 == general.placement } ?? 0), 0)
+        Self.restoreModes.forEach { addString($0.displayName, to: restore, message: CB_ADDSTRING) }
+        SendMessageW(restore, UINT(CB_SETCURSEL), WPARAM(Self.restoreModes.firstIndex(of: general.restoreMode) ?? 0), 0)
         check(confirmClose, general.confirmCloseSession)
         check(rightClick, general.rightClickPastes)
         buddy(lineArrows, lines, range: GeneralSettings.scrollLineRange.lowerBound...GeneralSettings.scrollLineRange.upperBound,
@@ -303,6 +313,8 @@ final class SettingsWindow {
         let custom = text(.customDirectory).trimmingCharacters(in: .whitespaces)
         general.newSessionCustomDirectory = custom.isEmpty ? nil : custom
         general.newSessionPlacement = Self.placements.indices.contains(placementRow) ? Self.placements[placementRow].0.rawValue : nil
+        let restoreRow = row(.restoreMode)
+        general.restoreMode = Self.restoreModes.indices.contains(restoreRow) ? Self.restoreModes[restoreRow] : .none
         general.confirmCloseSession = checked(.confirmClose)
         general.rightClickPastes = checked(.rightClickPastes)
         let lines = Int(Int32(truncatingIfNeeded: SendMessageW(item(.scrollArrows), Self.getPosition, 0, 0)))

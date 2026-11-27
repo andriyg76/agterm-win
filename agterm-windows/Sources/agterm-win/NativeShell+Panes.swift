@@ -158,8 +158,15 @@ extension NativeShell {
         locals[index].splitDirectory = directory
         // placed first, so the shell starts at its pane's grid
         placeSessions()
-        terminal.start(ShellIntegration.commandLine(locals[index].commandLine), directory: existingFolder(directory),
-                       environment: sessionEnvironment(id, pane: .right))
+        // a restored split keeps the identity its daemon is named from; a new one gets its own, as on macOS
+        let stored = localStore.session(withID: id)
+        if let stored, stored.splitPaneIdentity == nil {
+            stored.splitPaneIdentity = UUID()
+            mirror(locals[index])
+            localStore.save()
+        }
+        locals[index].splitBackedByZmx = startPane(terminal, commandLine: locals[index].commandLine, directory: existingFolder(directory),
+                                                   environment: sessionEnvironment(id, pane: .right), paneIdentity: stored?.splitPaneIdentity)
         log("native shell: split \(split.axisName) in [\(id)]")
         if dashboard != nil { dashboardSessionsChanged() }
     }
@@ -171,6 +178,14 @@ extension NativeShell {
         locals[index].splitTerminal = nil
         locals[index].splitTitle = nil
         locals[index].splitDirectory = nil
+        // closing a split ends its daemon, as a Mac split close finalizes its pane
+        if let stored = localStore.session(withID: id), let split = stored.splitPaneIdentity {
+            if locals[index].splitBackedByZmx { zmxClient.kill(paneIdentities: [split]) }
+            stored.splitPaneIdentity = nil
+            mirror(locals[index])
+            localStore.save()
+        }
+        locals[index].splitBackedByZmx = false
         locals[index].activity.paneEnded(.right)
         retire(terminal)
         placeSessions()
@@ -184,6 +199,12 @@ extension NativeShell {
         var session = locals[index]
         (session.terminal, session.splitTerminal) = (split, session.terminal)
         (session.programTitle, session.splitTitle) = (session.splitTitle, session.programTitle)
+        (session.backedByZmx, session.splitBackedByZmx) = (session.splitBackedByZmx, session.backedByZmx)
+        // the daemon names follow their terminals, as `AppStore.swapPanes` moves the identities
+        if let stored = localStore.session(withID: id), let splitIdentity = stored.splitPaneIdentity {
+            (stored.paneIdentity, stored.splitPaneIdentity) = (splitIdentity, stored.paneIdentity)
+            localStore.save()
+        }
         let directory = session.directory
         session.directory = session.splitDirectory ?? directory
         session.splitDirectory = directory

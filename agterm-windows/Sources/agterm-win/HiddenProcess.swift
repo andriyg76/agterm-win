@@ -13,8 +13,8 @@ final class HiddenProcess {
     private let errors: HANDLE?
 
     /// `input` is a file for the child's stdin, else a pipe `write` feeds. `captureErrors` false sends its stderr to NUL;
-    /// true leaves it for `readErrorsToEnd`.
-    init(commandLine: String, input file: URL? = nil, captureErrors: Bool) throws {
+    /// true leaves it for `readErrorsToEnd`. A nil `environment` passes this process's own.
+    init(commandLine: String, input file: URL? = nil, captureErrors: Bool, environment: [String: String]? = nil) throws {
         var security = SECURITY_ATTRIBUTES(nLength: DWORD(MemoryLayout<SECURITY_ATTRIBUTES>.size),
                                            lpSecurityDescriptor: nil, bInheritHandle: true)
         var parentEnds: [HANDLE] = [], childEnds: [HANDLE] = []
@@ -62,6 +62,8 @@ final class HiddenProcess {
 
         var info = PROCESS_INFORMATION()
         var line = Array(commandLine.utf16) + [0]
+        var block = environment.map(PseudoConsole.environmentBlock) ?? []
+        let flags = DWORD(EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW) | (block.isEmpty ? 0 : DWORD(CREATE_UNICODE_ENVIRONMENT))
         let started = inherited.withUnsafeMutableBufferPointer { handles in
             guard UpdateProcThreadAttribute(attributes, 0, Self.handleListAttribute, handles.baseAddress,
                                             SIZE_T(handles.count * MemoryLayout<HANDLE>.size), nil, nil) else { return false }
@@ -74,8 +76,10 @@ final class HiddenProcess {
             startup.lpAttributeList = attributes
             return withUnsafeMutablePointer(to: &startup) { pointer in
                 pointer.withMemoryRebound(to: STARTUPINFOW.self, capacity: 1) { startupInfo in
-                    CreateProcessW(nil, &line, nil, nil, true, DWORD(EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW),
-                                   nil, nil, startupInfo, &info)
+                    block.withUnsafeMutableBufferPointer { variables in
+                        CreateProcessW(nil, &line, nil, nil, true, flags, variables.isEmpty ? nil : UnsafeMutableRawPointer(variables.baseAddress),
+                                       nil, startupInfo, &info)
+                    }
                 }
             }
         }
