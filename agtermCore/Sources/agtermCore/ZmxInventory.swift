@@ -111,7 +111,7 @@ public enum ZmxInventory {
                             inventoryComplete: Bool) -> ZmxInventoryResult {
         var claimsByName: [String: [ZmxPaneClaim]] = [:]
         for claim in claims {
-            claimsByName[ZmxSupport.daemonName(for: claim.paneIdentity), default: []].append(claim)
+            claimsByName[ZmxSupport.localDaemonName(for: claim.paneIdentity), default: []].append(claim)
         }
         let conflicted = Set(claimsByName.filter { $0.value.count > 1 }.keys)
 

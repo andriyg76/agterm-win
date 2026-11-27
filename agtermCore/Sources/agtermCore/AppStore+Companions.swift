@@ -213,6 +213,7 @@ extension AppStore {
         for (from, to) in panes {
             ids[from.uuidString] = to.uuidString
             ids[ZmxSupport.daemonName(for: from)] = ZmxSupport.daemonName(for: to)
+            ids[ZmxSupport.localDaemonName(for: from)] = ZmxSupport.localDaemonName(for: to)
         }
         return ids
     }

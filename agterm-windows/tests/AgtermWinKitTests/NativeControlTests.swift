@@ -842,8 +842,8 @@ struct NativeControlTests {
     @Test func zmxKillEndsOnlyTheDaemonItsPaneClaims() async throws {
         let host = FakeHost()
         let id = host.add("a")
-        let daemon = ZmxSupport.daemonName(for: try #require(host.localStore.session(withID: id)).paneIdentity)
-        let stranger = ZmxSupport.daemonName(for: UUID())
+        let daemon = ZmxSupport.localDaemonName(for: try #require(host.localStore.session(withID: id)).paneIdentity)
+        let stranger = ZmxSupport.localDaemonName(for: UUID())
         var calls: [[String]] = []
         host.zmxClient = ZmxClient(executablePath: #"C:\zmx.exe"#, socketDirectory: #"C:\zmx"#) { _, invocation in
             calls.append(invocation.arguments)

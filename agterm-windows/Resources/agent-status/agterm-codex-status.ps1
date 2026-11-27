@@ -68,11 +68,10 @@ try {
         if ($env:AGTERM_CODEX_WATCH_MAX_CHECKS -match '^\d+$') { $maxChecks = [int] $env:AGTERM_CODEX_WATCH_MAX_CHECKS }
         $interval = 2
         if ($env:AGTERM_CODEX_WATCH_INTERVAL -match '^\d+(\.\d+)?$') { $interval = $env:AGTERM_CODEX_WATCH_INTERVAL }
-        # the watcher inherits no environment through WMI, so it gets the socket explicitly
+        # the watcher inherits no environment through WMI, so it gets the state folder agtermctl resolves the socket from
         $target = Get-AgtermTarget
-        if (-not $env:AGTERM_SOCKET -and $env:AGTERM_STATE_DIR) { $target += @('--socket', (Join-Path $env:AGTERM_STATE_DIR 'agterm.sock')) }
         $argv = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
-                  '__watch-blocked', $token, $File, $maxChecks, $interval, $AgtermCtl) + $target
+                  '__watch-blocked', $token, $File, $maxChecks, $interval, $AgtermCtl, [string] $env:AGTERM_STATE_DIR) + $target
         $line = 'powershell.exe ' + (($argv | ForEach-Object { '"' + ([string] $_ -replace '"', '\"') + '"' }) -join ' ')
         # created by WMI, outside any job the agent runs its hooks in and closes when the hook returns
         try {
@@ -87,9 +86,10 @@ try {
 
     $action = [string] $args[0]
     if ($action -eq '__watch-blocked') {
-        if ($args.Count -ge 6) {
+        if ($args.Count -ge 7) {
             $AgtermCtl = [string] $args[5]
-            Invoke-Watch -Token $args[1] -File $args[2] -MaxChecks $args[3] -Interval $args[4] -Target @($args | Select-Object -Skip 6)
+            if ($args[6]) { $env:AGTERM_STATE_DIR = [string] $args[6] }
+            Invoke-Watch -Token $args[1] -File $args[2] -MaxChecks $args[3] -Interval $args[4] -Target @($args | Select-Object -Skip 7)
         }
         exit 0
     }

@@ -111,8 +111,6 @@ function Stop-Shell($Shell) {
     $stepShells.Remove($Shell.State)
     Stop-Process -Id $Shell.Process.Id -Force -ErrorAction SilentlyContinue
     $Shell.Process.WaitForExit(10000) | Out-Null
-    # a killed window leaves its AF_UNIX socket, which nothing can stat, and an artifact upload stops at it
-    cmd.exe /d /c del /f /q "$(Join-Path $Shell.State 'agterm.sock')" 2>$null
 }
 
 # Get-Node finds a session in the local window's tree, else in a server window's, which bare tree leaves out.

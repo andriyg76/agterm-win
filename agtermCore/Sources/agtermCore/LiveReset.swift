@@ -86,7 +86,7 @@ public enum LiveReset {
         var conflicted = false
         let targets = claims.claims.compactMap { claim -> Target? in
             guard seen.insert(claim.paneIdentity).inserted else { conflicted = true; return nil }
-            let name = ZmxSupport.daemonName(for: claim.paneIdentity)
+            let name = ZmxSupport.localDaemonName(for: claim.paneIdentity)
             guard let leader = leaders[name] else { return nil }
             func target(_ reason: Reason) -> Target {
                 Target(paneIdentity: claim.paneIdentity, sessionID: claim.sessionID, daemon: name, leaderPID: leader,

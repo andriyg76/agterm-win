@@ -3,7 +3,7 @@ import Foundation
 import WinSDK
 import agtermCore
 
-/// ControlSocket serves agtermctl on `<state>\agterm.sock`, an AF_UNIX socket as on a Mac: one JSON request line and one
+/// ControlSocket serves agtermctl on `ControlResolve.socketPath`, an AF_UNIX socket as on a Mac: one JSON request line and one
 /// response line per connection. Accepting and reading run on a thread of their own; each request runs on the main
 /// actor, so a slow server operation holds the next connection, never the window.
 final class ControlSocket: @unchecked Sendable {
