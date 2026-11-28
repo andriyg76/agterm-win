@@ -114,6 +114,8 @@ public enum NativeMenu {
         case serverSession(Int)
         case sidebarSession
         case moveToWorkspace(Int)
+        /// moveUnder is a companion's Move Under item, by its index among the offered parents.
+        case moveUnder(Int)
         case tint(TintChoice)
 
         static let sidebarSessionID = 999
@@ -123,6 +125,7 @@ public enum NativeMenu {
         static let serverSessionBase = 4000
         static let moveToWorkspaceBase = 5000
         static let tintBase = 6000
+        static let moveUnderBase = 7000
 
         /// id is the Win32 menu item id; 0 is reserved for a dismissed menu.
         public var id: Int {
@@ -135,12 +138,15 @@ public enum NativeMenu {
             case .sidebarSession: Self.sidebarSessionID
             case .moveToWorkspace(let index): Self.moveToWorkspaceBase + index
             case .tint(let choice): Self.tintBase + choice.offset
+            case .moveUnder(let index): Self.moveUnderBase + index
             }
         }
 
         public init?(id: Int) {
             if id == Self.sidebarSessionID {
                 self = .sidebarSession
+            } else if id >= Self.moveUnderBase {
+                self = .moveUnder(id - Self.moveUnderBase)
             } else if id >= Self.tintBase {
                 guard let choice = TintChoice(offset: id - Self.tintBase) else { return nil }
                 self = .tint(choice)
@@ -388,6 +394,17 @@ public enum NativeMenu {
 
     /// Structure is what the sidebar's workspace section acts on: a workspace row (`workspace` not nil, true for a named
     /// one) or a session (`flagged` not nil), the workspaces a session can move to, and the view's flagged and filter state.
+    /// ParentGroup is one workspace's sessions in a companion's Move Under, under the workspace's name.
+    public struct ParentGroup: Equatable, Sendable {
+        public let workspace: String
+        public let sessions: [String]
+
+        public init(workspace: String, sessions: [String]) {
+            self.workspace = workspace
+            self.sessions = sessions
+        }
+    }
+
     public struct Structure: Equatable, Sendable {
         public var workspace: Bool?
         public var focused = false
@@ -401,6 +418,9 @@ public enum NativeMenu {
         /// collapsed is whether the workspace row is folded; workspaceRows is a tree with a named workspace to fold.
         public var collapsed = false
         public var workspaceRows = false
+        /// parents are a companion row's Move Under targets, the window's other top-level sessions by workspace; nil on
+        /// any other row, whose Move to moves it rather than promoting it.
+        public var parents: [ParentGroup]?
         /// canClearFlagged is a flagged session to clear; workspaceSessions and allFlagged are the workspace row's sessions
         /// and whether each is flagged, for Flag All or Unflag All.
         public var canClearFlagged = false
@@ -458,6 +478,16 @@ public enum NativeMenu {
             }
             menu += [flag] + tint(structure) + [.command(.newCompanion, shortcuts), .command(.convertCompanion, enabled: structure.canConvert, shortcuts),
                      Entry(title: "Move to", shortcut: "", pick: nil, enabled: !targets.isEmpty, children: targets)]
+            if let parents = structure.parents {
+                var index = 0
+                let items = parents.flatMap { group in
+                    [Entry(title: group.workspace, shortcut: "", pick: nil, enabled: false, children: [])] + group.sessions.map { name in
+                        defer { index += 1 }
+                        return Entry(title: name, shortcut: "", pick: .moveUnder(index), enabled: true, children: [])
+                    }
+                }
+                menu.append(Entry(title: "Move Under", shortcut: "", pick: nil, enabled: !items.isEmpty, children: items))
+            }
         }
         return menu + [.separator, flaggedView(structure, shortcuts), workspaceFilter(structure, shortcuts)]
     }

@@ -88,6 +88,18 @@ struct NativeMenuTests {
                                                                                       .flagAllSessions, .addToFocus, .clearFocus, .editFocusedWorkspaces])
     }
 
+    @Test func aCompanionMovesUnderAnotherParentByWorkspace() {
+        var structure = NativeMenu.Structure(flagged: false, moveTargets: ["Top Level", "dev"])
+        #expect(!NativeMenu.structure(structure).contains { $0.title == "Move Under" })
+        structure.parents = [NativeMenu.ParentGroup(workspace: "Top Level", sessions: ["a"]), NativeMenu.ParentGroup(workspace: "dev", sessions: ["b", "c"])]
+        let under = try! #require(NativeMenu.structure(structure).first { $0.title == "Move Under" })
+        #expect(under.children.map(\.title) == ["Top Level", "a", "dev", "b", "c"])
+        #expect(under.children.map(\.pick) == [nil, .moveUnder(0), nil, .moveUnder(1), .moveUnder(2)])
+        #expect(under.children.map(\.enabled) == [false, true, false, true, true])
+        #expect(NativeMenu.Pick(id: NativeMenu.Pick.moveUnder(2).id) == .moveUnder(2))
+        #expect(NativeMenu.Pick(id: NativeMenu.Pick.tint(.parts([.icon, .name])).id) == .tint(.parts([.icon, .name])))
+    }
+
     @Test func viewAndTheWorkspaceRowEditTheFocusedSet() {
         var structure = NativeMenu.Structure(workspace: true)
         structure.canFilter = false

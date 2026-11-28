@@ -261,3 +261,55 @@ $shellCases["sidebar-tint"] = {
     if ($menu) { Send-Escape $menu }
     $failures
 }
+
+# Choose-RowSubmenu picks `Parent` > `Title` on the `Row`-th row's menu.
+function Choose-RowSubmenu($Shell, [IntPtr]$Window, [int]$Row, [string]$Parent, [string]$Title) {
+    $menu = Open-RowMenu $Shell $Window $Row
+    if (-not $menu) { return "row $Row opened no menu" }
+    $titles = [AgtermWin32]::MenuTitles($menu) -join ","
+    $submenu = Open-Submenu $Shell $menu $Parent
+    if (-not $submenu) { Send-Escape $menu; return "row $Row's menu has no $Parent submenu: $titles" }
+    $items = [AgtermWin32]::MenuTitles($submenu) -join ","
+    if (-not (Choose-MenuItem $Shell $submenu $Title)) { Send-Escape $menu; return "$Parent lists '$items', not $Title" }
+    $null
+}
+
+$shellCases["companion-moves"] = {
+    param($Shell)
+    $state = $Shell.State
+    $window = Get-ShellWindow $Shell
+    if (-not $window) { return @("no visible agterm-shell window") }
+    $ids = @{}
+    foreach ($name in @("alpha", "beta")) {
+        $reply = Invoke-Ctl $state @("session", "new", "--name", $name, "--command", "cmd.exe /d /k")
+        if (-not $reply.ok) { return @("session new $name failed: $($reply | ConvertTo-Json -Compress)") }
+        $ids[$name] = $reply.result.id
+    }
+    $reply = Invoke-Ctl $state @("session", "new", "--parent", $ids.alpha, "--name", "logs", "--command", "cmd.exe /d /k")
+    if (-not $reply.ok) { return @("session new --parent failed: $($reply | ConvertTo-Json -Compress)") }
+    $logs = $reply.result.id
+    Get-SessionNodes $state | ? { @($ids.Values) + $logs -notcontains $_.id } | % { Invoke-Ctl $state @("session", "close", "--target", $_.id) | Out-Null }
+    if (-not (Wait-Until { @(Get-SessionNodes $state).Count -eq 3 } 10)) { return @("the window did not settle on alpha, logs and beta") }
+    Invoke-Ctl $state @("session", "expand", "--target", $ids.alpha) | Out-Null
+    $failures = @()
+
+    Note "Move Under beta"
+    $problem = Choose-RowSubmenu $Shell $window 1 "Move Under" "beta"
+    if ($problem) { return @($problem) }
+    if (-not (Wait-Until { (Get-Node $state $logs).parent -eq $ids.beta } 5)) { $failures += "Move Under left logs under '$((Get-Node $state $logs).parent)', not beta" }
+    Invoke-Ctl $state @("session", "expand", "--target", $ids.beta) | Out-Null
+    Save-Snapshot $Shell "moved-under"
+
+    Note "Move to Top Level promotes it"
+    $problem = Choose-RowSubmenu $Shell $window 2 "Move to" "Top Level"
+    if ($problem) { return $failures + @($problem) }
+    if (-not (Wait-Until { -not (Get-Node $state $logs).parent } 5)) { $failures += "Move to Top Level left logs under '$((Get-Node $state $logs).parent)'" }
+    if (@(Get-SessionNodes $state | ? { $_.id -eq $logs }).Count -ne 1) { $failures += "the promoted companion is not the same session" }
+    Save-Snapshot $Shell "promoted"
+    $menu = Open-RowMenu $Shell $window 2
+    if ($menu) {
+        if ([AgtermWin32]::MenuTitles($menu) -contains "Move Under") { $failures += "a top-level row offers Move Under" }
+        Send-Escape $menu
+    }
+    $failures
+}
