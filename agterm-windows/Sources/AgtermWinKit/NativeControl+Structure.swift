@@ -21,13 +21,13 @@ extension NativeControl {
     }
 
     private static let sessionTargeted: Set<Command> = [
-        .sessionMove, .sessionFlag, .sessionCollapse, .sessionExpand, .sessionCompanionNew, .sessionCompanionConvert,
+        .sessionMove, .sessionFlag, .sessionTint, .sessionCollapse, .sessionExpand, .sessionCompanionNew, .sessionCompanionConvert,
         .sessionCompanionMove, .sessionCompanionPromote,
     ]
 
     private static let workspaceTargeted: Set<Command> = [
         .workspaceRename, .workspaceDelete, .workspaceSelect, .workspaceMove, .workspaceFocus, .workspaceCollapse,
-        .workspaceExpand, .workspaceFlag,
+        .workspaceExpand, .workspaceFlag, .workspaceTint,
     ]
 
     /// destination is where `request` runs, with its session target resolved to an id the store there resolves.

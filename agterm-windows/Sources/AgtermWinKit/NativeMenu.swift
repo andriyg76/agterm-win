@@ -107,6 +107,7 @@ public enum NativeMenu {
         case serverSession(Int)
         case sidebarSession
         case moveToWorkspace(Int)
+        case tint(TintChoice)
 
         static let sidebarSessionID = 999
         static let profileBase = 1000
@@ -114,6 +115,7 @@ public enum NativeMenu {
         static let startServerBase = 3000
         static let serverSessionBase = 4000
         static let moveToWorkspaceBase = 5000
+        static let tintBase = 6000
 
         /// id is the Win32 menu item id; 0 is reserved for a dismissed menu.
         public var id: Int {
@@ -125,12 +127,16 @@ public enum NativeMenu {
             case .serverSession(let index): Self.serverSessionBase + index
             case .sidebarSession: Self.sidebarSessionID
             case .moveToWorkspace(let index): Self.moveToWorkspaceBase + index
+            case .tint(let choice): Self.tintBase + choice.offset
             }
         }
 
         public init?(id: Int) {
             if id == Self.sidebarSessionID {
                 self = .sidebarSession
+            } else if id >= Self.tintBase {
+                guard let choice = TintChoice(offset: id - Self.tintBase) else { return nil }
+                self = .tint(choice)
             } else if id >= Self.moveToWorkspaceBase {
                 self = .moveToWorkspace(id - Self.moveToWorkspaceBase)
             } else if id >= Self.serverSessionBase {
@@ -157,6 +163,8 @@ public enum NativeMenu {
         public let enabled: Bool
         public let children: [Entry]
         public var checked = false
+        /// swatch is a color the menu draws beside the title.
+        public var swatch: TintValue?
 
         public static let separator = Entry(title: "", shortcut: "", pick: nil, enabled: false, children: [])
 
@@ -371,6 +379,10 @@ public enum NativeMenu {
         /// collapsed is whether the workspace row is folded; workspaceRows is a tree with a named workspace to fold.
         public var collapsed = false
         public var workspaceRows = false
+        /// tints are the row's tint, one per target, when it offers Tint; tintPlacement is the last Show On pick.
+        public var tints: [SidebarTint?]?
+        public var tintPlacement: Set<TintPart> = [.icon]
+        public var canTint = true
 
         public init(workspace: Bool? = nil, focused: Bool = false, flagged: Bool? = nil, canConvert: Bool = false, moveTargets: [String] = [],
                     flaggedView: Bool = false, filtered: Bool = false) {
@@ -393,6 +405,7 @@ public enum NativeMenu {
             focus.checked = structure.focused
             menu += [.command(.renameWorkspace, enabled: named, shortcuts), .command(.copyName, enabled: named, shortcuts),
                      .command(.deleteWorkspace, enabled: named, shortcuts), workspaceFold(structure, shortcuts), focus]
+            if named { menu += tint(structure) }
         }
         if let flagged = structure.flagged {
             var flag = Entry.command(.toggleFlag, shortcuts)
@@ -400,7 +413,7 @@ public enum NativeMenu {
             let targets = structure.moveTargets.enumerated().map { index, name in
                 Entry(title: name, shortcut: "", pick: .moveToWorkspace(index), enabled: true, children: [])
             }
-            menu += [flag, .command(.newCompanion, shortcuts), .command(.convertCompanion, enabled: structure.canConvert, shortcuts),
+            menu += [flag] + tint(structure) + [.command(.newCompanion, shortcuts), .command(.convertCompanion, enabled: structure.canConvert, shortcuts),
                      Entry(title: "Move to", shortcut: "", pick: nil, enabled: !targets.isEmpty, children: targets)]
         }
         return menu + [.separator, flaggedView(structure, shortcuts), workspaceFilter(structure, shortcuts)]

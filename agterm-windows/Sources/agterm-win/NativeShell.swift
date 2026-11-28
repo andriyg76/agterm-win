@@ -166,6 +166,9 @@ final class NativeShell {
     var tree: UnsafeMutableRawPointer?
     /// beforeFullscreen is the style and placement full screen replaced, nil while the window is not full screen.
     var beforeFullscreen: (style: LONG_PTR, placement: WINDOWPLACEMENT)?
+    /// tintPlacement is the last Tint ▸ Show On pick, app-wide and in memory only, as on a Mac: an untinted row shows it
+    /// checked and a menu color starts the row on it.
+    var tintPlacement: Set<TintPart> = [.icon]
     var noticeWindow: NoticeBarWindow?
     private var findBar: HWND?
     private var findFailed = false
@@ -1586,6 +1589,13 @@ final class NativeShell {
         let targets = session.flatMap { store.workspace(forSession: $0) }.map { home in store.workspaces.filter { $0.id != home.id } } ?? []
         if session != nil { state.workspace = nil }
         state.moveTargets = targets.map { $0.isRoot ? "Top Level" : $0.name }
+        if let session {
+            state.tints = [store.session(withID: session)?.tint]
+        } else if state.workspace == true, let id = structureWorkspace(destination) {
+            state.tints = [store.workspaces.first { $0.id == id }?.tint]
+        }
+        state.tintPlacement = tintPlacement
+        state.canTint = !store.marksBlocked
         return (NativeMenu.structure(state, shortcuts: menuShortcuts), targets)
     }
 
@@ -2307,6 +2317,7 @@ final class NativeShell {
             guard let node = nt_tree_add(tree, parent, Array(item.title.utf16) + [0], tag, item.expanded ? 1 : 0) else { return }
             if let destination {
                 sidebarGroups.append((destination, node))
+                decorate(node, item)
             } else {
                 items[item.id] = node
                 decorate(node, item)
@@ -2359,10 +2370,12 @@ final class NativeShell {
     /// decorate draws an agent's status glyph and info line on a session row, as a Mac's sidebar shows them.
     private func decorate(_ node: UnsafeMutableRawPointer, _ item: SessionSidebar.Item) {
         let rgb = StatusGlyph.rgb(item.status)
-        guard rgb != nil || item.info != nil, let tree else { return }
+        guard rgb != nil || item.info != nil || item.tint != nil, let tree else { return }
         let glyph = rgb.map { _ in Array(StatusGlyph.character(item.status.shape ?? .circle).utf16) + [0] }
         let info = item.info.map { Array($0.utf16) + [0] }
-        nt_tree_decorate(tree, node, glyph, rgb ?? 0, item.status.blink ? 1 : 0, info)
+        let parts = item.tint.map { ($0.shows(.icon) ? 1 : 0) | ($0.shows(.name) ? 2 : 0) } ?? 0
+        nt_tree_decorate(tree, node, glyph, rgb ?? 0, item.status.blink ? 1 : 0, info, item.tint?.color.rgb(dark: false) ?? 0,
+                         item.tint?.color.rgb(dark: true) ?? 0, Int32(parts))
     }
 
     /// updateBlink runs the pulse timer only while some row's status blinks.
@@ -2647,6 +2660,10 @@ final class NativeShell {
             }
         case .command(.restartSession)?: restartFromUI(session)
         case .command(.revealSession)?: if let session { _ = revealSession(session) }
+        case .tint(let choice)?:
+            if case .parts(let parts) = choice { tintPlacement = parts }
+            tint(choice, session: session, workspace: session == nil ? structureWorkspace(destination) : nil, in: storeOf(destination),
+                 startingOn: tintPlacement)
         case .command(.closeSession)?: closeFromUI(session)
         case .serverSession(let index)? where names.indices.contains(index):
             if let server = server(names[index]) { launchInSidebar(.server(server.group, workspace: nil)) }
@@ -2669,8 +2686,32 @@ final class NativeShell {
             saveSettings()
         case .startServer(let index)? where menuServers.indices.contains(index): startServer(menuServers[index])
         case .serverSession(let index)? where menuServers.indices.contains(index): newServerSession(on: server(menuServers[index]))
+        case .tint(let choice)?: tint(choice, session: selected, workspace: nil, in: activeStore, startingOn: [.icon])
         default: break
         }
+    }
+
+    /// tint applies a Tint pick to a session or workspace row through `session.tint`/`workspace.tint`, so a server's
+    /// row is tinted where its catalog keeps it.
+    private func tint(_ choice: TintChoice, session: Foundation.UUID?, workspace: Foundation.UUID?, in store: AppStore,
+                      startingOn placement: Set<TintPart>) {
+        let current: SidebarTint?
+        if let session {
+            current = store.session(withID: session)?.tint
+        } else if let workspace {
+            current = store.workspaces.first { $0.id == workspace }?.tint
+        } else {
+            return
+        }
+        var args = ControlArgs()
+        if let tint = choice.applied(to: current, startingOn: placement) {
+            args.mode = "set"
+            args.tint = tint.color.rawValue
+            args.tintOn = tint.parts.map(\.rawValue)
+        } else {
+            args.mode = "clear"
+        }
+        structure(session == nil ? .workspaceTint : .sessionTint, target: session ?? workspace, args)
     }
 
     // MARK: palettes
@@ -2699,7 +2740,7 @@ final class NativeShell {
             return Palette.sessionRows(locals: localRows, servers: servers.map { (label: $0.label, workspaces: $0.remote.store.workspaces) },
                                        unseen: counting ? serverUnseen : [:])
         case .commands:
-            return Palette.commandRows(windowEntries)
+            return Palette.commandRows(windowEntries + NativeMenu.sessionTints(enabled: selected != nil && !activeStore.marksBlocked))
         case .attention:
             let localRows = locals.map { local in
                 let workspace = localStore.workspace(forSession: local.id)

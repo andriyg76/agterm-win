@@ -678,7 +678,13 @@ extension NativeTerminal: PaneRoleMutableSurface {
 @MainActor
 func showMenu(_ entries: [NativeMenu.Entry], owner: HWND?, at point: POINT) -> NativeMenu.Pick? {
     var menus: [HMENU] = []
-    defer { menus.forEach { DestroyMenu($0) } }
+    var swatches: [HBITMAP] = []
+    defer {
+        menus.forEach { DestroyMenu($0) }
+        swatches.forEach { DeleteObject($0) }
+    }
+    let dark = ChromePalette.recompute(theme: NativeTerminal.theme, sidebarTint: 0).isDark
+    let swatchSize = Int32(MulDiv(12, Int32(owner.map { GetDpiForWindow($0) } ?? 96), 96))
     func build(_ entries: [NativeMenu.Entry]) -> HMENU? {
         guard let menu = CreatePopupMenu() else { return nil }
         menus.append(menu)
@@ -690,6 +696,14 @@ func showMenu(_ entries: [NativeMenu.Entry], owner: HWND?, at point: POINT) -> N
                 AppendMenuW(menu, UINT(MF_POPUP) | state, UINT_PTR(UInt(bitPattern: Int(bitPattern: submenu))), text)
             } else if let pick = entry.pick {
                 AppendMenuW(menu, UINT(MF_STRING) | state, UINT_PTR(pick.id), text)
+                if let swatch = entry.swatch, let bitmap = swatchBitmap(swatch.rgb(dark: dark), size: swatchSize) {
+                    swatches.append(bitmap)
+                    var item = MENUITEMINFOW()
+                    item.cbSize = UINT(MemoryLayout<MENUITEMINFOW>.size)
+                    item.fMask = UINT(MIIM_BITMAP)
+                    item.hbmpItem = bitmap
+                    SetMenuItemInfoW(menu, UINT(pick.id), false, &item)
+                }
             } else if entry.children.isEmpty, entry.title.isEmpty {
                 AppendMenuW(menu, UINT(MF_SEPARATOR), 0, nil)
             } else {
@@ -700,6 +714,30 @@ func showMenu(_ entries: [NativeMenu.Entry], owner: HWND?, at point: POINT) -> N
     }
     guard let menu = build(entries) else { return nil }
     return NativeMenu.Pick(id: Int(nt_track_menu(UnsafeMutableRawPointer(menu), UnsafeMutableRawPointer(owner), point.x, point.y)))
+}
+
+/// swatchBitmap is a filled circle in `rgb` on a clear ground, as the premultiplied 32-bit DIB a menu draws with alpha.
+private func swatchBitmap(_ rgb: UInt32, size: Int32) -> HBITMAP? {
+    var info = BITMAPINFO()
+    info.bmiHeader.biSize = DWORD(MemoryLayout<BITMAPINFOHEADER>.size)
+    info.bmiHeader.biWidth = size
+    info.bmiHeader.biHeight = -size
+    info.bmiHeader.biPlanes = 1
+    info.bmiHeader.biBitCount = 32
+    info.bmiHeader.biCompression = DWORD(BI_RGB)
+    var bits: UnsafeMutableRawPointer?
+    guard let bitmap = CreateDIBSection(nil, &info, UINT(DIB_RGB_COLORS), &bits, nil, 0), let bits else { return nil }
+    let side = Int(size), pixels = bits.bindMemory(to: UInt32.self, capacity: side * side)
+    let center = Double(size) / 2, radius = center - 1
+    for y in 0..<side {
+        for x in 0..<side {
+            let dx = Double(x) + 0.5 - center, dy = Double(y) + 0.5 - center
+            let alpha = UInt32(max(0, min(1, radius - (dx * dx + dy * dy).squareRoot() + 0.5)) * 255)
+            let channel = { (shift: UInt32) in (rgb >> shift & 0xFF) * alpha / 255 }
+            pixels[y * side + x] = alpha << 24 | channel(16) << 16 | channel(8) << 8 | channel(0)
+        }
+    }
+    return bitmap
 }
 
 private let nativeWindowProcedure: WNDPROC = { window, message, wParam, lParam in

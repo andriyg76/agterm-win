@@ -1,5 +1,6 @@
 import AgtermWinKit
 import Testing
+import agtermCore
 
 struct NativeMenuTests {
     private let profiles = [LaunchProfile(name: "Windows PowerShell", commandLine: "powershell.exe"),
@@ -119,6 +120,33 @@ struct NativeMenuTests {
         #expect(enter?.title == "Enter Full Screen" && enter?.shortcut == "F11")
         view.fullscreen = true
         #expect(NativeMenu.view(view).first { $0.pick == .command(.toggleFullscreen) }?.title == "Exit Full Screen")
+    }
+
+    @Test func tintSubmenuChecksTheRowsColorAndPlacement() {
+        var structure = NativeMenu.Structure(flagged: false)
+        structure.tints = [nil]
+        structure.tintPlacement = [.name]
+        let untinted = try! #require(NativeMenu.structure(structure).first { $0.title == "Tint" }?.children)
+        #expect(untinted.first { $0.checked }?.title == "None")
+        let showOn = untinted.filter { if case .tint(.parts) = $0.pick { true } else { false } }
+        #expect(showOn.map(\.title) == ["Icon", "Name", "Icon and Name"] && showOn.allSatisfy { !$0.enabled })
+        #expect(showOn.first { $0.checked }?.title == "Name")
+        #expect(untinted.first { $0.title == "Teal" }?.swatch == .named(.teal))
+        structure.tints = [SidebarTint(color: TintValue(rawValue: "#ab12cd")!, parts: [.icon, .name])]
+        let tinted = try! #require(NativeMenu.structure(structure).first { $0.title == "Tint" }?.children)
+        #expect(tinted.filter(\.checked).map(\.title) == ["Custom #ab12cd", "Icon and Name"])
+        #expect(!NativeMenu.structure(NativeMenu.Structure(workspace: false)).contains { $0.title == "Tint" })
+    }
+
+    @Test func tintPicksRoundTripTheirMenuIds() {
+        let choices: [TintChoice] = TintColor.allCases.map { .color($0) } + [.color(nil), .custom, .parts([.icon]), .parts([.name]), .parts([.icon, .name])]
+        let picks = choices.map { NativeMenu.Pick.tint($0) }
+        #expect(picks.map { NativeMenu.Pick(id: $0.id) } == picks)
+        #expect(Set(picks.map(\.id)).count == picks.count)
+        let current = SidebarTint(color: .blue, parts: [.name])
+        #expect(TintChoice.color(.red).applied(to: current, startingOn: [.icon]) == SidebarTint(color: .red, parts: [.name]))
+        #expect(TintChoice.color(.red).applied(to: nil, startingOn: [.icon, .name]) == SidebarTint(color: .red, parts: [.icon, .name]))
+        #expect(TintChoice.parts([.icon]).applied(to: nil, startingOn: [.name]) == nil)
     }
 
     @Test func copyNameFollowsRenameOnSessionAndWorkspaceRows() {

@@ -383,6 +383,29 @@ struct NativeControlTests {
         #expect(host.localSessions.isEmpty && host.localStore.workspace(named: "backend") == nil)
     }
 
+    @Test func tintCommandsTintTheLocalRowsAndTreeReadsThemBack() async {
+        let host = FakeHost()
+        let workspace = try! #require(await handle(ControlRequest(cmd: .workspaceNew, args: ControlArgs(name: "api")), host).result?.id)
+        let session = host.add("a")
+        var set = ControlArgs()
+        set.mode = "set"
+        set.tint = "teal"
+        set.tintOn = ["name"]
+        #expect(await handle(ControlRequest(cmd: .sessionTint, target: session.uuidString, args: set), host).ok)
+        set.tint = "#AB12CD"
+        set.tintOn = nil
+        #expect(await handle(ControlRequest(cmd: .workspaceTint, target: workspace, args: set), host).ok)
+        let tree = try! #require(await handle(ControlRequest(cmd: .tree), host).result?.tree)
+        let node = try! #require(tree.workspaces.flatMap(\.sessions).first { $0.id == session.uuidString })
+        #expect(node.tint == "teal" && node.tintOn == ["name"])
+        let api = try! #require(tree.workspaces.first { $0.id == workspace })
+        #expect(api.tint == "#ab12cd" && api.tintOn == ["icon"])
+        var clear = ControlArgs()
+        clear.mode = "clear"
+        #expect(await handle(ControlRequest(cmd: .sessionTint, target: session.uuidString, args: clear), host).ok)
+        #expect(host.localStore.session(withID: session)?.tint == nil)
+    }
+
     @Test func aCompanionNestsUnderItsSessionInTheTree() async {
         let host = FakeHost()
         let parent = host.add("a")
