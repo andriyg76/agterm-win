@@ -484,7 +484,7 @@ $shellCases["title-bar-menus"] = {
         } 5
         if ($about) {
             $text = ([AgtermWin32]::VisibleChildren($about, "Static") | ForEach-Object { [AgtermWin32]::TextOf($_) }) -join "`n"
-            if ($text -notmatch 'Version \d+\.\d+\.\d+\.\d+') { $failures += "About has no four-component Windows version: $text" }
+            if ($text -notmatch 'Version \d+\.\d+\.\d+ \(agterm \d+\.\d+\.\d+\)') { $failures += "About has no version with its upstream: $text" }
             if ($text -notmatch 'Built \d{4}-\d{2}-\d{2}T') { $failures += "About has no build date: $text" }
             Save-ScreenSnapshot $Shell "about"
         } else { $failures += "Help → About opened no About dialog" }
