@@ -85,17 +85,20 @@ void drawDecoration(const NMTVCUSTOMDRAW *draw, HTREEITEM handle, const Decorati
     if (ownsTitle(decoration)) {
         int shift = 0;
         if (decoration.tintParts & tintIcon) {
-            const int dot = MulDiv(8, dpi, 96);
+            // a glyph, not Ellipse: GDI fills shapes without antialiasing, ClearType smooths text
+            HFONT symbols = CreateFontW(-MulDiv(9, static_cast<int>(dpi), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Symbol");
+            const auto oldFont = SelectObject(dc, symbols);
+            const wchar_t dot[] = L"⬤";
+            SIZE size{};
+            GetTextExtentPoint32W(dc, dot, 1, &size);
             const int lineBottom = decoration.info[0] ? (row.top + row.bottom) / 2 : row.bottom;
-            const int top = row.top + (lineBottom - row.top - dot) / 2;
-            const auto oldBrush = SelectObject(dc, GetStockObject(DC_BRUSH));
-            const auto oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
-            const auto oldBrushColor = SetDCBrushColor(dc, tintColor(decoration));
-            Ellipse(dc, label.left + 2, top, label.left + 2 + dot, top + dot);
-            SetDCBrushColor(dc, oldBrushColor);
-            SelectObject(dc, oldPen);
-            SelectObject(dc, oldBrush);
-            shift = dot + MulDiv(6, dpi, 96);
+            RECT at{label.left + 2, row.top, label.left + 2 + size.cx, lineBottom};
+            SetTextColor(dc, tintColor(decoration));
+            DrawTextW(dc, dot, 1, &at, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            SelectObject(dc, oldFont);
+            DeleteObject(symbols);
+            shift = size.cx + MulDiv(4, dpi, 96);
         }
         wchar_t title[512] = {};
         TVITEMW item{};
