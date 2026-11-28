@@ -37,7 +37,6 @@ final class NativeTerminal {
     static var scrollLines = GeneralSettings.defaultScrollLines
     /// onExit runs with the exit code when the started program exits.
     var onExit: ((Int) -> Void)?
-    var isRunning: Bool { console != nil }
     /// started is whether a program was ever started here, `TerminalSurface.isRealized`.
     private(set) var started = false
     private(set) var paneToken = ""

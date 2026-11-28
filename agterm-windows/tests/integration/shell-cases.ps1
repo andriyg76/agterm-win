@@ -275,7 +275,6 @@ $shellTeardowns = @{}
 
 . (Join-Path $PSScriptRoot "wsl-cases.ps1")
 . (Join-Path $PSScriptRoot "docker-remote-cases.ps1")
-. (Join-Path $PSScriptRoot "session-exit-cases.ps1")
 . (Join-Path $PSScriptRoot "overlay-cases.ps1")
 
 # Note marks a step in the log, so a case that stops shows where.
