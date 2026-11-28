@@ -1,6 +1,6 @@
 # Unsigned Inno installer, portable zip and Store MSIX (and registerable layout) from an existing release build.
 # CI runs swift build -c release first, then:
-#   scripts\package-ci.ps1 -Version (Get-Content AGTERM_VERSION -TotalCount 1) -Arch x64 -Output $env:RUNNER_TEMP\ci-packages
+#   scripts\package-ci.ps1 -Version (Get-Content VERSION -TotalCount 1) -Arch x64 -Output $env:RUNNER_TEMP\ci-packages
 param(
     [Parameter(Mandatory)][string]$Version,
     [ValidateSet("x64", "arm64")][string]$Arch = "x64",

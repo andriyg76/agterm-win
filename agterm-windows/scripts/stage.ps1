@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $build = Join-Path $root ".build\$Configuration"
 $agterm = Get-Content (Join-Path $root "AGTERM_VERSION") -TotalCount 1
-if (-not $Version) { $Version = $agterm }
+if (-not $Version) { $Version = (Get-Content (Join-Path $root "VERSION") -TotalCount 1).Trim() }
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Version must be a.b.c, got $Version" }
 foreach ($exe in "agterm-win.exe", "agtermctl.exe") {
     if (-not (Test-Path (Join-Path $build $exe))) { throw "build $Configuration first: no $build\$exe (swift build --product agtermctl builds the CLI)" }

@@ -11,6 +11,9 @@ agterm-win stops borrowing the upstream release number (`v0.44.1.11`) and gets i
   Store, so no channel sees a downgrade.
 - User-facing name: `agterm-win 0.44.1012 (agterm 0.44.1)` in the release title, Inno `AppVerName` and About.
 - MSIX: `a.b.c` → `a.b.c.0`.
+- `agterm-windows/VERSION` holds the line as `major.minor.0` (`0.44.0`) for every unreleased build.
+  `incremental` leaves it; `minor`/`major` commit the new `.0` to the branch in the `version` job and build that commit,
+  so the tag and every later unreleased build carry the new line.
 
 ## Upstream sync
 

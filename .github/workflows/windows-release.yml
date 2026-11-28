@@ -34,6 +34,7 @@ jobs:
       base: ${{ steps.next.outputs.base }}
       base-line: ${{ steps.next.outputs.base-line }}
       latest: ${{ steps.next.outputs.latest }}
+      sha: ${{ steps.next.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -51,6 +52,17 @@ jobs:
           "base=$($next.Base)" >> $env:GITHUB_OUTPUT
           "base-line=$($next.BaseLine)" >> $env:GITHUB_OUTPUT
           "latest=$($next.Latest.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          # a new line's release commit carries its major.minor.0, so unreleased builds after it show the new line
+          if ($next.NewLine) {
+            $line = ($next.Version -split '\.')[0..1] -join '.'
+            Set-Content agterm-windows/VERSION "$line.0"
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -am "agterm-windows: version $line.0 for the $($next.Version) release"
+            git push origin "HEAD:$env:BRANCH"
+            if ($LASTEXITCODE) { throw "pushing the VERSION bump to $env:BRANCH failed" }
+          }
+          "sha=$(git rev-parse HEAD)" >> $env:GITHUB_OUTPUT
           "releasing $($next.Version) ($env:KIND after $($next.Base))"
 
   # each architecture builds natively, since Swift on Windows does not cross-compile the app here
@@ -71,6 +83,8 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.sha }}
       - uses: compnerd/gha-setup-swift@v0.5.1
         with:
           swift-version: ${{ env.SWIFT_VERSION }}
@@ -215,6 +229,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.version.outputs.sha }}
           fetch-depth: 0
       - uses: actions/download-artifact@v7
         with:
@@ -234,6 +249,7 @@ jobs:
           BRANCH: ${{ github.ref_name }}
           KIND: ${{ inputs.kind }}
           LATEST: ${{ needs.version.outputs.latest }}
+          SHA: ${{ needs.version.outputs.sha }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
         run: |
@@ -264,7 +280,7 @@ jobs:
           }
           # a version/v* release is an older line than windows-port's, so it must not take GitHub's Latest
           $latest = if ($env:LATEST -eq 'true') { '--latest' } else { '--latest=false' }
-          gh release create "v$env:VERSION" --target $env:GITHUB_SHA @assets --title "agterm-win $env:VERSION (agterm $agterm)" `
+          gh release create "v$env:VERSION" --target $env:SHA @assets --title "agterm-win $env:VERSION (agterm $agterm)" `
             --notes-file $notesPath $latest
           if ($LASTEXITCODE) { throw 'gh release create failed' }
           # a minor or major supersedes the previous line; its maintenance branch starts at that line's last release

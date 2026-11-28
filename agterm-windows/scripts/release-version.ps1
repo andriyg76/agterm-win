@@ -1,5 +1,6 @@
 # agterm-win versions are its own major.minor.patch, independent of AGTERM_VERSION (the upstream pin the build is locked to).
 # windows-port releases any kind; version/v<major>.<minor> maintains a superseded line and releases only its patches.
+# agterm-windows\VERSION holds the line as major.minor.0 for unreleased builds; a minor or major release rewrites it.
 #   scripts\release-version.ps1 -Kind major|minor|incremental [-Branch <name>]   the next version and its base tag
 #   scripts\release-version.ps1 -Version 0.44.1012 [-Branch <name>]             throws unless the branch may release it
 param(
@@ -19,6 +20,8 @@ if ($base -notmatch '^v(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?$') { throw "no release ta
 $major, $minor = [int]$Matches[1], [int]$Matches[2]
 $patch = if ($Matches[4]) { 1000 * [int]$Matches[3] + [int]$Matches[4] } else { [int]$Matches[3] }
 $baseLine = "$major.$minor"
+$versionFile = Join-Path $root "VERSION"
+$stored = if (Test-Path $versionFile) { (Get-Content $versionFile -TotalCount 1).Trim() } else { "" }
 
 $maintenance = $Branch -match '^version/v(\d+\.\d+)$'
 if ($maintenance) {
@@ -31,9 +34,13 @@ if ($maintenance) {
 if ($Version) {
     if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION must be a.b.c, got $Version" }
     if ($maintenance -and $Version -notlike "$line.*") { throw "$Branch releases only $line.<patch>, not $Version" }
+    $versionLine = ($Version -split '\.')[0..1] -join '.'
+    if ($versionLine -ne $baseLine -and -not $Version.EndsWith(".0")) { throw "$Version skips the $versionLine line's .0 release" }
+    if ($stored -and $stored -ne "$versionLine.0") { throw "VERSION is $stored; set it to $versionLine.0 before releasing $Version" }
     exit 0
 }
 
+if ($stored -and $stored -ne "$baseLine.0") { throw "VERSION is $stored, but the last release $base is on the $baseLine line" }
 if ($maintenance -and $Kind -ne "incremental") { throw "$Branch releases only incremental; $Kind runs from windows-port" }
 # once a line has its maintenance branch, its patches come from there
 if (-not $maintenance -and $Kind -eq "incremental" -and (git -C $root ls-remote --heads origin "version/v$baseLine")) {
@@ -46,4 +53,4 @@ $next = switch ($Kind) {
     "incremental" { "$major.$minor.$($patch + 1)" }
 }
 if (git -C $root tag --list "v$next") { throw "v$next is already tagged" }
-[pscustomobject]@{ Version = $next; Base = $base; BaseLine = $baseLine; Latest = -not $maintenance }
+[pscustomobject]@{ Version = $next; Base = $base; BaseLine = $baseLine; Latest = -not $maintenance; NewLine = $Kind -ne "incremental" }
