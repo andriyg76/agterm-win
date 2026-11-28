@@ -27,7 +27,7 @@ Resubmit **both** architecture MSIX from `windows-release` without changing iden
 2. Restricted capabilities: лише `runFullTrust` — текст з `store-listing.md`.  
 3. Support **email** у формі.  
 4. На другому ПК: WSL + `agtermctl` з `TESTING-VIRTUALIZED.md`.  
-5. Очікування: Store MSIX state **не** в `%LOCALAPPDATA%\agterm-win`; winget/Inno лишають старий шлях — документувати в release notes при першому Store-оновленні.
+5. Очікування: state у `%USERPROFILE%\.local\state\agterm-win`, config у `%USERPROFILE%\.config\agterm` для Store, winget та Inno однаково; старий `%LOCALAPPDATA%\agterm-win` (у Store — перенаправлена копія) переноситься при першому запуску, якщо нові теки порожні.
 
 ## Previous reconsideration (archived 2026-11-25)
 

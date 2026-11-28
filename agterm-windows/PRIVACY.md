@@ -26,21 +26,25 @@ agterm-win does not see, log or forward their traffic.
 
 ## What is stored on your computer
 
-The files are under `%LOCALAPPDATA%\agterm-win`, or the folder `AGTERM_WIN_STATE_DIR` names, beside one registry key:
+State is under `%USERPROFILE%\.local\state\agterm-win` and config under `%USERPROFILE%\.config\agterm`, the same for
+the Store app and every other install, beside one registry key. `AGTERM_WIN_STATE_DIR` names another state folder,
+which then holds the config in its `config` folder. agterm-win 0.44.1.11 and earlier kept both in
+`%LOCALAPPDATA%\agterm-win`; the first start of a later version moves them while the new folders hold none, and ends
+the Live sessions an older version started, removing their `zmx` folder.
 
 | File | What it holds |
 |---|---|
 | `native.json` | Settings: theme, font and size, notification choices, window position and size, the default launch profile, whether each WSL distribution's agterm-server starts at launch, and the local sessions open at quit. Each session keeps its name, the command line it started with and the folder it was last in, so it can start there again. |
-| `config\keymap.conf` | Your key bindings, written only when you choose Edit Keymap. |
+| `keymap.conf`, `profiles.properties`, `remote.properties`, `themes\` (config) | Your key bindings, launch profiles, WSL and remote hosts, and themes. agterm-win writes the keymap only when you choose Edit Keymap. |
 | `windows\wsl-<distribution>.json` | How agterm-win last showed an agterm-server's sessions, so the sidebar fills at once on the next start. |
 | `agterm-win.log` | A diagnostic log: start and stop, sessions opened and closed, the commands that started them, the title and text of notifications posted to a session, errors. It does not record what you type or what programs print. |
 | `crash.log` | Written only when agterm-win crashes: the error and where it happened. |
 | `HKCU\Software\Classes\AppUserModelId\andriyg76.agterm-win` (registry, installs outside the Store) | The name and icon Windows shows on agterm-win's notifications. |
 
-Its sockets are under `%USERPROFILE%\.local\state\agterm-win`, which Windows opens only to your account and
-administrators, and carry nothing off the machine: `agterm-<id>.sock`, the control socket `agtermctl` talks to,
-and, with Settings ▸ General ▸ Restore sessions set to Live sessions, `s\<id>`, the sockets of the `zmx`
-processes that keep each local session's shell running between starts.
+Its sockets are in the state folder too, which Windows opens only to your account and administrators, and carry
+nothing off the machine: `agterm-<id>.sock`, the control socket `agtermctl` talks to, and, with Settings ▸ General ▸
+Restore sessions set to Live sessions, `z\<id>`, the sockets and logs of the `zmx` processes that keep each local
+session's shell running between starts.
 
 Terminal contents and scrollback stay in memory: they are not written to disk and are gone when a session
 closes. With Live sessions, a `zmx` process per pane keeps its shell and screen in memory after agterm-win closes,
@@ -61,9 +65,10 @@ out.
 
 ## Removing your data
 
-Close agterm-win and delete `%LOCALAPPDATA%\agterm-win`, and on an install outside the Store the
-`HKCU\Software\Classes\AppUserModelId\andriyg76.agterm-win` registry key. Uninstalling, including from the Store, may leave that
-folder in place, so delete it yourself if you want nothing left behind. agterm-server's data in WSL is removed
+Close agterm-win and delete `%USERPROFILE%\.local\state\agterm-win`, your config files in `%USERPROFILE%\.config\agterm`,
+any `%LOCALAPPDATA%\agterm-win` an older version left, and on an install outside the Store the
+`HKCU\Software\Classes\AppUserModelId\andriyg76.agterm-win` registry key. Uninstalling, the Store app included, leaves
+these folders in place, since they are outside the package, so delete them yourself if you want nothing left behind. agterm-server's data in WSL is removed
 with `~/.local/state/agterm` there, or with the distribution. The status hooks are removed by deleting
 `%USERPROFILE%\.config\agterm\agent-status`, agterm-win's entries in `%USERPROFILE%\.claude\settings.json`, and the
 block between the `agterm-win agent-status` markers in Codex's `config.toml`.

@@ -58,6 +58,23 @@ public struct ZmxClient {
         return kill(names: names)
     }
 
+    /// endLegacyDaemons ends every daemon agterm-win 0.44.1.11 and earlier started in `directory` and removes the folder:
+    /// a later version neither reattaches nor lists them, so nothing else would end them before sign-out.
+    public func endLegacyDaemons(in directory: String) {
+        guard FileManager.default.fileExists(atPath: directory) else { return }
+        let legacy = ZmxClient(executablePath: executablePath, socketDirectory: directory, runner: runner, log: log)
+        guard let names = legacy.listSessions()?.map(\.name) else { return }
+        log("zmx: ending \(names.count) daemon(s) an older agterm-win started in \(directory)")
+        guard legacy.kill(names: names) else { return }
+        do {
+            try FileManager.default.removeItem(atPath: directory)
+            let parent = (directory as NSString).deletingLastPathComponent
+            if (try? FileManager.default.contentsOfDirectory(atPath: parent))?.isEmpty == true { try FileManager.default.removeItem(atPath: parent) }
+        } catch {
+            log("zmx: could not remove \(directory): \(error.localizedDescription)")
+        }
+    }
+
     /// kill force-kills every name in one call; semantic deletion has already taken the panes out of the model.
     @discardableResult
     public func kill(paneIdentities: [UUID]) -> Bool {

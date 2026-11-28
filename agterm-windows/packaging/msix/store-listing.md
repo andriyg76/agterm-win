@@ -117,7 +117,8 @@ install that server. It also ships agtermctl, a console command exposed as an ex
 control the terminal over a local socket under %USERPROFILE%\.local\state\agterm-win, outside the virtualized
 profile so a packaged app and an unpackaged agtermctl reach the same path. All of this needs the full-trust desktop
 model: an AppContainer process cannot create pseudoconsoles or launch arbitrary user programs with the user's
-normal rights. User programs started inside a session keep their normal profile and AppData; agterm-win's own
-settings use the packaged store. On its first start it adds agent status hooks to the user's Claude Code and Codex
+normal rights. User programs started inside a session keep their normal profile and AppData; agterm-win keeps its own
+settings in %USERPROFILE%\.local\state\agterm-win and %USERPROFILE%\.config\agterm, so every install type shares
+them. On its first start it adds agent status hooks to the user's Claude Code and Codex
 settings, backing each file up first. agterm-win collects no data and makes no network connections of its own
 beyond the optional agterm-server install the user starts.

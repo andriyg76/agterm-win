@@ -73,22 +73,22 @@ public enum ControlResolve {
     }
 
     #if os(Windows)
-    /// windowsSocketRoot holds agterm-win's AF_UNIX sockets, its control socket and its zmx daemons'. It is out of
-    /// AppData, where an MSIX package's bind fails under file system virtualization, so a packaged agterm-win and an
-    /// unpackaged agtermctl meet on the same real path.
-    public static var windowsSocketRoot: String {
-        let home = ProcessInfo.processInfo.environment["USERPROFILE"] ?? NSTemporaryDirectory()
-        return "\(home)\\.local\\state\\agterm-win"
+    /// windowsSocketRoot holds agterm-win's AF_UNIX sockets, its control socket and its zmx daemons', and is its default
+    /// state directory. It is out of AppData, where an MSIX package's bind fails and its files are redirected under file
+    /// system virtualization, so every install type and an unpackaged agtermctl meet on the same real path.
+    public static var windowsSocketRoot: String { windowsStateRoot(environment: ProcessInfo.processInfo.environment) }
+
+    static func windowsStateRoot(environment: [String: String]) -> String {
+        "\(environment["USERPROFILE"] ?? NSTemporaryDirectory())\\.local\\state\\agterm-win"
     }
     #endif
 
     /// defaultStateDirectory is the state directory when `AGTERM_STATE_DIR` is unset:
-    /// `~/Library/Application Support/agterm` on macOS; on Linux, where agterm-server lives, `$XDG_STATE_HOME/agterm`
+    /// `~/Library/Application Support/agterm` on macOS; `%USERPROFILE%\.local\state\agterm-win` on Windows; on Linux, where agterm-server lives, `$XDG_STATE_HOME/agterm`
     /// (an absolute value only) or `~/.local/state/agterm`, so a bare ssh command finds it. `/tmp/agterm` with no HOME.
     public static func defaultStateDirectory(environment: [String: String]) -> String {
         #if os(Windows)
-        // agterm-win's own state directory, so a CLI started in one of its sessions finds the window's socket
-        return environment["LOCALAPPDATA"].map { ($0 as NSString).appendingPathComponent("agterm-win") } ?? "agterm-win"
+        return windowsStateRoot(environment: environment)
         #elseif os(Linux)
         if let state = environment["XDG_STATE_HOME"], state.hasPrefix("/") {
             return (state as NSString).appendingPathComponent("agterm")

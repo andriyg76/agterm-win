@@ -16,8 +16,12 @@ import agtermCore
 // AGTERM_WIN_STATE_DIR isolates a test or second instance; AGTERM_WIN_TEST_SCREEN makes a command window write its
 // terminal text there when the program exits, then close.
 private let environment = ProcessInfo.processInfo.environment
-private let stateDirectory = environment["AGTERM_WIN_STATE_DIR"].map { URL(fileURLWithPath: $0) }
-    ?? URL(fileURLWithPath: environment["LOCALAPPDATA"] ?? ".").appendingPathComponent("agterm-win")
+private let isolatedState = environment["AGTERM_WIN_STATE_DIR"].map { URL(fileURLWithPath: $0) }
+private let stateDirectory = isolatedState ?? URL(fileURLWithPath: ControlResolve.defaultStateDirectory(environment: environment))
+/// legacyStateDirectory is where 0.44.1.11 and earlier kept the state an isolated instance keeps where it is.
+let legacyStateDirectory = isolatedState ?? URL(fileURLWithPath: environment["LOCALAPPDATA"] ?? ".").appendingPathComponent("agterm-win")
+private let configDirectory = ConfigPaths.configDirectory(setting: nil, stateDir: isolatedState?.path,
+                                                          home: FileManager.default.homeDirectoryForCurrentUser)
 private let logURL = stateDirectory.appendingPathComponent("agterm-win.log")
 private let logLock = NSLock()
 
@@ -99,10 +103,10 @@ private func installAgentHooks(version: String) {
 
 MainActor.assumeIsolated {
     try? FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+    let migrated = StateMigration.run(from: legacyStateDirectory, state: stateDirectory, config: configDirectory)
     nt_install_crash_log(Array(stateDirectory.appendingPathComponent("crash.log").path.utf16) + [0])
     log("agterm-win starting on \(UpdateCheck.hostName)")
-    let configDirectory = ConfigPaths.configDirectory(setting: nil, stateDir: stateDirectory.path,
-                                                      home: FileManager.default.homeDirectoryForCurrentUser)
+    migrated.forEach(log)
     Keys.load(configDirectory: configDirectory)
     RemoteCommands.use(configDirectory: configDirectory) { diagnostics in
         for diagnostic in diagnostics { log("remote.properties line \(diagnostic.line): \(diagnostic.message)") }
