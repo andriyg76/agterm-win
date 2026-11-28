@@ -1,16 +1,20 @@
-# Contributing to agterm
+# Contributing to agterm-win
 
 ## Before you start
 
-If this is your first pull request to agterm, open a [Discussion](https://github.com/umputun/agterm/discussions) describing what you plan to build and why, then wait for a reply before writing code. Some ideas do not fit the project's direction, and finding that out early costs less than finding it out after a finished PR.
+Report Windows bugs and propose Windows port changes in the [agterm-win issue tracker](https://github.com/andriyg76/agterm-win/issues). Use [upstream agterm Discussions](https://github.com/umputun/agterm/discussions) to discuss changes to upstream behavior.
 
 Check that what you want does not already exist: agterm carries a broad control API, custom commands you bind yourself in `keymap.conf`, and six Settings tabs, so a lot is reachable without new code. Look at `agtermctl --help`, the [README](README.md), [agterm.com/docs](https://agterm.com/docs), and the bundled agent skill under `plugins/agterm/skills/agterm/` before proposing anything.
-
-Discussions are for ideas, questions, and anything open-ended. Issues are for concrete bugs and for features already agreed in a Discussion.
 
 ## Windows parity review
 
 Every agterm-win change to an option, command, or user-facing feature requires an upstream parity check before implementation and a recorded result before merge. Follow the [upstream parity requirements](AGENTS.md).
+
+## Windows development
+
+The Windows app lives in `agterm-windows/` and builds with Swift Package Manager. The [Windows CI workflow](.github/workflows/windows.yml) specifies the Swift and Visual Studio toolchains and the dependency-fetch and build commands for x64 and ARM64.
+
+See the [integration test guide](agterm-windows/tests/integration/README.md) for running the staged app on an interactive Windows desktop and the [packaging guide](agterm-windows/packaging/README.md) for release builds.
 
 ## Is it worth it?
 
@@ -21,7 +25,7 @@ Weigh what a feature adds against the code it brings with it.
 - **Does it change what agterm is?** It is a terminal with a two-level workspace to session sidebar. It is not a multiplexer, not a session manager for other tools, not an IDE. PRs pulling it in those directions will be closed.
 - **Is the code proportional to the value?** Several hundred lines for something a `keymap.conf` custom command already covers is a hard sell. Keep it small.
 
-## Development setup
+## macOS development setup
 
 Building needs macOS 14 or later, Xcode 26 with `xcodegen` on `PATH`, and Homebrew. `xcodegen` is not installed for you and nothing checks for it, but `make build`, `make run`, `make release` and `make test-app` all call it, so install it first (`brew install xcodegen`). Run the one-time setup next:
 
