@@ -12,9 +12,9 @@ Every item follows upstream agterm's behavior; see the [upstream parity rule](..
 
 ## Shipped
 
-- Native Win32 app for x64 and ARM64 with workspaces, sessions, splits, scratch, palettes, keymap and settings.
+- Native Win32 app for x64 and ARM64 with workspaces, sessions, splits, scratch, palettes, pick and ask dialogs, keymap and settings.
 - Launch profiles: Windows PowerShell, PowerShell 7, Command Prompt, Git Bash, WSL distributions, and user profiles in `profiles.properties`.
-- WSL agterm-server: start, install and attach from the sidebar.
+- WSL agterm-server: start, install and attach from the sidebar, with each session's split and scratch.
 - `agtermctl` with the upstream control protocol, and agent status for Claude Code and Codex.
 - Distribution: Microsoft Store, GitHub Releases installer and portable ZIP.
 

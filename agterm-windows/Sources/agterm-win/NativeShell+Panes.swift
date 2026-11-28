@@ -13,7 +13,7 @@ extension NativeShell {
     func local(_ id: Foundation.UUID?) -> LocalSession? { locals.first { $0.id == id } }
 
     /// canSplit is whether `id` takes a split and a scratch: a local session; a server session's panes are not shown here.
-    func canSplit(_ id: Foundation.UUID) -> Bool { locals.contains { $0.id == id } }
+    func canSplit(_ id: Foundation.UUID) -> Bool { locals.contains { $0.id == id } || id == running && serverRowInView != nil }
 
     /// sessionArea is the terminal area beside the sidebar and between the title bar and the notice bar, which a
     /// session's panes share.
@@ -26,8 +26,11 @@ extension NativeShell {
 
     var viewState: NativeMenu.View {
         let session = local(selected)
-        return NativeMenu.View(canSplit: session != nil && dashboard == nil, hasSplit: session?.splitTerminal != nil,
-                               scratchShown: session?.scratchShown == true, quickShown: quickShown, canDashboard: !locals.isEmpty,
+        let served = serverRowInView != nil
+        return NativeMenu.View(canSplit: (session != nil || served) && dashboard == nil,
+                               hasSplit: session?.splitTerminal != nil || served && serverSplit != nil,
+                               scratchShown: session?.scratchShown == true || served && serverScratchShown, quickShown: quickShown,
+                               canDashboard: !locals.isEmpty,
                                dashboardOpen: dashboard != nil, canToggleOverlay: selectedOverlayHidden != nil,
                                overlayShown: selectedOverlayHidden == false, sidebarVisible: settings.sidebarVisible)
     }
@@ -46,7 +49,7 @@ extension NativeShell {
         switch button {
         case .sidebar: settings.sidebarVisible
         case .scratch: viewState.scratchShown
-        case .split: local(selected)?.split?.shown == true
+        case .split: local(selected)?.split?.shown == true || serverRowInView != nil && serverSplit?.shown == true
         case .overlays: selectedOverlayHidden == true
         case .dashboard: viewState.dashboardOpen
         case .quick: viewState.quickShown
@@ -86,24 +89,21 @@ extension NativeShell {
             placeDashboard(dashboard, in: area)
         } else {
             let localInView = local(selected) != nil
-            for terminal in remoteTerminals {
-                terminal.move(x: area.x, y: area.y, width: area.width, height: area.height)
-                show(terminal, terminal === remoteTerminal && !localInView)
-            }
+            placeServerPanes(in: area, inView: !localInView)
             for session in locals {
                 let inView = session.id == selected
                 let covered = session.scratchShown && session.scratch != nil
                 let layout = PaneLayout(area: area, split: session.splitTerminal == nil ? nil : session.split, divider: dividerThickness)
-                place(session.terminal, layout.primary, shown: inView && !covered)
-                if let split = session.splitTerminal { place(split, layout.split, shown: inView && !covered) }
-                if let scratch = session.scratch { place(scratch, area, shown: inView && covered) }
+                placePane(session.terminal, layout.primary, shown: inView && !covered)
+                if let split = session.splitTerminal { placePane(split, layout.split, shown: inView && !covered) }
+                if let scratch = session.scratch { placePane(scratch, area, shown: inView && covered) }
             }
         }
         placeOverlays()
         invalidateTitleBar()
     }
 
-    private func place(_ terminal: NativeTerminal, _ rect: Rect?, shown: Bool) {
+    func placePane(_ terminal: NativeTerminal, _ rect: Rect?, shown: Bool) {
         if let rect { terminal.move(x: rect.x, y: rect.y, width: rect.width, height: rect.height) }
         show(terminal, shown && rect != nil)
     }
@@ -116,117 +116,96 @@ extension NativeShell {
 
     /// splitKey is a split key or button: over a shown scratch it hides the scratch, else it toggles the split on `axis`.
     func splitKey(_ axis: SplitAxis?) {
-        guard let selected, let session = local(selected) else { return }
+        guard let selected else { return }
+        if let row = serverRowInView, selected == running {
+            sendServerPane(row.scratchActive ? .setScratch(selected, shown: false) : .setSplit(selected, shown: !row.isSplit, axis: axis?.rawValue))
+            return
+        }
+        guard let session = local(selected) else { return }
         if session.scratchShown {
             setScratch(selected, shown: false, command: nil)
             return
         }
-        if let next = NativeSplit.next(session.splitTerminal == nil ? nil : session.split, mode: .toggle, axis: axis ?? session.split?.axis ?? .leftRight) { setSplit(selected, next) }
+        localStore.toggleSplit(selected, axis: axis)
+        panesChanged(selected)
     }
 
     func focusPaneKey(split: Bool) {
-        guard let selected, var layout = local(selected)?.split, local(selected)?.splitTerminal != nil else { return }
-        layout.focused = split
-        setSplit(selected, layout)
+        guard let selected, let row = local(selected)?.stored ?? serverRowInView, row.hasSplit else { return }
+        row.splitFocused = split
+        panesChanged(selected)
     }
 
-    /// setSplit gives the session `split`, starting its second shell in the primary pane's folder when it has none.
-    func setSplit(_ id: Foundation.UUID, _ split: NativeSplit) {
-        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
-        let hadFocus = hasFocus(id)
-        if locals[index].splitTerminal == nil {
-            addSplit(index, split, directory: locals[index].directory)
-        } else {
-            locals[index].split = split
-            placeSessions()
+    /// panesChanged shows the session's panes as its store session has them, starting a split's shell it lacks.
+    func panesChanged(_ id: Foundation.UUID) {
+        guard let session = local(id) else {
+            guard id == running else { return }
+            let hadFocus = hasFocus(id)
+            syncServerPanes()
+            rebuild()
+            if hadFocus || id == selected && GetFocus() != nil { focus() }
+            return
         }
+        let hadFocus = hasFocus(id)
+        if session.stored.hasSplit, session.splitTerminal == nil { startSplitPane(id) } else { placeSessions() }
         rebuild()
         if hadFocus || id == selected && GetFocus() != nil { focus() }
     }
 
-    func restoreSplit(_ id: Foundation.UUID, _ split: NativeSplit, directory: String?) {
-        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
-        addSplit(index, split, directory: directory ?? locals[index].directory)
-    }
-
-    private func addSplit(_ index: Int, _ split: NativeSplit, directory: String?) {
-        let id = locals[index].id
+    /// startSplitPane starts the shell of a split the store session has and no terminal shows yet, in its saved folder
+    /// or else the primary pane's.
+    func startSplitPane(_ id: Foundation.UUID) {
+        guard let session = local(id) else { return }
+        let stored = session.stored
         let terminal = makeTerminal()
         wirePane(terminal, of: id)
-        locals[index].split = split
-        locals[index].splitTerminal = terminal
-        locals[index].splitDirectory = directory
+        stored.splitSurface = terminal
         // placed first, so the shell starts at its pane's grid
         placeSessions()
-        // a restored split keeps the identity its daemon is named from; a new one gets its own, as on macOS
-        let stored = localStore.session(withID: id)
-        if let stored, stored.splitPaneIdentity == nil {
+        // every split-creating path mints this before exposing the pane; a split saved before that rule lacks one
+        if stored.splitPaneIdentity == nil {
             stored.splitPaneIdentity = UUID()
-            mirror(locals[index])
             localStore.save()
         }
-        locals[index].splitBackedByZmx = startPane(terminal, commandLine: locals[index].commandLine, directory: existingFolder(directory),
-                                                   environment: sessionEnvironment(id, pane: .right), paneIdentity: stored?.splitPaneIdentity)
-        log("native shell: split \(split.axisName) in [\(id)]")
+        startPane(terminal, commandLine: session.commandLine, directory: existingFolder(stored.splitCwd ?? stored.initialSplitCwd ?? session.directory),
+                  environment: sessionEnvironment(id, pane: .right), paneIdentity: stored.splitPaneIdentity)
+        log("native shell: split \(stored.splitAxis.rawValue) in [\(id)]")
         if dashboard != nil { dashboardSessionsChanged() }
     }
 
     func closeSplit(_ id: Foundation.UUID) {
-        guard let index = locals.firstIndex(where: { $0.id == id }), let terminal = locals[index].splitTerminal else { return }
+        if id == running, serverRowInView?.hasSplit == true { return sendServerPane(.closeSplit(id)) }
+        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].splitTerminal != nil else { return }
         let hadFocus = hasFocus(id)
-        locals[index].split = nil
-        locals[index].splitTerminal = nil
-        locals[index].splitTitle = nil
-        locals[index].splitDirectory = nil
-        // closing a split ends its daemon, as a Mac split close finalizes its pane
-        if let stored = localStore.session(withID: id), let split = stored.splitPaneIdentity {
-            if locals[index].splitBackedByZmx { zmxClient.kill(paneIdentities: [split]) }
-            stored.splitPaneIdentity = nil
-            mirror(locals[index])
-            localStore.save()
-        }
-        locals[index].splitBackedByZmx = false
+        localStore.closeSplit(id)
         locals[index].activity.paneEnded(.right)
-        retire(terminal)
-        placeSessions()
-        rebuild()
-        if dashboard != nil { dashboardSessionsChanged() }
-        if hadFocus { focus() }
+        panesLeft(id, hadFocus: hadFocus)
     }
 
     func swapPanes(_ id: Foundation.UUID) {
-        guard let index = locals.firstIndex(where: { $0.id == id }), let split = locals[index].splitTerminal else { return }
-        var session = locals[index]
-        (session.terminal, session.splitTerminal) = (split, session.terminal)
-        (session.programTitle, session.splitTitle) = (session.splitTitle, session.programTitle)
-        (session.backedByZmx, session.splitBackedByZmx) = (session.splitBackedByZmx, session.backedByZmx)
-        // the daemon names follow their terminals, as `AppStore.swapPanes` moves the identities
-        if let stored = localStore.session(withID: id), let splitIdentity = stored.splitPaneIdentity {
-            (stored.paneIdentity, stored.splitPaneIdentity) = (splitIdentity, stored.paneIdentity)
-            localStore.save()
-        }
-        let directory = session.directory
-        session.directory = session.splitDirectory ?? directory
-        session.splitDirectory = directory
-        session.split?.focused.toggle()
-        session.activity.swapped()
-        locals[index] = session
+        if id == running, serverRowInView?.hasSplit == true { return sendServerPane(.swap(id)) }
+        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].splitTerminal != nil,
+              localStore.swapPanes(id) == nil else { return }
+        locals[index].activity.swapped()
         placeSessions()
         rebuild()
     }
 
     /// paneFocused follows a click into the other pane of a shown split.
     private func paneFocused(_ id: Foundation.UUID, _ terminal: NativeTerminal) {
-        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].splitTerminal != nil,
-              let focused = locals[index].split?.focused else { return }
-        let inSplit = terminal === locals[index].splitTerminal
-        guard inSplit || terminal === locals[index].terminal, inSplit != focused else { return }
-        locals[index].split?.focused = inSplit
+        guard let session = local(id) else { return }
+        let covered: OverlayPane? = terminal === session.splitTerminal ? .right : terminal === session.terminal ? .left : nil
+        if session.stored.askCovers(covered ?? .left), covered != nil || session.stored.askPaneIdentity == nil { paneFocusedUnderAsk(id) }
+        guard session.splitTerminal != nil else { return }
+        let inSplit = terminal === session.splitTerminal
+        guard inSplit || terminal === session.terminal, inSplit != session.stored.splitFocused else { return }
+        session.stored.splitFocused = inSplit
         rebuild()
     }
 
     /// paneExited closes the pane whose program ended: a split or scratch goes; a primary pane with a split hands its
-    /// place to the split, as a Mac promotes it; a lone primary pane stays, exited, to restart.
+    /// place to the split, as a Mac promotes it; a lone primary pane stays, exited, to restart, where a Mac closes the
+    /// session: Windows has no undo-close to bring it back.
     private func paneExited(_ id: Foundation.UUID, _ terminal: NativeTerminal) {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         if terminal === locals[index].scratch {
@@ -235,18 +214,21 @@ extension NativeShell {
             closeSplit(id)
         } else if terminal === locals[index].terminal, locals[index].splitTerminal != nil {
             let hadFocus = hasFocus(id)
-            swapPanes(id)
-            closeSplit(id)
-            if hadFocus { focus() }
+            localStore.closePrimaryPane(id)
+            locals[index].activity.swapped()
+            locals[index].activity.paneEnded(.right)
+            panesLeft(id, hadFocus: hadFocus)
         } else if terminal === locals[index].terminal {
             localExited(id)
         }
     }
 
-    /// retire destroys a terminal once the message that ended it has returned.
-    private func retire(_ terminal: NativeTerminal) {
-        ShowWindow(terminal.window, SW_HIDE)
-        DispatchQueue.main.async { if let window = terminal.window { DestroyWindow(window) } }
+    /// panesLeft shows what is left of a session whose pane closed.
+    private func panesLeft(_ id: Foundation.UUID, hadFocus: Bool) {
+        placeSessions()
+        rebuild()
+        if dashboard != nil { dashboardSessionsChanged() }
+        if hadFocus { focus() }
     }
 
     private func existingFolder(_ path: String?) -> String? {
@@ -263,7 +245,11 @@ extension NativeShell {
 
     /// selectedLayout is the selected session's panes while its split is shown and nothing covers them.
     private var selectedLayout: (id: Foundation.UUID, split: NativeSplit, layout: PaneLayout)? {
-        guard dashboard == nil, let session = local(selected), session.splitTerminal != nil, let split = session.split, split.shown,
+        guard dashboard == nil, let selected else { return nil }
+        if serverRowInView != nil, let split = serverSplit, split.shown, !serverScratchShown, visibleTerminal === serverOnScreen {
+            return (selected, split, PaneLayout(area: sessionArea, split: split, divider: dividerThickness))
+        }
+        guard let session = local(selected), session.splitTerminal != nil, let split = session.split, split.shown,
               !session.scratchShown, session.overlay.map({ $0.state.hidden }) != false else { return nil }
         return (session.id, split, PaneLayout(area: sessionArea, split: split, divider: dividerThickness))
     }
@@ -285,9 +271,8 @@ extension NativeShell {
         }
         guard let shown = selectedLayout, shown.layout.onDivider(x: x, y: y, slop: scaled(2)) else { return false }
         if double {
-            var even = shown.split
-            even.ratio = NativeSplit.defaultRatio
-            setSplit(shown.id, even)
+            paneRow(shown.id)?.store.applySplitRatio(NativeSplit.defaultRatio, forSession: shown.id)
+            panesChanged(shown.id)
         } else {
             dragging = (shown.id, sessionArea)
             SetCapture(window)
@@ -300,9 +285,10 @@ extension NativeShell {
             sidebarResizeDrag(x: point(lParam).x)
             return true
         }
-        guard let dragging, let index = locals.firstIndex(where: { $0.id == dragging.id }), let axis = locals[index].split?.axis else { return false }
+        guard let dragging, let row = paneRow(dragging.id)?.row, row.hasSplit else { return false }
         let (x, y) = point(lParam)
-        locals[index].split?.ratio = PaneLayout.ratio(at: x, y, area: dragging.area, axis: axis, divider: dividerThickness)
+        // saved once, when the drag ends
+        row.splitRatio = PaneLayout.ratio(at: x, y, area: dragging.area, axis: row.splitAxis, divider: dividerThickness)
         placeSessions()
         return true
     }
@@ -315,9 +301,10 @@ extension NativeShell {
             ReleaseCapture()
             return true
         }
-        guard dragging != nil else { return false }
+        guard let ended = dragging else { return false }
         dragging = nil
         ReleaseCapture()
+        if let pane = paneRow(ended.id), let ratio = pane.row.splitRatio { pane.store.applySplitRatio(ratio, forSession: ended.id) }
         return true
     }
 
@@ -354,19 +341,18 @@ extension NativeShell {
     /// setScratch shows or hides the session's scratch, starting its shell in the session's folder, or `command` beside the
     /// session as an overlay's runs, when it has none; a `command` replaces a running one.
     func setScratch(_ id: Foundation.UUID, shown: Bool, command: String?) {
-        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
+        if id == running, serverRowInView != nil { return sendServerPane(.setScratch(id, shown: shown, command: command)) }
+        guard let session = local(id) else { return }
         let hadFocus = hasFocus(id)
-        if command != nil, let running = locals[index].scratch {
-            locals[index].scratch = nil
-            retire(running)
-        }
-        locals[index].scratchShown = shown
-        if shown, locals[index].scratch == nil {
+        let stored = session.stored
+        let wasShown = stored.scratchActive
+        if command != nil, session.scratch != nil { localStore.replaceScratch(id, emitVisibility: false) }
+        if stored.scratchActive != shown { localStore.toggleScratch(id, emitVisibility: shown != wasShown) }
+        if shown, session.scratch == nil {
             let terminal = makeTerminal()
             wirePane(terminal, of: id)
-            let session = locals[index]
-            locals[index].scratch = terminal
-            locals[index].scratchDirectory = session.directory
+            stored.scratchSurface = terminal
+            stored.scratchCwd = session.directory
             placeSessions()
             if let command {
                 let launch = NativeOverlay.launch(command, sessionCommandLine: session.commandLine, cwd: nil, directory: session.directory)
@@ -384,12 +370,11 @@ extension NativeShell {
     }
 
     private func dropScratch(_ index: Int) {
-        guard let scratch = locals[index].scratch else { return }
-        let hadFocus = hasFocus(locals[index].id)
-        locals[index].scratch = nil
-        locals[index].scratchShown = false
+        let id = locals[index].id
+        guard locals[index].scratch != nil else { return }
+        let hadFocus = hasFocus(id)
+        localStore.closeScratch(id)
         locals[index].activity.paneEnded(.scratch)
-        retire(scratch)
         placeSessions()
         if hadFocus { focus() }
     }
@@ -459,7 +444,7 @@ extension NativeShell {
         let cells = NativeDashboard.cells(in: area, count: dashboard.members.count, gap: scaled(6), caption: scaled(22))
         for (index, member) in dashboard.members.enumerated() where cells.indices.contains(index) {
             guard let terminal = memberTerminal(member) else { continue }
-            place(terminal, cells[index].terminal, shown: true)
+            placePane(terminal, cells[index].terminal, shown: true)
             guard captions.indices.contains(index), let session = local(member.session) else { continue }
             let strip = cells[index].caption
             let text = " " + NativeDashboard.caption(name: session.name, member: member, split: session.splitTerminal == nil ? nil : session.split?.axis)
@@ -511,9 +496,9 @@ extension NativeShell {
     private func jump(to member: DashboardMember) {
         closeDashboard(refocus: false)
         select(member.session)
-        if var split = local(member.session)?.split, local(member.session)?.splitTerminal != nil {
-            split.focused = member.surface == .split
-            setSplit(member.session, split)
+        if let session = local(member.session), session.stored.hasSplit {
+            session.stored.splitFocused = member.surface == .split
+            panesChanged(member.session)
         }
         focus()
     }

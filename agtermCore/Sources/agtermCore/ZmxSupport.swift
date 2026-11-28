@@ -328,9 +328,9 @@ public enum ZmxSupport {
 
     public static func socketDirectory(forStateDirectory stateDirectory: String) -> String {
         #if os(Windows)
-        // short because zmx binds AF_UNIX sockets, whose paths stop at 107 bytes with the daemon name;
-        // `localNamePrefix` is short for the same reason
-        "\(ControlResolve.windowsSocketRoot)\\s\\\(stateHash(stateDirectory))"
+        // zmx binds AF_UNIX sockets, whose paths stop at 107 bytes with the daemon name, so the parts after the profile
+        // folder are short opaque ids: a profile folder name of up to 46 characters fits
+        "\(ControlResolve.windowsSocketRoot)\\z\\\(opaqueID(stateHash(stateDirectory), length: 8))"
         #else
         "/tmp/agterm-zmx-\(stateHash(stateDirectory))"
         #endif
@@ -348,24 +348,31 @@ public enum ZmxSupport {
         return stableHash(canonical)
     }
 
-    /// agterm-win's own socket directory takes a shorter prefix, since every byte counts toward the AF_UNIX path;
-    /// agterm-server's daemons keep `namePrefix`.
     #if os(Windows)
-    static let localNamePrefix = "agt-"
-    #else
-    static let localNamePrefix = namePrefix
+    /// legacyWindowsSocketDirectory is where agterm-win 0.44.1.11 and earlier kept Live daemons; a later version ends them.
+    public static func legacyWindowsSocketDirectory(forStateDirectory stateDirectory: String) -> String {
+        "\(stateDirectory)\\zmx\\\(stateHash(stateDirectory))"
+    }
+
     #endif
+
+    static let localIDLength = 16
 
     public static func daemonName(for paneIdentity: UUID) -> String {
         namePrefix + compactUUID(paneIdentity)
     }
 
-    /// localDaemonName names a pane's daemon on this host.
+    /// localDaemonName names a pane's daemon on this host. agterm-win's is opaque, as short as its socket path needs, and
+    /// alone in its state directory's socket folder; every other host's is `daemonName(for:)`.
     public static func localDaemonName(for paneIdentity: UUID) -> String {
-        localNamePrefix + compactUUID(paneIdentity)
+        #if os(Windows)
+        opaqueID(compactUUID(paneIdentity), length: localIDLength)
+        #else
+        daemonName(for: paneIdentity)
+        #endif
     }
 
-    /// The pane identity `daemonName(for:)` or `localDaemonName(for:)` built `name` from, nil for any other name.
+    /// The pane identity `daemonName(for:)` built `name` from, nil for any other name, agterm-win's opaque local ones included.
     public static func paneIdentity(fromDaemonName name: String) -> UUID? {
         guard let body = daemonNameBody(name) else { return nil }
         let hex = Array(body)
@@ -377,12 +384,21 @@ public enum ZmxSupport {
     /// A prefix test is not enough — the namespace is a shared /tmp directory, so a user session called
     /// `agterm-notes` would otherwise read as an unclaimed app daemon and be pruned.
     public static func isDaemonName(_ name: String) -> Bool {
-        daemonNameBody(name) != nil
+        #if os(Windows)
+        if isLocalID(name) { return true }
+        #endif
+        return daemonNameBody(name) != nil
     }
 
+    static func isLocalID(_ name: String) -> Bool {
+        name.utf8.count == localIDLength && name.utf8.allSatisfy(base58Digits.contains)
+    }
+
+    private static let base58Digits = Set(base58Alphabet)
+
     private static func daemonNameBody(_ name: String) -> Substring? {
-        guard let prefix = [namePrefix, localNamePrefix].first(where: name.hasPrefix) else { return nil }
-        let body = name.dropFirst(prefix.count)
+        guard name.hasPrefix(namePrefix) else { return nil }
+        let body = name.dropFirst(namePrefix.count)
         // ASCII bytes, not `Character.isHexDigit`, which is Unicode-aware: 32 fullwidth digits satisfy it
         // and are neither uppercase nor anything `daemonName(for:)` can emit.
         let valid = body.utf8.count == 32 && body.utf8.allSatisfy {

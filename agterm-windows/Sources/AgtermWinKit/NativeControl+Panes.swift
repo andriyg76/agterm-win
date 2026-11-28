@@ -1,11 +1,10 @@
 import Foundation
 import agtermCore
 
-/// A local session's split and scratch, the quick terminal and the dashboard, in the Mac's wording and reply shapes.
-/// agterm-server sessions are refused by name until their panes are shown here.
+/// A session's split and scratch, the quick terminal and the dashboard, in the Mac's wording and reply shapes.
+/// An agterm-server session's split, swap and scratch are the server's, as a Mac's remote window sends them; focus and
+/// ratio are this viewer's own, kept on the mirror's row.
 extension NativeControl {
-    public static let serverPanesRefusal = "split panes and scratch of agterm-server sessions are not shown on Windows yet"
-
     static func panes(_ request: ControlRequest, host: NativeControlHost) async -> ControlResponse {
         let args = request.args
         let id: UUID
@@ -13,8 +12,21 @@ extension NativeControl {
         case .failure(let refusal): return failure(refusal.message)
         case .success(let resolved): id = resolved
         }
-        if host.isServerSession(id) { return failure(serverPanesRefusal) }
-        guard let local = host.localSessions.first(where: { $0.id == id }) else { return failure("no such session: \(id.uuidString)") }
+        let store: AppStore
+        if case .remote(let window, let remote) = owner(ofSession: id, host: host) {
+            if RemoteOperation.structuralCommands.contains(request.cmd) {
+                var request = request
+                request.target = id.uuidString
+                switch RemoteOperation.parse(request, in: remote) {
+                case .refused(let response): return response
+                case .operation(let operation, let select): return await host.performRemote(operation, window: window, select: select)
+                }
+            }
+            store = remote
+        } else {
+            store = host.localStore
+        }
+        guard let session = store.session(withID: id) else { return failure("no such session: \(id.uuidString)") }
         let done = ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
         switch request.cmd {
         case .sessionSplit:
@@ -24,38 +36,45 @@ extension NativeControl {
                 axis = parsed
             }
             guard let mode = ControlToggleMode.parse(args?.mode) else { return failure("invalid split mode: \(args?.mode ?? "toggle")") }
-            if let next = NativeSplit.next(local.split, mode: mode, axis: axis), next != local.split { host.setSplit(id, next) }
+            switch mode {
+            case .on: store.setSplitVisibility(id, shown: true, axis: axis)
+            case .off: store.setSplitVisibility(id, shown: false)
+            case .toggle: store.toggleSplit(id, axis: axis)
+            }
+            host.panesChanged(id)
             return done
         case .sessionSplitClose:
-            if local.split != nil { host.closeSplit(id) }
+            if session.hasSplit { host.closeSplit(id) }
             return done
         case .sessionScratch:
             guard let mode = ControlToggleMode.parse(args?.mode) else { return failure("invalid scratch mode: \(args?.mode ?? "toggle")") }
-            let want = mode.desiredValue(current: local.scratch)
+            let want = mode.desiredValue(current: session.scratchActive)
             let command = args?.command.flatMap { $0.isEmpty ? nil : $0 }
             if want, args?.follow == true, host.selectedSession != id { host.selectSession(id) }
-            if want != local.scratch || want && command != nil { host.setScratch(id, shown: want, command: want ? command : nil) }
+            if want != session.scratchActive || want && command != nil { host.setScratch(id, shown: want, command: want ? command : nil) }
             return done
         default:
             break
         }
-        guard var split = local.split else { return failure("session has no split") }
+        guard session.hasSplit else { return failure("session has no split") }
         switch request.cmd {
         case .sessionSwap:
             host.swapPanes(id)
         case .sessionFocus:
             guard let pane = ControlPaneFocusMode.parse(args?.pane) else { return failure("invalid pane: \(args?.pane ?? "other")") }
-            split.focused = pane.wantsSplit(currentSplitFocused: split.focused)
-            host.setSplit(id, split)
+            session.splitFocused = pane.wantsSplit(currentSplitFocused: session.splitFocused)
+            host.panesChanged(id)
         case .sessionResize:
+            let ratio: Double
             switch (args?.ratio, args?.ratioDelta) {
             case (nil, nil): return failure("session.resize requires --split-ratio, --grow-left, or --grow-right")
             case (.some, .some): return failure("session.resize: --split-ratio is mutually exclusive with --grow-left/--grow-right")
-            case (.some(let ratio), nil): split.ratio = NativeSplit.clamp(ratio)
-            case (nil, .some(let delta)): split.ratio = NativeSplit.clamp(split.ratio + delta)
+            case (.some(let value), nil): ratio = value
+            case (nil, .some(let delta)): ratio = (session.splitRatio ?? NativeSplit.defaultRatio) + delta
             }
-            host.setSplit(id, split)
-            return ControlResponse(ok: true, result: ControlResult(id: id.uuidString, ratio: split.ratio))
+            let applied = store.applySplitRatio(ratio, forSession: id)
+            host.panesChanged(id)
+            return ControlResponse(ok: true, result: ControlResult(id: id.uuidString, ratio: applied))
         default:
             break
         }
@@ -101,7 +120,7 @@ extension NativeControl {
         if fontSize != nil, autoSize { return failure("dashboard: --font-size is mutually exclusive with --auto-size") }
         if let fontSize, !fontSize.isFinite || fontSize <= 0 { return failure("dashboard --font-size must be a positive number") }
         let fontMode: DashboardFontMode = autoSize ? .auto : (fontSize.map(DashboardFontMode.fixed) ?? .untouched)
-        let splits = Set(host.localSessions.filter { $0.split != nil }.map(\.id))
+        let splits = Set(host.localSessions.map(\.id).filter { host.localStore.session(withID: $0)?.hasSplit == true })
         let locals = Set(host.localSessions.map(\.id))
         var resolved: [NativeDashboard.Target] = []
         var unresolved: [String] = []

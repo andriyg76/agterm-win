@@ -28,7 +28,13 @@ function Connect-OverlayServerCatalogSession {
     Invoke-Ctl $state @("session", "select", "--target", $id) | Out-Null
     $node = Wait-Until { Get-Node $state $id }
     if (-not $node) { return ,@("new server session $id is missing from tree") }
-    if ($node.presenters.presenter -ne $true) { $failures += "presenter is not true: $($node.presenters | ConvertTo-Json -Compress)" }
+    # `presenters` is the origin's count of its viewers; this window reads its own stream back as `presentation`
+    $presented = Wait-Until { $n = Get-Node $state $id; if ($n.presentation.state -eq "connected" -and $n.presentation.mode -eq "presenter") { $n } } 30
+    if (-not $presented) {
+        # a second viewer of the same server is granted mirror only; the gate needs a server no other agterm-win presents
+        $failures += "presentation is not a connected presenter: $((Get-Node $state $id).presentation | ConvertTo-Json -Compress)"
+        Invoke-Ctl $state @("session", "close", "--target", $id) | Out-Null
+    }
     if ($failures.Count) { return ,$failures }
     $id
 }

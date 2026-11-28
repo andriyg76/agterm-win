@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -131,6 +132,11 @@ int32_t nt_tree_blink(void *tree, int32_t dimmed);
 #define NT_FIND_CLOSE 0x8101
 void *nt_find_bar_create(void *parent, uint32_t dpi);
 void nt_find_bar_set_dpi(void *bar, uint32_t dpi);
+// nt_common_controls_activate activates the comctl32 6 context for creating themed controls, such as an EDIT that shows
+// a cue banner; on true, nt_common_controls_deactivate(cookie) ends it.
+bool nt_common_controls_activate(uintptr_t *cookie);
+void nt_common_controls_deactivate(uintptr_t cookie);
+
 // nt_ask_choice asks with one command button per entry of `buttons` and returns the picked one's index; the dialog
 // has no cancel, so it always returns one.
 int32_t nt_ask_choice(void *owner, const uint16_t *caption, const uint16_t *instruction, const uint16_t *content,
@@ -159,6 +165,8 @@ void nt_palette_set_dpi(void *palette, uint32_t dpi);
 // nt_palette_open clears the field, shows the panel at `left`, `top` (parent client pixels) and focuses it.
 void nt_palette_open(void *palette, const uint16_t *cue, int32_t left, int32_t top, int32_t width);
 void nt_palette_place(void *palette, int32_t left, int32_t top, int32_t width);
+// nt_palette_set_query puts `text` in the open palette's field, selected, so the first keystroke replaces it.
+void nt_palette_set_query(void *palette, const uint16_t *text);
 // nt_palette_set_rows replaces the list, highlighting `selection`; the panel's height follows, up to ten rows.
 void nt_palette_set_rows(void *palette, const nt_palette_row *rows, int32_t count, int32_t selection);
 int32_t nt_palette_query(void *palette, uint16_t *out, int32_t capacity);

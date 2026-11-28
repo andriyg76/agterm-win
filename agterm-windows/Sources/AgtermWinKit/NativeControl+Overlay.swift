@@ -18,8 +18,11 @@ extension NativeControl {
             let page = host.serverPageOverlay(for: id)
             slot = OverlaySlot(program: state.overlay, exitCode: state.exitCode, page: page?.page,
                                pageHidden: page?.hidden ?? false)
-        } else if let local = host.localSessions.first(where: { $0.id == id }) {
-            slot = OverlaySlot(program: local.overlay, exitCode: local.overlayExitCode, page: local.htmlOverlay, pageHidden: local.pageOverlayHidden)
+        } else if let session = host.localStore.session(withID: id) {
+            var program = session.programOverlayActive ? NativeOverlay(sizePercent: session.overlaySizePercent, wait: session.overlayWait) : nil
+            program?.hidden = session.overlayHidden
+            let page = session.htmlOverlayActive ? session.htmlOverlay : nil
+            slot = OverlaySlot(program: program, exitCode: session.overlayExitCode, page: page, pageHidden: page != nil && session.overlayHidden)
         } else {
             return failure("no such session: \(id.uuidString)")
         }

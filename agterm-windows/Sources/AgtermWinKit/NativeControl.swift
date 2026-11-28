@@ -80,8 +80,8 @@ public protocol NativeControlHost: AnyObject {
     /// overlayScreen and overlaySelection read the overlay's terminal, as `screen(of:)` reads the session's.
     func overlayScreen(of id: UUID) -> (lines: [String], rows: Int)?
     func overlaySelection(of id: UUID) -> String?
-    /// setSplit gives a local session `split`, starting its second shell when it has none.
-    func setSplit(_ id: UUID, _ split: NativeSplit)
+    /// panesChanged shows a local session's panes as its store session now has them, starting a split's shell it lacks.
+    func panesChanged(_ id: UUID)
     /// closeSplit ends a local session's split pane and whatever it runs.
     func closeSplit(_ id: UUID)
     /// swapPanes exchanges a split session's two terminals, focus following its terminal.
@@ -105,6 +105,14 @@ public protocol NativeControlHost: AnyObject {
     func setSidebarWidth(points: Double)
     func openDashboard(_ members: [DashboardMember], fontMode: DashboardFontMode)
     func closeDashboard()
+    /// pickController is the window modal slot, shared by picks and GUI asks.
+    var pickController: PickController { get }
+    /// interactionSession is the store session `id` names, a local one or a server catalog row, which holds its terminal ask.
+    func interactionSession(_ id: UUID) -> Session?
+    /// guiTargetShown is whether session `id` is on screen for a GUI ask: selected, with no dashboard over it.
+    func guiTargetShown(_ id: UUID) -> Bool
+    /// interactionsChanged shows the pick and asks as their slots now hold them, raising the window with `follow`.
+    func interactionsChanged(follow: Bool)
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -120,32 +128,15 @@ public enum NativeControl {
         public let unseen: Int
         public let cwd: String
         public let title: String?
-        /// overlay is the program overlay in the session's slot, nil while it is empty.
-        public var overlay: NativeOverlay?
-        /// overlayExitCode is how the last overlay's program exited, until another opens.
-        public var overlayExitCode: Int?
-        /// htmlOverlay is a page in the session-wide slot, nil while a program overlay is shown or the slot is empty.
-        public var htmlOverlay: HtmlOverlay?
-        /// pageOverlayHidden keeps a page running with the session in view.
-        public var pageOverlayHidden = false
-        /// pageOverlaySizePercent is the floating page panel's share, when a page overlay is open.
-        public var pageOverlaySizePercent: Int?
-        /// split is the session's second pane, nil without one.
-        public var split: NativeSplit?
-        public var splitCwd: String?
         /// backedByZmx is whether every pane runs under a Live sessions daemon, as a Mac session node reports it.
         public var backedByZmx = false
-        /// scratch is whether the scratch is shown; scratchRunning whether its shell runs, shown or not.
-        public var scratch = false
-        public var scratchRunning = false
-        public var scratchCwd: String?
         public var activity = AgentActivity()
         /// context is the title-bar context (`session.context`), info the sidebar info line (`session.info`).
         public var context: String?
         public var info: SessionInfo?
 
         public init(id: UUID, name: String, commandLine: String, exited: Bool, attention: Bool, unseen: Int = 0, cwd: String = "",
-                    title: String? = nil, overlay: NativeOverlay? = nil, overlayExitCode: Int? = nil, htmlOverlay: HtmlOverlay? = nil) {
+                    title: String? = nil) {
             self.id = id
             self.name = name
             self.commandLine = commandLine
@@ -154,9 +145,6 @@ public enum NativeControl {
             self.unseen = unseen
             self.cwd = cwd
             self.title = title
-            self.overlay = overlay
-            self.overlayExitCode = overlayExitCode
-            self.htmlOverlay = htmlOverlay
         }
     }
 
@@ -203,6 +191,9 @@ public enum NativeControl {
             }
         case .version:
             return ControlResponse(ok: true, result: ControlResult(app: AppIdentity(version: version)))
+        case _ where NativeStructure.interactionCommands.contains(request.cmd):
+            return await ControlDispatcher(actions: NativeStructure(store: host.localStore, interactions: host)).dispatch(request)
+                ?? failure("\(request.cmd.rawValue) is not supported on Windows")
         case .eventsRead:
             // the dispatcher parses the cursor, kinds and limit and refuses them as on a Mac
             return await ControlDispatcher(actions: NativeStructure(store: host.localStore, events: host.events)).dispatch(request)
@@ -333,8 +324,7 @@ public enum NativeControl {
         }
     }
 
-    /// withPane resolves the session and `--pane`; a server session takes no pane, since its split and scratch are not
-    /// shown here.
+    /// withPane resolves the session and `--pane`.
     private static func withPane(_ request: ControlRequest, host: NativeControlHost,
                                  _ body: (UUID, NativePane?) async -> ControlResponse) async -> ControlResponse {
         var pane: NativePane?
@@ -342,10 +332,7 @@ public enum NativeControl {
             guard let parsed = NativePane(controlName: name) else { return failure("invalid pane: \(name) (left|right|scratch)") }
             pane = parsed
         }
-        return await withSession(request.target, host: host) { id in
-            if pane != nil, host.isServerSession(id) { return failure(NativeControl.serverPanesRefusal) }
-            return await body(id, pane)
-        }
+        return await withSession(request.target, host: host) { await body($0, pane) }
     }
 
     static func failure(_ message: String) -> ControlResponse { ControlResponse(ok: false, error: message) }
@@ -472,7 +459,8 @@ public enum NativeControl {
         return ControlTree(workspaces: workspaces, sidebarVisible: host.sidebarVisible, sidebarMode: shape.sidebarMode,
                            flaggedOrder: shape.flaggedOrder, sidebarWidth: host.sidebarWidthPoints, workspaceFilter: shape.workspaceFilter, quickVisible: host.quickShown,
                            dashboardMembers: dashboard?.members.map(\.controlRef), dashboardHighlighted: dashboard?.highlighted?.controlRef,
-                           dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
+                           dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) },
+                           pickPending: host.pickController.pending?.id, askPending: host.pickController.pendingAsk?.id)
     }
 
     /// sessionNode is a local session as it runs here, with the store's flag, tint and companion fields.
@@ -480,20 +468,18 @@ public enum NativeControl {
         let indicator = local.activity.indicator
         let shown = indicator.status != .idle
         return ControlSessionNode(id: local.id.uuidString, name: local.name, cwd: local.cwd, title: local.title, active: shape.active,
-                           split: local.split?.shown == true, hasSplit: local.split != nil, backedByZmx: local.backedByZmx,
-                           splitAxis: local.split?.axisName, splitRatio: local.split?.ratio, splitFocused: local.split?.focused,
-                           overlay: local.overlay != nil || local.htmlOverlay != nil,
-                           overlaySizePercent: local.overlay?.sizePercent ?? local.pageOverlaySizePercent,
-                           scratch: local.scratch, flagged: shape.flagged, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
+                           split: shape.split, hasSplit: shape.hasSplit, backedByZmx: local.backedByZmx,
+                           splitAxis: shape.splitAxis, splitRatio: shape.splitRatio,
+                           splitFocused: shape.splitFocused, overlay: shape.overlay, overlaySizePercent: shape.overlaySizePercent,
+                           ask: shape.ask, pick: shape.pick, scratch: shape.scratch, flagged: shape.flagged, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
                            status: shown ? indicator.status.rawValue : nil, statusPane: shown ? indicator.statusPane?.rawValue : nil,
                            statusBlink: shown && indicator.blink ? true : nil, statusColor: shown ? indicator.color : nil,
                            statusShape: shown ? indicator.shape?.rawValue : nil,
                            statusChangedAt: local.activity.changedAt?.timeIntervalSince1970, activePanes: local.activity.activePanes,
                            unseen: local.unseen > 0 ? local.unseen : local.attention ? 1 : nil, fontSize: Double(host.fontPoints),
-                           context: local.context,
-                           splitCwd: local.split == nil ? nil : local.splitCwd, scratchCwd: local.scratchRunning ? local.scratchCwd : nil,
-                           htmlOverlays: local.htmlOverlay.map { [$0.controlNode(hidden: local.pageOverlayHidden)] },
-                           hiddenOverlays: local.pageOverlayHidden || local.overlay?.hidden == true ? ["session"] : nil,
+                           surfaces: shape.surfaces, realized: shape.realized, context: local.context,
+                           splitCwd: shape.splitCwd, scratchCwd: shape.scratchCwd,
+                           htmlOverlays: shape.htmlOverlays, hiddenOverlays: shape.hiddenOverlays,
                            tint: shape.tint, tintOn: shape.tintOn, parent: shape.parent, collapsed: shape.collapsed, info: local.info)
     }
 

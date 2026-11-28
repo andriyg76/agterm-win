@@ -3,13 +3,9 @@ import Foundation
 import Testing
 import agtermCore
 
-private final class Terminal {}
-
 @MainActor
 struct NativeEventsTests {
     private let run = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
-    private let primary = Terminal()
-    private let split = Terminal()
 
     private func store(_ events: NativeEvents, window: UUID = LocalWindow.id) -> AppStore {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("native-events-\(UUID().uuidString)")
@@ -27,10 +23,8 @@ struct NativeEventsTests {
         await read(events, store, ControlArgs(after: "0", run: run.uuidString, kinds: kinds, limit: 1_000)).result?.events?.items ?? []
     }
 
-    private func pane(_ status: AgentStatus = .idle, split splitShown: Bool = false, scratch: Bool = false,
-                      right: Bool = false) -> NativeEvents.Pane {
-        NativeEvents.Pane(indicator: AgentIndicator(status: status), splitShown: splitShown, scratchShown: scratch,
-                          focusedPane: right ? .right : .left, focusedTerminal: ObjectIdentifier(right ? split : primary))
+    private func status(_ id: UUID, _ status: AgentStatus = .idle) -> [(id: UUID, name: String, indicator: AgentIndicator)] {
+        [(id: id, name: "pwsh", indicator: AgentIndicator(status: status))]
     }
 
     @Test func aReadWithoutACursorAnchorsAtTheTail() async {
@@ -76,37 +70,32 @@ struct NativeEventsTests {
         #expect(notify.map(\.payload.title) == ["build"] && notify.map(\.payload.body) == ["done"])
     }
 
-    @Test func syncReportsStatusAndPanesAsTheyChange() async {
+    @Test func syncReportsStatusAsItChanges() async {
         let events = NativeEvents(ring: ControlEventRing(runID: run))
         let store = store(events)
         let id = store.addSession(toWorkspace: store.rootWorkspace!.id, cwd: "", command: "cmd.exe", select: false)!.id
         events.launched()
-        events.sync([(id: id, name: "pwsh", pane: pane())], store: store)
-        events.sync([(id: id, name: "pwsh", pane: pane(.completed))], store: store)
-        events.sync([(id: id, name: "pwsh", pane: pane(.completed, split: true, right: true))], store: store)
-        events.sync([(id: id, name: "pwsh", pane: pane(.completed, split: true, scratch: true, right: true))], store: store)
+        events.sync(status(id), store: store)
+        events.sync(status(id, .completed), store: store)
+        events.sync(status(id, .completed), store: store)
         let recorded = await items(events, store).filter { $0.kind != .appLaunched }
-        #expect(recorded.map(\.kind) == [.status, .paneSplit, .paneFocused, .paneScratch])
+        #expect(recorded.map(\.kind) == [.status])
         #expect(recorded[0].payload.status == "completed" && recorded[0].payload.previous == "idle" && recorded[0].payload.name == "pwsh")
         #expect(recorded[0].session == id.uuidString && recorded[0].workspace == store.rootWorkspace!.id.uuidString)
-        #expect(recorded[1].payload.status == "shown" && recorded[2].payload.pane == "right" && recorded[3].payload.status == "shown")
     }
 
-    @Test func aSwapAndANewOrGoneSessionRecordNothing() async {
+    @Test func aNewOrGoneSessionRecordsNothing() async {
         let events = NativeEvents(ring: ControlEventRing(runID: run))
         let store = store(events)
         let id = UUID()
         events.launched()
-        events.sync([(id: id, name: "pwsh", pane: pane(.active))], store: store)
-        let swapped = NativeEvents.Pane(indicator: AgentIndicator(status: .active), splitShown: false, scratchShown: false,
-                                        focusedPane: .right, focusedTerminal: ObjectIdentifier(primary))
-        events.sync([(id: id, name: "pwsh", pane: swapped)], store: store)
+        events.sync(status(id, .active), store: store)
         events.sync([], store: store)
-        events.sync([(id: id, name: "pwsh", pane: pane(.blocked))], store: store)
+        events.sync(status(id, .blocked), store: store)
         #expect(await items(events, store).map(\.kind) == [.appLaunched])
     }
 
-    @Test func theLocalStoresOwnStatusAndPaneEventsAreLeftToSync() async {
+    @Test func theLocalStoresStatusIsLeftToSyncAndItsPaneEventsAreRecorded() async {
         let events = NativeEvents(ring: ControlEventRing(runID: run))
         let local = store(events)
         let remoteWindow = NativeControl.remoteWindowID("Ubuntu")
@@ -116,8 +105,12 @@ struct NativeEventsTests {
         events.launched()
         local.setAgentIndicator(AgentIndicator(status: .completed), forSession: localID)
         remote.setAgentIndicator(AgentIndicator(status: .completed), forSession: remoteID)
+        local.setSplitVisibility(localID, shown: true)
+        local.toggleScratch(localID)
         let status = await items(events, local, kinds: ["status"])
         #expect(status.map(\.session) == [remoteID.uuidString] && status.map(\.window) == [remoteWindow.uuidString])
+        let panes = await items(events, local, kinds: ["pane.split", "pane.scratch"])
+        #expect(panes.map(\.kind) == [.paneSplit, .paneScratch] && panes.allSatisfy { $0.session == localID.uuidString })
     }
 
     @Test func pagingAndKindsFollowTheCursor() async {
@@ -125,9 +118,9 @@ struct NativeEventsTests {
         let store = store(events)
         let id = UUID()
         events.launched()
-        events.sync([(id: id, name: "pwsh", pane: pane())], store: store)
+        events.sync(status(id), store: store)
         for status in [AgentStatus.active, .blocked, .completed] {
-            events.sync([(id: id, name: "pwsh", pane: pane(status))], store: store)
+            events.sync(self.status(id, status), store: store)
         }
         let page = await read(events, store, ControlArgs(after: "0", run: run.uuidString, limit: 2)).result?.events
         #expect(page?.items.map(\.seq) == [1, 2] && page?.next == 2)
@@ -140,9 +133,9 @@ struct NativeEventsTests {
         let store = store(events)
         let id = UUID()
         events.launched()
-        events.sync([(id: id, name: "pwsh", pane: pane())], store: store)
+        events.sync(status(id), store: store)
         for status in [AgentStatus.active, .blocked, .completed] {
-            events.sync([(id: id, name: "pwsh", pane: pane(status))], store: store)
+            events.sync(self.status(id, status), store: store)
         }
         let anchor = ControlEventBatch(run: run, next: 4, items: [])
         let other = await read(events, store, ControlArgs(after: "1", run: UUID().uuidString))

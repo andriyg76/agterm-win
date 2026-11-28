@@ -13,42 +13,73 @@ private let shellWindowID = LocalWindow.id
 /// on `remote.properties` remotes, whose sessions share one terminal that attaches whichever is selected.
 @MainActor
 final class NativeShell {
-    /// LocalSession is what runs in a session of `localStore`, under the store session's id.
-    struct LocalSession {
-        let id: Foundation.UUID
+    /// LocalSession is what runs in a session of `localStore`: the store session owns its panes, overlay and their
+    /// state, as on a Mac, and this adds the windows that draw them and what only agterm-win's runtime tracks.
+    @MainActor struct LocalSession {
+        let stored: Session
+        var id: Foundation.UUID { stored.id }
         /// fallback names the session until its program reports a title or a folder: its profile's name.
         var fallback: String
         var customName: String?
-        var programTitle: String?
-        /// directory is the folder the shell last reported, decoded.
-        var directory: String?
         let commandLine: String
-        /// terminal is the primary pane's; a swap exchanges it with the split's.
-        var terminal: NativeTerminal
         var exited = false
         /// attention is a bell since the session was last in view.
         var attention = false
         /// unseen counts notifications since the session was last in view.
         var unseen = 0
-        var overlay: Overlay?
-        var overlayExitCode: Int?
-        var pageOverlay: (page: HtmlOverlay, sizePercent: Int?, hidden: Bool, frame: PageOverlayFrame)?
-        /// split and its terminal are the second pane, both nil without one; a hidden split keeps its shell.
-        var split: NativeSplit?
-        var splitTerminal: NativeTerminal?
-        var splitTitle: String?
-        var splitDirectory: String?
-        /// backedByZmx and splitBackedByZmx are whether that pane attached to a Live sessions daemon at its start.
-        var backedByZmx = false
-        var splitBackedByZmx = false
-        /// scratch is the session's third shell, kept while hidden; it covers the panes while `scratchShown`.
-        var scratch: NativeTerminal?
-        var scratchShown = false
-        var scratchDirectory: String?
+        /// overlayFrame and pageFrame draw the store session's program or page overlay.
+        var overlayFrame: OverlayFrame?
+        var pageFrame: PageOverlayFrame?
         /// activity, context and info are what agents report over `session.status`, `.context` and `.info`.
         var activity = AgentActivity()
         var context: String?
         var info: SessionInfo?
+
+        var programTitle: String? {
+            get { stored.oscTitle }
+            nonmutating set { stored.oscTitle = newValue }
+        }
+        /// directory is the folder the shell last reported, decoded.
+        var directory: String? {
+            get { stored.currentCwd }
+            nonmutating set { stored.currentCwd = newValue }
+        }
+        var splitTitle: String? {
+            get { stored.splitTitle }
+            nonmutating set { stored.splitTitle = newValue }
+        }
+        var splitDirectory: String? {
+            get { stored.splitCwd }
+            nonmutating set { stored.splitCwd = newValue }
+        }
+        var scratchDirectory: String? {
+            get { stored.scratchCwd }
+            nonmutating set { stored.scratchCwd = newValue }
+        }
+        /// terminal is the primary pane's; a swap exchanges it with the split's.
+        var terminal: NativeTerminal { stored.surface as! NativeTerminal }
+        /// split and its terminal are the second pane, both nil without one; a hidden split keeps its shell.
+        var split: NativeSplit? {
+            guard stored.hasSplit else { return nil }
+            return NativeSplit(axis: stored.splitAxis, ratio: stored.splitRatio ?? NativeSplit.defaultRatio, shown: stored.isSplit,
+                               focused: stored.splitFocused)
+        }
+        var splitTerminal: NativeTerminal? { stored.splitSurface as? NativeTerminal }
+        /// scratch is the session's third shell, kept while hidden; it covers the panes while `scratchShown`.
+        var scratch: NativeTerminal? { stored.scratchSurface as? NativeTerminal }
+        var scratchShown: Bool { stored.scratchActive }
+        var allPanesBackedByZmx: Bool { terminal.backedByZmx && splitTerminal?.backedByZmx != false }
+        var overlay: Overlay? {
+            guard let overlayFrame, stored.programOverlayActive else { return nil }
+            var state = NativeOverlay(sizePercent: stored.overlaySizePercent, wait: stored.overlayWait)
+            state.hidden = stored.overlayHidden
+            return Overlay(state: state, frame: overlayFrame)
+        }
+        var overlayExitCode: Int? { stored.overlayExitCode }
+        var pageOverlay: (page: HtmlOverlay, sizePercent: Int?, hidden: Bool, frame: PageOverlayFrame)? {
+            guard let pageFrame, let page = stored.htmlOverlay else { return nil }
+            return (page, stored.overlaySizePercent, stored.overlayHidden, pageFrame)
+        }
 
         /// name follows the focused pane's title and folder, as a Mac's split session's does.
         var name: String {
@@ -105,7 +136,7 @@ final class NativeShell {
 
     /// Server is an agterm-server started this launch, under its sidebar group.
     @MainActor
-    private final class Server {
+    final class Server {
         let remote: RemoteWindow
         let group = Foundation.UUID()
         /// bootstrapNotice is shown in the notice bar until the catalog connects or install refuses.
@@ -119,7 +150,7 @@ final class NativeShell {
 
     /// servers are the started agterm-servers, in the order they started; a remote's server is here only once started,
     /// so nothing runs its command before then.
-    private var servers: [Server] = []
+    private(set) var servers: [Server] = []
     /// remotes are the names `remote.properties` defines, each a remote that can hold a server, read again on each use.
     private var remotes: [String] { RemoteCommands.current.names }
     // remotes whose first start is asking, so a Start the question's message loop delivers waits for the answer
@@ -139,7 +170,7 @@ final class NativeShell {
     private var tooltip: UnsafeMutableRawPointer?
     var palette: UnsafeMutableRawPointer?
     // the open palette, what it lists, and the rows its query leaves, which Enter's index refers to
-    private var paletteMode: Palette.Mode?
+    private(set) var paletteMode: Palette.Mode?
     private var paletteRows: [Palette.Row] = []
     private var paletteShown: [Palette.Row] = []
     // the title bar's button under the mouse, and the one a press started on, which acts if the release is on it too
@@ -150,12 +181,7 @@ final class NativeShell {
     private var appIconHighlight = false
     private var windowActive = true
     private var shownTitle = "agterm"
-    private var emptyRemoteTerminal: NativeTerminal!
-    private var serverTerminals: [Foundation.UUID: NativeTerminal] = [:]
-    private var serverLaunches: [Foundation.UUID: SessionSidebar.Launch] = [:]
-    var remoteTerminal: NativeTerminal {
-        selected.flatMap { serverTerminals[$0] } ?? emptyRemoteTerminal
-    }
+    var remoteTerminal: NativeTerminal!
     var locals: [LocalSession] = [] {
         didSet { syncEvents() }
     }
@@ -170,9 +196,15 @@ final class NativeShell {
         var hideTask: Task<Void, Never>?
     }
     private var serverHuds: [Foundation.UUID: ServerHud] = [:]
-    private let pickController = PickController()
-    /// pickPalette is set while the palette lists a replica pick; it shares the palette with the session and command lists.
-    private var pickPalette: PendingPick?
+    let pickController = PickController()
+    /// pickPalette is set while the palette lists a pick; it shares the palette with the session and command lists.
+    var pickPalette: PendingPick?
+    /// pickSeedQuery is the query the shown pick opened with while it is unedited: its `--select` seed holds until
+    /// then, since the field's own change notices arrive after the first list.
+    private var pickSeedQuery: String?
+    /// windowAskPanel draws the window modal slot's GUI ask, sessionAskPanel the selected session's own ask.
+    var windowAskPanel: AskPanel?
+    var sessionAskPanel: AskPanel?
     /// detectedProfiles is what this launch found; `profiles` is that with profiles.properties over it.
     private var detectedProfiles = LaunchProfiles.available(wslDistributions: [], powerShell7: NativeShell.powerShell7(),
                                                             gitBash: NativeShell.gitBash())
@@ -180,7 +212,14 @@ final class NativeShell {
                                                     gitBash: NativeShell.gitBash())
     var selected: Foundation.UUID?
     private var pendingCreatedSession: (server: Foundation.UUID, session: Foundation.UUID)?
-    private var running: Foundation.UUID?
+    /// running is the server session the remote terminals show.
+    var running: Foundation.UUID?
+    // what the remote terminal was last given, so a session that ends or comes back is shown again
+    private var runningLaunch: SessionSidebar.Launch?
+    /// remoteSplitTerminal and remoteScratchTerminal are the running session's split and scratch.
+    var remoteSplitTerminal: NativeTerminal!
+    var remoteScratchTerminal: NativeTerminal!
+    var serverPanes = ServerPanes()
     private enum SidebarDestination: Equatable {
         case local(workspace: Foundation.UUID?)
         case server(Foundation.UUID, workspace: Foundation.UUID?)
@@ -241,6 +280,7 @@ final class NativeShell {
                                       paneFinalizer: { identities in MainActor.assumeIsolated { _ = client.kill(paneIdentities: identities) } })
         localStore = loaded.store
         client.reap(knownPaneIdentities: loaded.paneIdentities, decision: zmx.decision)
+        client.endLegacyDaemons(in: ZmxSupport.legacyWindowsSocketDirectory(forStateDirectory: legacyStateDirectory.path))
         if !settings.localSessions.isEmpty || settings.selectedLocal != nil {
             settings.localSessions = []
             settings.selectedLocal = nil
@@ -282,8 +322,11 @@ final class NativeShell {
         makeSidebarFooter()
         makeNoticeBar()
         findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
-        emptyRemoteTerminal = makeTerminal()
+        remoteTerminal = makeServerTerminal(.left)
+        remoteSplitTerminal = makeServerTerminal(.right)
+        remoteScratchTerminal = makeServerTerminal(nil)
         PickRegistry.shared.register(shellWindowID, controller: pickController)
+        NativeStructure.wireOwners(self)
         try? FileManager.default.createDirectory(atPath: ControlResolve.windowsSocketRoot, withIntermediateDirectories: true)
         control = ControlSocket.start(path: socketPath, host: self, version: version)
         if control != nil { events.launched() }
@@ -329,7 +372,7 @@ final class NativeShell {
     private func server(_ name: String) -> Server? { servers.first { $0.name == name } }
 
     /// server(of:) is the server holding session `id`.
-    private func server(of id: Foundation.UUID) -> Server? { servers.first { $0.remote.session(id) != nil } }
+    func server(of id: Foundation.UUID) -> Server? { servers.first { $0.remote.session(id) != nil } }
 
     private func serverSession(_ id: Foundation.UUID) -> Session? { servers.lazy.compactMap { $0.remote.session(id) }.first }
 
@@ -374,6 +417,7 @@ final class NativeShell {
         started.remote.onReplicaOverlayResize = { [weak self] id, change in
             self?.resizeServerReplicaOverlay(id, change: change)
         }
+        started.remote.onPaneNeedsAttach = { [weak self] identity, id in self?.serverPaneNeedsAttach(identity, session: id) }
         started.remote.onPresentationStopped = { [weak self] id in
             self?.clearServerReplicaOverlay(id, notifyOrigin: false)
             self?.clearServerPageOverlay(id, notifyOrigin: false)
@@ -684,13 +728,16 @@ final class NativeShell {
     /// confirmQuit asks before running local sessions end with the window.
     fileprivate func confirmQuit() -> Bool {
         // a session whose panes all run under Live sessions daemons keeps running
-        let ending = locals.filter { !$0.exited && !($0.backedByZmx && ($0.splitTerminal == nil || $0.splitBackedByZmx)) }
+        let ending = locals.filter { !$0.exited && !$0.allPanesBackedByZmx }
         guard let question = NativeMenu.quitQuestion(runningLocalSessions: ending.count) else { return true }
         return MessageBoxW(window, Array(question.utf16) + [0], Array("agterm".utf16) + [0],
                            UINT(MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)) == IDOK
     }
 
     fileprivate func closing() {
+        for session in localStore.workspaces.flatMap(\.sessions) + servers.flatMap({ $0.remote.store.workspaces.flatMap(\.sessions) }) {
+            session.cancelPendingAsk()
+        }
         PickRegistry.shared.unregister(shellWindowID)
         for id in serverHuds.keys { clearServerHud(id) }
         var placement = WINDOWPLACEMENT()
@@ -700,7 +747,6 @@ final class NativeShell {
             settings.frame = .init(left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom)
             settings.maximized = placement.showCmd == UINT(SW_SHOWMAXIMIZED)
         }
-        locals.forEach(mirror)
         localStore.save()
         saveSettings()
     }
@@ -935,23 +981,21 @@ final class NativeShell {
     private func launch(_ session: LocalSession) {
         var isFolder: ObjCBool = false
         let last = session.directory.flatMap { FileManager.default.fileExists(atPath: $0, isDirectory: &isFolder) && isFolder.boolValue ? $0 : nil }
-        let backed = startPane(session.terminal, commandLine: session.commandLine,
-                               directory: last ?? ProcessInfo.processInfo.environment["USERPROFILE"],
-                               environment: sessionEnvironment(session.id), paneIdentity: localStore.session(withID: session.id)?.paneIdentity)
-        if let index = locals.firstIndex(where: { $0.id == session.id }) { locals[index].backedByZmx = backed }
+        startPane(session.terminal, commandLine: session.commandLine, directory: last ?? ProcessInfo.processInfo.environment["USERPROFILE"],
+                  environment: sessionEnvironment(session.id), paneIdentity: session.stored.paneIdentity)
     }
 
-    /// startPane starts a primary or split pane's program, under its Live sessions daemon when this launch is Live, and
-    /// answers whether it did.
+    /// startPane starts a primary or split pane's program, under its Live sessions daemon when this launch is Live.
     func startPane(_ terminal: NativeTerminal, commandLine: String, directory: String?, environment: [String: String],
-                   paneIdentity: Foundation.UUID?) -> Bool {
+                   paneIdentity: Foundation.UUID?) {
         let environment = ShellIntegration.environment(for: commandLine, merging: environment)
         if let paneIdentity, let wrapped = zmx.start(commandLine, paneIdentity: paneIdentity, environment: environment) {
+            terminal.backedByZmx = true
             terminal.start(wrapped.commandLine, directory: directory, environment: wrapped.environment)
-            return true
+            return
         }
+        terminal.backedByZmx = false
         terminal.start(ShellIntegration.commandLine(commandLine), directory: directory, environment: environment)
-        return false
     }
 
     /// runZmx runs zmx.exe hidden, ending it when it outlives `timeout`, as macOS `ZmxClient.run` does.
@@ -974,44 +1018,21 @@ final class NativeShell {
     private func startLocal(_ stored: Session) {
         let commandLine = stored.initialCommand ?? quickProfileCommandLine ?? "cmd.exe"
         let fallback = LocalWindow.fallbackName(commandLine: commandLine, profiles: profiles, earlier: locals.map(\.fallback))
-        let cwd = stored.currentCwd ?? stored.initialCwd
-        let session = LocalSession(id: stored.id, fallback: fallback, customName: stored.customName, directory: cwd.isEmpty ? nil : cwd,
-                                   commandLine: commandLine, terminal: makeTerminal())
-        wirePane(session.terminal, of: session.id)
+        if stored.currentCwd == nil, !stored.initialCwd.isEmpty { stored.currentCwd = stored.initialCwd }
+        stored.initialCommand = commandLine
+        let terminal = makeTerminal()
+        stored.surface = terminal
+        let session = LocalSession(stored: stored, fallback: fallback, customName: stored.customName, commandLine: commandLine)
+        wirePane(terminal, of: session.id)
         locals.append(session)
         layout()
         log("native shell: new \(session.name) session [\(session.id)]")
         launch(session)
-        if stored.hasSplit {
-            restoreSplit(session.id, NativeSplit(axis: stored.splitAxis, ratio: stored.splitRatio ?? 0.5, shown: stored.isSplit,
-                                                 focused: stored.splitFocused), directory: stored.splitCwd)
-        }
+        if stored.hasSplit { startSplitPane(session.id) }
     }
 
     func syncEvents() {
-        events.sync(locals.map { local -> (id: Foundation.UUID, name: String, pane: NativeEvents.Pane) in
-            let inSplit = local.split?.focused == true && local.splitTerminal != nil
-            let focused: NativeTerminal = inSplit ? local.splitTerminal! : local.terminal
-            return (id: local.id, name: local.name, pane: NativeEvents.Pane(indicator: local.activity.indicator,
-                                                            splitShown: local.splitTerminal != nil && local.split?.shown == true,
-                                                            scratchShown: local.scratchShown && local.scratch != nil,
-                                                            focusedPane: inSplit ? .right : .left, focusedTerminal: ObjectIdentifier(focused)))
-        }, store: localStore)
-    }
-
-    /// mirror writes what a local session's panes report into its store session, which saves it.
-    func mirror(_ session: LocalSession) {
-        guard let stored = localStore.session(withID: session.id) else { return }
-        stored.currentCwd = session.directory
-        stored.oscTitle = session.programTitle
-        stored.initialCommand = session.commandLine
-        let split = session.splitTerminal == nil ? nil : session.split
-        stored.hasSplit = split != nil
-        stored.isSplit = split?.shown ?? false
-        stored.splitAxis = split?.axis ?? .leftRight
-        stored.splitRatio = split?.ratio
-        stored.splitFocused = split?.focused ?? false
-        stored.splitCwd = split == nil ? nil : session.splitDirectory
+        events.sync(locals.map { (id: $0.id, name: $0.name, indicator: $0.activity.indicator) }, store: localStore)
     }
 
     func localExited(_ id: Foundation.UUID) {
@@ -1035,7 +1056,6 @@ final class NativeShell {
         } else if terminal === locals[index].scratch {
             if let directory { locals[index].scratchDirectory = directory }
         }
-        mirror(locals[index])
         if locals[index].name != before { rebuild() }
     }
 
@@ -1230,7 +1250,7 @@ final class NativeShell {
     }
 
     /// perform sends `operation` to the server holding session `id`.
-    private func perform(_ operation: RemoteOperation, on id: Foundation.UUID) async -> ControlResponse {
+    func perform(_ operation: RemoteOperation, on id: Foundation.UUID) async -> ControlResponse {
         guard let server = server(of: id) else { return ControlResponse(ok: false, error: "no session \(id.uuidString) on a server") }
         let response = await server.remote.perform(operation)
         log("native shell: \(operation) on \(server.label): \(response.ok ? "ok" : response.error ?? "failed")")
@@ -1384,8 +1404,9 @@ final class NativeShell {
     private func endLocal(_ id: Foundation.UUID) {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         let closing = locals.remove(at: index)
-        closing.overlay?.frame.destroy()
-        closing.pageOverlay?.frame.destroy()
+        endInteractions(of: closing.stored)
+        closing.overlayFrame?.destroy()
+        closing.pageFrame?.destroy()
         closing.terminals.forEach { DestroyWindow($0.window) }
         recentSessions.removeAll { $0 == id }
         if dashboard?.members.contains(where: { $0.session == id }) == true { dashboardSessionsChanged() }
@@ -1443,7 +1464,7 @@ final class NativeShell {
         case .closeSplit: if let selected { closeSplit(selected) }
         case .swapPanes: if let selected { swapPanes(selected) }
         case .focusLeftPane, .focusRightPane: focusPaneKey(split: command == .focusRightPane)
-        case .toggleScratch: if let selected, canSplit(selected) { setScratch(selected, shown: !(local(selected)?.scratchShown ?? false), command: nil) }
+        case .toggleScratch: if let selected, canSplit(selected) { setScratch(selected, shown: !viewState.scratchShown, command: nil) }
         case .toggleOverlay:
             if let selected, let hidden = selectedOverlayHidden { setOverlayHidden(selected, !hidden) }
         case .quickTerminal: toggleQuick()
@@ -1597,8 +1618,9 @@ final class NativeShell {
             ShowWindow(hud.panel, shown ? SW_SHOW : SW_HIDE)
         }
         if let running, let overlay = serverOverlays[running], selected == running, !overlay.state.hidden { remoteEnabled = false }
-        EnableWindow(remoteTerminal.window, remoteEnabled)
-        // the find bar and the palette stay above an overlay placed after them
+        for terminal in [remoteTerminal, remoteSplitTerminal, remoteScratchTerminal] { EnableWindow(terminal!.window, remoteEnabled) }
+        // an ask draws above the overlays, and the find bar and the palette stay above both
+        syncAskPanels()
         for panel in [findBar, palette?.assumingMemoryBound(to: HWND__.self)] where panel.map({ IsWindowVisible($0) }) == true {
             SetWindowPos(panel, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
         }
@@ -1610,6 +1632,9 @@ final class NativeShell {
         guard let focused = GetFocus() else { return false }
         if let overlay = serverOverlays[id] {
             if [overlay.terminal.window, overlay.frame.window].contains(focused) { return true }
+        }
+        if id == running, local(id) == nil {
+            return [remoteTerminal, remoteSplitTerminal, remoteScratchTerminal].contains { $0.window == focused }
         }
         guard let session = locals.first(where: { $0.id == id }) else { return false }
         return (session.terminals.map(\.window) + [session.overlay?.terminal.window, session.overlay?.frame.window]).contains(focused)
@@ -1646,8 +1671,8 @@ final class NativeShell {
     }
 
     private func overlayExited(_ id: Foundation.UUID, frame: OverlayFrame, code: Int) {
-        guard let index = locals.firstIndex(where: { $0.id == id }), let overlay = locals[index].overlay, overlay.frame === frame else { return }
-        locals[index].overlayExitCode = code
+        guard let overlay = local(id)?.overlay, overlay.frame === frame else { return }
+        localStore.recordOverlayExit(id, code: code)
         log("native shell: overlay of [\(id)] exited \(code)")
         if !overlay.state.wait { removeOverlay(id, frame: frame) }
     }
@@ -1655,44 +1680,28 @@ final class NativeShell {
     // MARK: replica asks (catalog sessions)
 
     private func showReplicaAsk(on server: Server, sessionID: Foundation.UUID, ask: PresentationAsk) -> Bool {
-        guard ask.pane == nil, ask.style == .terminal, !ask.needsFormSupport else { return false }
-        guard ask.buttons.count >= 1, ask.buttons.count <= 8 else { return false }
+        guard ask.pane == nil else { return false }
         let answer: @MainActor (PresentationFrame.Body) -> Void = { [weak server] body in
             server?.remote.answerPresentation(sessionID, body)
         }
         guard server.remote.store.presentReplicaAsk(ask, forSession: sessionID, answer: answer) else { return false }
         if running != sessionID { select(sessionID) }
-        presentReplicaAskDialog(on: server, sessionID: sessionID)
+        syncInteractions()
         rebuild()
         log("native shell: replica ask on server session [\(sessionID)]: \(ask.id)")
         return true
     }
 
-    private func presentReplicaAskDialog(on server: Server, sessionID: Foundation.UUID) {
-        guard let session = server.remote.session(sessionID), let ask = session.askPending else { return }
-        let titles = ask.buttons.map { Array($0.label.utf16) + [0] }
-        let picked = Int(withWideStrings(titles) {
-            nt_ask_choice(UnsafeMutableRawPointer(window), Array("agterm".utf16) + [0], Array(ask.title.utf16) + [0],
-                          Array((ask.message ?? "").utf16) + [0], $0, Int32(titles.count))
-        })
-        if picked >= 0 {
-            _ = session.answerAsk(id: ask.id, buttonAt: picked)
-        } else {
-            _ = session.cancelAsk(id: ask.id)
-        }
-        SessionPickBook.shared.drain(pickController)
-        if let pending = pickController.pending { openPickPalette(pending) }
-        rebuild()
-    }
-
     private func dismissReplicaAsk(on server: Server, sessionID: Foundation.UUID, ref: PresentationAskRef) {
         server.remote.store.dismissReplicaAsk(ref, forSession: sessionID)
+        syncInteractions()
         rebuild()
     }
 
     private func dismissReplicaAsk(ifShownFor sessionID: Foundation.UUID) {
         guard let server = server(of: sessionID), let session = server.remote.session(sessionID), session.askReplica else { return }
         session.releaseAsk()
+        syncInteractions()
         rebuild()
     }
 
@@ -1706,10 +1715,7 @@ final class NativeShell {
         guard SessionPickBook.shared.openReplica(pick, session: sessionID, window: shellWindowID, controller: pickController,
                                                answer: answer) else { return false }
         if pick.follow == true { select(sessionID) }
-        if let pending = pickController.pending, pending.id == pick.id {
-            closePalette(refocus: false)
-            openPickPalette(pending)
-        }
+        syncInteractions()
         rebuild()
         log("native shell: replica pick on server session [\(sessionID)]: \(pick.id)")
         return true
@@ -1717,39 +1723,43 @@ final class NativeShell {
 
     private func dismissReplicaPick(on server: Server, sessionID: Foundation.UUID, ref: PresentationPickRef) {
         SessionPickBook.shared.dismissReplica(ref, session: sessionID)
-        if pickController.pending?.id == ref.id {
-            pickPalette = nil
-            closePalette(refocus: false)
-        }
+        syncInteractions()
         rebuild()
     }
 
-    private func pickRows(for pick: PendingPick) -> [Palette.Row] {
-        pick.items.map {
-            Palette.Row(title: $0.label, subtitle: $0.subtitle ?? "", detail: "",
-                        target: .pickChoice($0.id))
-        }
-    }
-
-    private func openPickPalette(_ pick: PendingPick) {
+    /// openPickPalette lists `pick` in the palette: `--prompt` as the field's hint, `--query` in it selected, so the first
+    /// keystroke replaces it, and the highlight on the `--select` item.
+    func openPickPalette(_ pick: PendingPick) {
         guard let palette else { return }
         pickPalette = pick
+        pickSeedQuery = pick.query ?? ""
         paletteMode = nil
-        paletteRows = pickRows(for: pick)
-        let cue = Array((pick.prompt ?? "Pick one").utf16) + [0]
+        let cue = Array((pick.prompt ?? "Select…").utf16) + [0]
         let (left, top, width) = paletteFrame
         nt_palette_open(palette, cue, left, top, width)
+        if let query = pick.query, !query.isEmpty { nt_palette_set_query(palette, Array(query.utf16) + [0]) }
         paletteQueryChanged()
     }
 
-    private func resolvePickChoice(_ itemID: String) {
+    /// dropPickPalette takes the palette down for a pick that ended elsewhere, without answering it.
+    func dropPickPalette() {
+        closePalette(refocus: !focusAsk())
+    }
+
+    /// resolvePick answers the palette's pick with the row run: an item, or the free text of a custom row.
+    private func resolvePick(_ target: Palette.Target) {
         guard let pick = pickController.pending else { return }
-        guard let index = pick.items.firstIndex(where: { $0.id == itemID }) else { return }
-        pickController.resolve(ControlPickResult(result: .picked, id: itemID, label: pick.items[index].label, index: index))
-        pickPalette = nil
+        switch target {
+        case .pickChoice(let id):
+            guard let index = pick.items.firstIndex(where: { $0.id == id }) else { return }
+            pickController.resolve(ControlPickResult(result: .picked, id: id, label: pick.items[index].label, index: index))
+        case .pickCustom(let query):
+            pickController.resolve(ControlPickResult(result: .custom, query: query))
+        default:
+            return
+        }
         closePalette(refocus: true)
-        SessionPickBook.shared.drain(pickController)
-        if let pending = pickController.pending { openPickPalette(pending) }
+        syncInteractions()
         rebuild()
     }
 
@@ -2100,9 +2110,10 @@ final class NativeShell {
 
     /// removeOverlay ends the overlay `frame` holds, if it is still the session's.
     private func removeOverlay(_ id: Foundation.UUID, frame: OverlayFrame) {
-        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay?.frame === frame else { return }
+        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlayFrame === frame else { return }
         let focused = hasFocus(id)
-        locals[index].overlay = nil
+        locals[index].overlayFrame = nil
+        localStore.closeOverlay(id)
         frame.destroy()
         placeOverlays()
         if focused { focus() }
@@ -2112,9 +2123,7 @@ final class NativeShell {
 
     func scaled(_ value: Int32) -> Int32 { MulDiv(value, Int32(dpi), 96) }
 
-    var remoteTerminals: [NativeTerminal] { [emptyRemoteTerminal] + Array(serverTerminals.values) }
-
-    var terminalsShown: [NativeTerminal] { remoteTerminals + locals.flatMap(\.terminals) }
+    var terminalsShown: [NativeTerminal] { [remoteTerminal, remoteSplitTerminal, remoteScratchTerminal] + locals.flatMap(\.terminals) }
 
     /// allTerminals adds the overlays', server overlays', and the quick terminal's, which draw and size as the sessions' do.
     private var allTerminals: [NativeTerminal] {
@@ -2122,7 +2131,7 @@ final class NativeShell {
     }
 
     /// selectedTerminal is the selected session's pane in view, under any overlay.
-    private var selectedTerminal: NativeTerminal { locals.first { $0.id == selected }?.onScreen ?? remoteTerminal }
+    private var selectedTerminal: NativeTerminal { locals.first { $0.id == selected }?.onScreen ?? serverOnScreen }
 
     /// visibleTerminal is what the keyboard and the terminal commands reach: a shown overlay, else the session.
     var visibleTerminal: NativeTerminal {
@@ -2223,25 +2232,18 @@ final class NativeShell {
     }
 
     private func catalogChanged() {
-        for id in Array(serverTerminals.keys) where serverSession(id) == nil {
-            if let terminal = serverTerminals.removeValue(forKey: id) {
-                terminal.setVisible(false)
-                DispatchQueue.main.async { if let window = terminal.window { DestroyWindow(window) } }
-            }
-            serverLaunches[id] = nil
-            if running == id { running = nil }
-        }
         for server in servers where server.remote.connected {
             server.bootstrapNotice = nil
         }
         rebuild()
         layout()
+        syncServerPanes()
         let workspaces = servers.flatMap { $0.remote.store.workspaces }
         if selectCreatedSession() { return }
         guard !locals.contains(where: { $0.id == selected }) else { return }
         let next = SessionSidebar.selection(current: selected, in: workspaces)
         log("native shell: \(workspaces.lazy.flatMap(\.sessions).count) session(s), selecting \(next?.uuidString ?? "none")")
-        if let next { select(next, reattach: false) } else if let local = locals.last { select(local.id) } else { selected = nil }
+        if let next { select(next) } else if let local = locals.last { select(local.id) } else { selected = nil }
     }
 
     func rebuild() {
@@ -2364,7 +2366,7 @@ final class NativeShell {
         focus()
     }
 
-    func select(_ id: Foundation.UUID, reattach: Bool = true) {
+    func select(_ id: Foundation.UUID) {
         if dashboard != nil { closeDashboard(refocus: false) }
         let previous = selected
         selected = id
@@ -2387,54 +2389,32 @@ final class NativeShell {
         placeSessions()
         let owner = locals.contains(where: { $0.id == id }) ? nil : server(of: id)
         for other in servers where other !== owner { other.remote.store.selectedSessionID = nil }
-        guard let owner, let session = owner.remote.session(id) else { return }
-        let launch = SessionSidebar.launch(for: session, hostLabel: owner.label)
-        let existing = serverTerminals[id]
-        let terminal = existing ?? makeServerTerminal(id)
-        serverTerminals[id] = terminal
-        running = id
+        guard let owner, owner.remote.session(id) != nil else { return }
         owner.remote.store.selectedSessionID = id
-        placeSessions()
-        // A completed session keeps its terminal and scrollback when selected again.
-        if existing != nil, session.ended {
-            serverLaunches[id] = launch
-            return
-        }
-        // Catalog pane removal can arrive before the ended state; only an explicit selection retries a dead attach.
-        let panes = owner.remote.mirror.catalog?.workspaces.flatMap(\.sessions).first { $0.id == id }?.panes
-        let retry = reattach && !terminal.isRunning && panes?.isEmpty == false
-        guard existing == nil || (owner.remote.connected && (serverLaunches[id] != launch || retry)) else { return }
-        serverLaunches[id] = launch
-        switch launch {
-        case .command(let command):
-            log("native shell: showing \(session.displayName) [\(id)]")
-            terminal.start(command)
-        case .notice(let text):
-            terminal.show(notice: text)
-        }
+        running = id
+        syncServerPanes()
     }
 
-    private func makeServerTerminal(_ id: Foundation.UUID) -> NativeTerminal {
-        let terminal = makeTerminal()
-        terminal.onNotification = { [unowned self] title, body in
-            deliver(id, title: title, body: body, source: .terminal)
+    /// attachServerPrimary starts what the in-view server row's main pane attaches, when that changed since it last did.
+    func attachServerPrimary(_ session: Session, hostLabel: String, again: Bool = false) {
+        let launch = SessionSidebar.launch(for: session, hostLabel: hostLabel)
+        guard again || launch != runningLaunch else { return }
+        runningLaunch = launch
+        switch launch {
+        case .command(let command):
+            log("native shell: showing \(session.displayName) [\(session.id)]")
+            remoteTerminal.start(command)
+        case .notice(let text):
+            remoteTerminal.show(notice: text)
         }
-        terminal.onKeystroke = { [unowned self] keystroke in
-            guard let store = server(of: id)?.remote.store, let session = store.session(withID: id) else { return }
-            let before = session.agentIndicator
-            store.clearStatus(by: keystroke, pane: .left, reset: .firstKey, forSession: id)
-            if session.agentIndicator != before { rebuild() }
-        }
-        terminal.onNaming = { [unowned self, weak terminal] in if let terminal { serverNaming(id, terminal) } }
-        return terminal
     }
 
     /// serverNaming records the title a server session's program reported on its replica; the server does not render
     /// the pane, so only the viewer sees it. A ConPTY executable-path title reads as none.
-    private func serverNaming(_ id: Foundation.UUID, _ terminal: NativeTerminal) {
+    func serverNaming(_ id: Foundation.UUID, _ terminal: NativeTerminal, pane: CommandContext.Pane) {
         guard let session = server(of: id)?.remote.store.session(withID: id) else { return }
         let before = session.displayName
-        session.recordReportedTitle(SessionNaming.programTitle(terminal.title) ?? "", pane: .left)
+        session.recordReportedTitle(SessionNaming.programTitle(terminal.title) ?? "", pane: pane)
         if session.displayName != before { rebuild() }
     }
 
@@ -2468,7 +2448,10 @@ final class NativeShell {
     }
 
     /// focus gives the keyboard to what is in view: the dashboard's grid takes it in the window itself.
-    func focus() { SetFocus(dashboard != nil ? window : visibleTerminal.window) }
+    func focus() {
+        if focusAsk() { return }
+        SetFocus(dashboard != nil ? window : visibleTerminal.window)
+    }
 
     static func handleSidebarShortcut(_ message: MSG) -> Bool {
         guard message.message == UINT(WM_KEYDOWN) || message.message == UINT(WM_SYSKEYDOWN),
@@ -2715,9 +2698,16 @@ final class NativeShell {
         if pickPalette == nil, let mode = paletteMode { paletteRows = rows(for: mode) }
         var text = [UInt16](repeating: 0, count: 512)
         let length = nt_palette_query(palette, &text, Int32(text.count))
-        paletteShown = Palette.filter(paletteRows, query: String(decoding: text.prefix(Int(max(length, 0))), as: UTF16.self))
+        let query = String(decoding: text.prefix(Int(max(length, 0))), as: UTF16.self)
+        var selection: Int32 = 0
+        if let pick = pickPalette {
+            paletteShown = Palette.pickRows(pick, query: query)
+            if query == pickSeedQuery { selection = Int32(Palette.pickSeed(pick, rows: paletteShown)) } else { pickSeedQuery = nil }
+        } else {
+            paletteShown = Palette.filter(paletteRows, query: query)
+        }
         let lines = paletteShown.map { (Array($0.title.utf16) + [0], Array($0.subtitle.utf16) + [0], Array($0.detail.utf16) + [0], $0.enabled) }
-        withPaletteRows(lines) { nt_palette_set_rows(palette, $0, Int32(lines.count), 0) }
+        withPaletteRows(lines) { nt_palette_set_rows(palette, $0, Int32(lines.count), selection) }
     }
 
     /// withPaletteRows lends the shim pointers into `lines`, valid for the call only.
@@ -2744,8 +2734,7 @@ final class NativeShell {
         guard paletteShown.indices.contains(index) else { return }
         let row = paletteShown[index]
         if pickPalette != nil {
-            guard case .pickChoice(let id) = row.target else { return }
-            resolvePickChoice(id)
+            resolvePick(row.target)
             return
         }
         guard let mode = paletteMode else { return }
@@ -2761,11 +2750,11 @@ final class NativeShell {
             if let indicator, indicator.status == .blocked {
                 switch indicator.statusPane {
                 case .right:
-                    if let session = local(id), session.splitTerminal != nil, var split = session.split {
-                        split.shown = true
-                        split.focused = true
+                    if let session = local(id), session.splitTerminal != nil {
                         if session.scratchShown { setScratch(id, shown: false, command: nil) }
-                        setSplit(id, split)
+                        localStore.setSplitVisibility(id, shown: true)
+                        session.stored.splitFocused = true
+                        panesChanged(id)
                     }
                 case .scratch: if local(id)?.scratch != nil { setScratch(id, shown: true, command: nil) }
                 case .left, nil:
@@ -2776,22 +2765,23 @@ final class NativeShell {
             focus()
         case .pick(let pick):
             run(pick)
-        case .pickChoice:
+        case .pickChoice, .pickCustom:
             break
         }
     }
 
-    fileprivate func closePalette(refocus: Bool) {
+    func closePalette(refocus: Bool) {
         guard paletteMode != nil || pickPalette != nil else { return }
-        if let pick = pickPalette, pickController.pending?.id == pick.id {
-            pickController.cancel()
-            SessionPickBook.shared.drain(pickController)
-        }
+        let cancelled = pickPalette.map { pick in pickController.pending?.id == pick.id } == true
         pickPalette = nil
         paletteMode = nil
         paletteRows = []
         paletteShown = []
         if let palette { nt_palette_close(palette) }
+        if cancelled {
+            pickController.cancel()
+            syncInteractions()
+        }
         if refocus { focus() }
     }
 
@@ -2813,7 +2803,7 @@ final class NativeShell {
     }
 
     /// titleChanged shows the selected session's name and agent context in the title bar and on the taskbar.
-    private func titleChanged() {
+    func titleChanged() {
         let context = selected.flatMap { id in locals.first { $0.id == id }.map(\.context) ?? serverSession(id)?.effectiveContext }
         let title = TitleBar.caption(name: selected.flatMap(name(of:)), context: context)
         guard let window, title != shownTitle else { return }
@@ -3330,16 +3320,8 @@ extension NativeShell: NativeControlHost {
     var localSessions: [NativeControl.Local] {
         locals.map {
             var local = NativeControl.Local(id: $0.id, name: $0.name, commandLine: $0.commandLine, exited: $0.exited, attention: $0.attention,
-                                            unseen: $0.unseen, cwd: $0.directory ?? "", title: $0.programTitle, overlay: $0.overlay?.state,
-                                            overlayExitCode: $0.overlayExitCode, htmlOverlay: $0.pageOverlay?.page)
-            local.pageOverlayHidden = $0.pageOverlay?.hidden ?? false
-            local.pageOverlaySizePercent = $0.pageOverlay?.sizePercent
-            local.split = $0.splitTerminal == nil ? nil : $0.split
-            local.splitCwd = $0.splitDirectory
-            local.backedByZmx = $0.backedByZmx && ($0.splitTerminal == nil || $0.splitBackedByZmx)
-            local.scratch = $0.scratchShown && $0.scratch != nil
-            local.scratchRunning = $0.scratch != nil
-            local.scratchCwd = $0.scratchDirectory
+                                            unseen: $0.unseen, cwd: $0.directory ?? "", title: $0.programTitle)
+            local.backedByZmx = $0.allPanesBackedByZmx
             local.activity = $0.activity
             local.context = $0.context
             local.info = $0.info
@@ -3511,7 +3493,7 @@ extension NativeShell: NativeControlHost {
     func restartSession(_ id: Foundation.UUID) async -> ControlResponse {
         if let index = locals.firstIndex(where: { $0.id == id }) {
             // a running daemon would take the attach back to the same program
-            if locals[index].backedByZmx, !locals[index].exited, let identity = localStore.session(withID: id)?.paneIdentity {
+            if locals[index].terminal.backedByZmx, !locals[index].exited, let identity = localStore.session(withID: id)?.paneIdentity {
                 let name = ZmxSupport.localDaemonName(for: identity)
                 switch zmxClient.killConfirmed(name: name) {
                 case .killed: break
@@ -3529,11 +3511,12 @@ extension NativeShell: NativeControlHost {
 
     func selectSession(_ id: Foundation.UUID) { select(id) }
 
-    /// terminal is the session's retained terminal, including a remote session's last screen after exit.
+    /// terminal is the terminal showing `id`'s pane: a local session's own, or the running ones for the server session they show.
     private func terminal(of id: Foundation.UUID, pane: NativePane?) -> NativeTerminal? {
         if let session = locals.first(where: { $0.id == id }) { return pane.map { session.pane($0) } ?? session.onScreen }
-        guard pane == nil || pane == .primary else { return nil }
-        return serverTerminals[id]
+        guard running == id else { return nil }
+        if let pane { return serverPane(pane) }
+        return serverOnScreen
     }
 
     func type(_ text: String, into id: Foundation.UUID, pane: NativePane?) -> Bool { terminal(of: id, pane: pane)?.type(text) ?? false }
@@ -3623,8 +3606,8 @@ extension NativeShell: NativeControlHost {
             openServerCtlOverlay(id, open)
             return
         }
-        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
-        guard locals[index].pageOverlay == nil else { return }
+        guard let index = locals.firstIndex(where: { $0.id == id }),
+              localStore.openOverlay(id, command: open.command, cwd: open.cwd, wait: open.wait, sizePercent: open.sizePercent) else { return }
         if selected != id { select(id) }
         let focused = hasFocus(id)
         let frame = OverlayFrame(parent: window, points: settings.fontPoints, dpi: dpi)
@@ -3641,8 +3624,8 @@ extension NativeShell: NativeControlHost {
             }
         }
         terminal.background = open.background
-        locals[index].overlay = Overlay(state: NativeOverlay(sizePercent: open.sizePercent, wait: open.wait), frame: frame)
-        locals[index].overlayExitCode = nil
+        locals[index].overlayFrame = frame
+        locals[index].stored.overlaySurface = terminal
         // placed first, so the program starts at the panel's grid
         placeOverlays()
         let session = locals[index]
@@ -3654,7 +3637,7 @@ extension NativeShell: NativeControlHost {
     }
 
     private func refreshPageOverlayState(at index: Int) {
-        guard var slot = locals[index].pageOverlay else { return }
+        guard let slot = locals[index].pageOverlay else { return }
         var page = slot.page
         let state = slot.frame.loadState()
         page.loadState = state
@@ -3662,8 +3645,7 @@ extension NativeShell: NativeControlHost {
         if state == .loaded, let title = slot.frame.documentTitle() {
             page.current = HtmlPageInfo(page: title, title: title, canGoBack: false, canGoForward: false)
         }
-        slot.page = page
-        locals[index].pageOverlay = slot
+        locals[index].stored.htmlOverlay = page
     }
 
     private func refreshPageOverlayState(_ session: LocalSession) {
@@ -3672,30 +3654,31 @@ extension NativeShell: NativeControlHost {
     }
 
     func openPageOverlay(_ id: Foundation.UUID, _ overlay: HtmlOverlay, sizePercent: Int?) {
-        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
-        guard locals[index].overlay == nil else { return }
+        var page = overlay
+        page.loadState = .loading
+        guard let index = locals.firstIndex(where: { $0.id == id }),
+              localStore.openHtmlOverlay(id, pane: nil, overlay: page, sizePercent: sizePercent) == nil else { return }
         if selected != id { select(id) }
         let frame = PageOverlayFrame(parent: window, dataFolder: stateDirectory.appendingPathComponent("WebView2")) { [weak self] in
             self?.closeOverlay(id)
         }
-        var page = overlay
-        page.loadState = .loading
         switch page.source {
         case .file(let path, _): frame.load(file: path)
         case .url(let address): frame.load(url: address)
         case .image(let path): frame.load(file: path)
         default: break
         }
-        locals[index].pageOverlay = (page: page, sizePercent: sizePercent, hidden: false, frame: frame)
+        locals[index].pageFrame = frame
         placeOverlays()
         rebuild()
         log("native shell: page overlay over \(locals[index].name) [\(id)]")
     }
 
     private func removePageOverlay(_ id: Foundation.UUID, frame: PageOverlayFrame) {
-        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay?.frame === frame else { return }
+        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageFrame === frame else { return }
         let focused = frame.hasFocus || hasFocus(id)
-        locals[index].pageOverlay = nil
+        locals[index].pageFrame = nil
+        localStore.closeOverlay(id)
         frame.destroy()
         placeOverlays()
         rebuild()
@@ -3750,15 +3733,10 @@ extension NativeShell: NativeControlHost {
             rebuild()
             return
         }
-        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay != nil {
-            locals[index].pageOverlay?.sizePercent = sizePercent
-            placeOverlays()
-            rebuild()
-            return
-        }
-        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay != nil else { return }
-        locals[index].overlay?.state.sizePercent = sizePercent
+        guard let session = local(id), session.overlay != nil || session.pageOverlay != nil else { return }
+        localStore.resizeOverlay(id, sizePercent: sizePercent)
         placeOverlays()
+        rebuild()
     }
 
     func setOverlayHidden(_ id: Foundation.UUID, _ hidden: Bool) {
@@ -3784,18 +3762,11 @@ extension NativeShell: NativeControlHost {
             if focused { focus() }
             return
         }
-        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay != nil {
-            let focused = hasFocus(id)
-            locals[index].pageOverlay?.hidden = hidden
-            placeOverlays()
-            rebuild()
-            if focused { focus() }
-            return
-        }
-        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay != nil else { return }
+        guard let session = local(id), session.overlay != nil || session.pageOverlay != nil else { return }
         let focused = hasFocus(id)
-        locals[index].overlay?.state.hidden = hidden
+        localStore.setOverlaysHidden(id, pane: nil, hidden: hidden)
         placeOverlays()
+        rebuild()
         if focused { focus() }
     }
 

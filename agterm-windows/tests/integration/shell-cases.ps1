@@ -253,6 +253,7 @@ $shellCases = [ordered]@{
 
 . (Join-Path $PSScriptRoot "title-bar-cases.ps1")
 . (Join-Path $PSScriptRoot "palette-cases.ps1")
+. (Join-Path $PSScriptRoot "pick-ask-cases.ps1")
 . (Join-Path $PSScriptRoot "settings-cases.ps1")
 . (Join-Path $PSScriptRoot "panes-cases.ps1")
 . (Join-Path $PSScriptRoot "sidebar-resize-cases.ps1")
@@ -275,7 +276,6 @@ $shellTeardowns = @{}
 
 . (Join-Path $PSScriptRoot "wsl-cases.ps1")
 . (Join-Path $PSScriptRoot "docker-remote-cases.ps1")
-. (Join-Path $PSScriptRoot "session-exit-cases.ps1")
 . (Join-Path $PSScriptRoot "overlay-cases.ps1")
 
 # Note marks a step in the log, so a case that stops shows where.

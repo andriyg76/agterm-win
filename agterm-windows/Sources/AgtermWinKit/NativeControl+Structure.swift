@@ -65,7 +65,7 @@ extension NativeControl {
         return .success(.local)
     }
 
-    private static func owner(ofSession id: UUID, host: NativeControlHost) -> Destination {
+    static func owner(ofSession id: UUID, host: NativeControlHost) -> Destination {
         guard host.localStore.session(withID: id) == nil else { return .local }
         for server in host.remoteServers {
             let window = remoteWindowID(server.name)

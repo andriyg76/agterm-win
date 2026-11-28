@@ -37,7 +37,11 @@ final class NativeTerminal {
     static var scrollLines = GeneralSettings.defaultScrollLines
     /// onExit runs with the exit code when the started program exits.
     var onExit: ((Int) -> Void)?
-    var isRunning: Bool { console != nil }
+    /// started is whether a program was ever started here, `TerminalSurface.isRealized`.
+    private(set) var started = false
+    private(set) var paneToken = ""
+    /// backedByZmx is whether this pane's program runs under a Live sessions daemon.
+    var backedByZmx = false
     /// onCloseKey, once the program has exited, takes the next key instead of dropping it: `overlay open --wait`.
     var onCloseKey: (() -> Void)?
     /// background is this terminal's own background as 0xRRGGBB over the theme's: an overlay's `--color`.
@@ -130,6 +134,8 @@ final class NativeTerminal {
     /// start replaces whatever ran in the terminal with `commandLine` on a fresh screen.
     func start(_ commandLine: String, directory: String? = nil, environment: [String: String]? = nil) {
         reset()
+        started = true
+        paneToken = environment?["AGTERM_PANE_ID"] ?? ""
         runsInWSL = TerminalInput.runsInWSL(commandLine)
         let generation = generation, window = window
         do {
@@ -642,7 +648,24 @@ final class NativeTerminal {
         nt_destroy(terminal)
         terminal = nil
         if let window { terminals[window] = nil }
+        window = nil
     }
+}
+
+extension NativeTerminal: PaneRoleMutableSurface {
+    var isRealized: Bool { started }
+
+    /// teardown hides the terminal and destroys it once the message that ended it has returned; a second call, or one
+    /// after its window went with a parent, does nothing.
+    func teardown() {
+        guard let window else { return }
+        ShowWindow(window, SW_HIDE)
+        DispatchQueue.main.async { if IsWindow(window) { DestroyWindow(window) } }
+    }
+
+    // a pane's title and folder are routed by the slot that holds its terminal, so a role change moves nothing here
+    func promoteToPrimaryPane() {}
+    func setPaneRole(_ role: SwappablePaneRole) {}
 }
 
 /// showMenu opens a dark popup of `entries` at a screen point and returns what was picked, nil when dismissed.
