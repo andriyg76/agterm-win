@@ -183,9 +183,13 @@ public final class RemotePresentationClient {
     /// overlays or pages leaves it false and stays a mirror, so the origin keeps those for a viewer that can.
     public let presents: Bool
 
+    /// kinds is what a non-observer hello lists: the origin hands over only what the hello names, so a viewer short of a
+    /// Mac's surfaces lists less and the origin refuses or keeps the rest itself.
+    public let kinds: [String]
+
     public init(argv: [String], presentationVersion: Int?, transport: RemotePresentationTransport,
                 effects: RemotePresentationEffects, now: @escaping () -> Date = Date.init, observer: Bool = false,
-                presents: Bool = true) {
+                presents: Bool = true, kinds: [String] = PresentationHub.supportedKinds) {
         self.argv = argv
         self.presentationVersion = presentationVersion
         self.transport = transport
@@ -193,6 +197,7 @@ public final class RemotePresentationClient {
         self.now = now
         self.observer = observer
         self.presents = presents
+        self.kinds = kinds
     }
 
     /// Opens the stream. An origin that predates the protocol is never launched at all.
@@ -420,7 +425,7 @@ public final class RemotePresentationClient {
             onLine: { [weak self] line in self?.receive(line, launch: launch) },
             onClose: { [weak self] reason in self?.linkClosed(reason: reason, launch: launch) })
         link = opened
-        let hello = PresentationHello(version: PresentationCodec.version, kinds: observer ? Self.observerKinds : PresentationHub.supportedKinds,
+        let hello = PresentationHello(version: PresentationCodec.version, kinds: observer ? Self.observerKinds : kinds,
                                       mode: observer || !presents ? .mirror : .presenter)
         send(.hello(hello), on: opened)
     }
