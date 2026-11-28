@@ -195,7 +195,9 @@ function Get-TealSpan($Shell, [IntPtr]$Window, [int]$Row) {
     for ($x = 0; $x -lt $rect.Right; $x++) {
         for ($y = $Row * $height; $y -lt ($Row + 1) * $height; $y++) {
             $c = $shot.Bitmap.GetPixel($origin.X - $client.X + $x + $shot.X, $origin.Y - $client.Y + $y + $shot.Y)
-            if ($c.R -lt 0x70 -and $c.G -gt 0x90 -and $c.B -gt 0xA0 -and $c.B - $c.R -gt 0x60) {
+            $light = [Math]::Abs($c.R - 0x30) + [Math]::Abs($c.G - 0xB0) + [Math]::Abs($c.B - 0xC7)
+            $dark = [Math]::Abs($c.R - 0x40) + [Math]::Abs($c.G - 0xC8) + [Math]::Abs($c.B - 0xE0)
+            if ([Math]::Min($light, $dark) -le 24) {
                 if ($null -eq $left) { $left = $x }
                 $right = $x
             }
