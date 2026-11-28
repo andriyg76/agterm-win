@@ -10,7 +10,7 @@ public enum NativeMenu {
              deleteWorkspace, toggleFlag, toggleFlaggedView, focusWorkspace, toggleWorkspaceFilter, previousWorkspace, nextWorkspace,
              newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar, editProfiles, copyName, revealSession,
              expandWorkspaces, collapseWorkspaces, toggleWorkspaceCollapse, toggleFullscreen, clearFlagged, editFlaggedSessions,
-             flagAllSessions
+             flagAllSessions, addToFocus, clearFocus, editFocusedWorkspaces
 
         public var title: String {
             switch self {
@@ -58,6 +58,9 @@ public enum NativeMenu {
             case .clearFlagged: "Clear Flagged"
             case .editFlaggedSessions: "Edit Flagged Sessions…"
             case .flagAllSessions: "Flag All Sessions"
+            case .addToFocus: "Add to Focus"
+            case .clearFocus: "Clear Focus"
+            case .editFocusedWorkspaces: "Edit Focused Workspaces…"
             case .focusWorkspace: "Focus"
             case .toggleWorkspaceFilter: "Toggle Workspace Filter"
             case .previousWorkspace: "Previous Workspace"
@@ -78,7 +81,7 @@ public enum NativeMenu {
             switch self {
             case .newWorkspace, .renameWorkspace, .deleteWorkspace, .focusWorkspace, .toggleWorkspaceFilter, .toggleFlaggedView,
                  .previousWorkspace, .nextWorkspace, .toggleFlag, .newCompanion, .convertCompanion, .expandWorkspaces,
-                 .collapseWorkspaces, .toggleWorkspaceCollapse, .clearFlagged, .flagAllSessions: true
+                 .collapseWorkspaces, .toggleWorkspaceCollapse, .clearFlagged, .flagAllSessions, .addToFocus, .clearFocus: true
             default: false
             }
         }
@@ -338,7 +341,9 @@ public enum NativeMenu {
         return [sidebar, .separator]
             + fontSizing(shortcuts) + [.separator, .command(.selectTheme), .separator, flaggedView(structure, shortcuts), flag,
                 .command(.clearFlagged, enabled: structure.canClearFlagged, shortcuts), .command(.editFlaggedSessions, shortcuts),
-                .separator, focus, workspaceFilter(structure, shortcuts), .command(.expandWorkspaces, enabled: structure.workspaceRows, shortcuts),
+                .separator, focus, .command(.addToFocus, enabled: structure.workspace == true && !structure.focused, shortcuts),
+                workspaceFilter(structure, shortcuts), .command(.clearFocus, enabled: structure.canFilter, shortcuts),
+                .command(.editFocusedWorkspaces, shortcuts), .command(.expandWorkspaces, enabled: structure.workspaceRows, shortcuts),
                 .command(.collapseWorkspaces, enabled: structure.workspaceRows, shortcuts), workspaceFold(structure, shortcuts), .separator,
                 .command(.toggleSplit, enabled: view.canSplit, shortcuts), .command(.toggleHorizontalSplit, enabled: view.canSplit, shortcuts),
                 .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), scratch, overlay,
@@ -413,8 +418,11 @@ public enum NativeMenu {
         if let named = structure.workspace {
             var focus = Entry.command(.focusWorkspace, enabled: named, shortcuts)
             focus.checked = structure.focused
+            let member = Command.addToFocus
             menu += [.command(.renameWorkspace, enabled: named, shortcuts), .command(.copyName, enabled: named, shortcuts),
-                     .command(.deleteWorkspace, enabled: named, shortcuts), workspaceFold(structure, shortcuts), focus]
+                     .command(.deleteWorkspace, enabled: named, shortcuts), workspaceFold(structure, shortcuts), focus,
+                     Entry(title: structure.focused ? "Remove from Focus" : member.title, shortcut: shortcuts[member] ?? member.shortcut,
+                           pick: .command(member), enabled: named, children: [])]
             if named {
                 let flagAll = Command.flagAllSessions
                 menu.append(Entry(title: structure.allFlagged ? "Unflag All Sessions" : flagAll.title,

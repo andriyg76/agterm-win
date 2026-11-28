@@ -60,6 +60,23 @@ struct PaletteTests {
         #expect(rows[1].target == .flag(api.id))
     }
 
+    @Test func theFocusEditorListsEveryWorkspaceMarkingTheMembers() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let dev = Workspace(name: "dev", sessions: [Session(initialCwd: "/home/u", customName: "api")])
+        let ops = Workspace(name: "ops")
+        let local = AppStore(workspaces: [dev, ops], persistence: PersistenceStore(directory: directory), paneFinalizer: nil, headless: true)
+        local.setFocusMembership(ops.id, member: true)
+        let server = AppStore(workspaces: [Workspace(name: "db", sessions: [Session(initialCwd: "/home/u", customName: "a"), Session(initialCwd: "/home/u", customName: "b")])],
+                              persistence: PersistenceStore(directory: directory, fileName: "server.json"), paneFinalizer: nil, headless: true)
+        let rows = Palette.focusRows([(nil, local, true), ("WSL Ubuntu", server, false)]).filter { $0.title != ControlWorkspaceNode.rootLabel }
+        #expect(rows.map(\.title) == ["dev", "ops", "db"])
+        #expect(rows.map(\.subtitle) == ["1 session", "0 sessions", "WSL Ubuntu · 2 sessions"])
+        #expect(rows.map(\.detail) == ["", "\u{2713}", ""])
+        #expect(rows.map(\.enabled) == [true, true, false])
+        #expect(rows[1].target == .focus(ops.id))
+    }
+
     @Test func unseenAndAttentionMarkASession() {
         let quiet = Palette.Local(id: UUID(), name: "a", exited: false, attention: true)
         let counted = Palette.Local(id: UUID(), name: "b", exited: false, attention: true, unseen: 3)
