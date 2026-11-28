@@ -44,10 +44,9 @@ function Wait-ContainerBooted {
     } 60
 }
 
-# The preparation builds the image, starts the container and installs agterm-server before the window starts, as a user
-# would; a failure is the case's first finding. The container lives until the case's teardown, which runs either way.
-$shellPreparations["docker-remote"] = {
-    param($state)
+# Start-DockerRemote builds the image, starts the container and installs agterm-server before the window starts, as a
+# user would; a failure is the case's first finding. The container lives until Stop-DockerRemote, which runs either way.
+function Start-DockerRemote([string]$state) {
     try {
         $dir = Split-Path $state
         $tty = Join-Path $dir "docker-tty.exe"
@@ -88,16 +87,19 @@ $shellPreparations["docker-remote"] = {
         $dockerRemote.Failure = "preparation: $($_.Exception.Message)"
     }
 }
-$shellLaunches["docker-remote"] = @{ Minimized = $true }
-$shellCaseLimits["docker-remote"] = 420
-$shellTeardowns["docker-remote"] = {
-    param($Shell)
+
+function Stop-DockerRemote($Shell) {
     if ($dockerRemote.Container) {
         Invoke-Docker @("logs", "--tail", "200", $dockerRemote.Container) | % { Set-Content (Join-Path $Shell.Dir "container.log") $_.Out }
         Invoke-Docker @("rm", "-f", $dockerRemote.Container) | Out-Null
     }
     Invoke-Docker @("rmi", $dockerRemoteImage) | Out-Null
 }
+
+$shellPreparations["docker-remote"] = { param($state) Start-DockerRemote $state }
+$shellLaunches["docker-remote"] = @{ Minimized = $true }
+$shellCaseLimits["docker-remote"] = 420
+$shellTeardowns["docker-remote"] = { param($Shell) Stop-DockerRemote $Shell }
 
 # Wait-SessionText waits for the session's screen to match, and returns it.
 function Wait-SessionText([string]$State, [string]$Id, [string]$Pattern, [int]$Seconds = 30) {
@@ -206,5 +208,70 @@ $shellCases["docker-remote"] = {
         Set-Content (Join-Path $Shell.Dir "reconnect.txt") "not reconnected: $($remote | ConvertTo-Json -Compress -Depth 4)"
     }
     Save-Snapshot $Shell "after-restart"
+    $failures
+}
+
+# an agterm-server session's split, swap and scratch are the server's, its ratio and focus this window's; each pane is
+# typed and read on its own (needs Docker with Linux containers)
+$shellPreparations["server-panes"] = { param($state) Start-DockerRemote $state }
+$shellCaseLimits["server-panes"] = 420
+$shellTeardowns["server-panes"] = { param($Shell) Stop-DockerRemote $Shell }
+$shellCases["server-panes"] = {
+    param($Shell)
+    $state = $Shell.State
+    if ($dockerRemote.Failure) { return @($dockerRemote.Failure) }
+    $window = Get-ShellWindow $Shell
+    $opened = Invoke-Ctl $state @("window", "remote", "open", $dockerRemoteName)
+    if (-not $opened.ok) { return @("window remote open replied $($opened | ConvertTo-Json -Compress)") }
+    if (-not (Wait-Until { (Get-DockerRemoteWindow $state).remote.state -eq "connected" } 60)) { return @("$dockerRemoteName did not connect") }
+    $session = New-DockerSession $state
+    if ($session.Failure) { return @($session.Failure) }
+    $id = $session.Id
+    Invoke-Ctl $state @("session", "select", "--target", $id) | Out-Null
+    if (-not (Wait-Until { $n = Get-Node $state $id; $n.presentation.state -eq "connected" -and $n.presentation.mode -eq "presenter" } 30)) {
+        return @("presentation is not a connected presenter: $((Get-Node $state $id).presentation | ConvertTo-Json -Compress)")
+    }
+    $failures = @()
+
+    Note "split"
+    $reply = Invoke-Ctl $state @("session", "split", "on", "--target", $id)
+    if (-not $reply.ok) { return @("session split replied $($reply | ConvertTo-Json -Compress)") }
+    if (-not (Wait-Until { $n = Get-Node $state $id; $n.split -and $n.hasSplit } 30)) { return @("the server row never reported its split") }
+    if (-not (Wait-Until { @(Get-Panes $window).Count -eq 2 } 15)) { $failures += "$(@(Get-Panes $window).Count) terminal(s) are visible, not 2" }
+    if (-not (Wait-Until { (Get-PaneText $state $id "right") -match "\$ " } 30)) { return $failures + "the server split never showed a prompt" }
+    Invoke-Ctl $state @("session", "type", "--target", $id, "--pane", "right", "echo server-split-ok`r") | Out-Null
+    if (-not (Wait-Until { (Get-PaneText $state $id "right") -match "server-split-ok" } 15)) { $failures += "the server split did not run what was typed into it" }
+    if ((Get-PaneText $state $id "left") -match "server-split-ok") { $failures += "typing into the server split reached the primary pane" }
+    Save-Snapshot $Shell "server-split"
+
+    Note "ratio and focus"
+    $resized = Invoke-Ctl $state @("session", "resize", "--target", $id, "--split-ratio", "0.3")
+    if ($resized.result.ratio -ne 0.3) { $failures += "resize replied $($resized | ConvertTo-Json -Compress)" }
+    $panes = Get-Panes $window | Sort-Object { (Get-Rect $_).Left }
+    if ($panes.Count -eq 2) {
+        $left = Get-Rect $panes[0]; $right = Get-Rect $panes[1]
+        $share = ($left.Right - $left.Left) / (($left.Right - $left.Left) + ($right.Right - $right.Left))
+        if ([Math]::Abs($share - 0.3) -gt 0.03) { $failures += "the primary pane takes {0:N2} of the width, not 0.30" -f $share }
+    }
+    Invoke-Ctl $state @("session", "focus", "right", "--target", $id) | Out-Null
+    if (-not (Get-Node $state $id).splitFocused) { $failures += "focus right left the primary pane focused" }
+
+    Note "scratch"
+    $scratch = Invoke-Ctl $state @("session", "scratch", "on", "--target", $id)
+    if (-not $scratch.ok) { $failures += "scratch replied $($scratch | ConvertTo-Json -Compress)" }
+    if (-not (Wait-Until { (Get-Node $state $id).scratch } 30)) { $failures += "the server row never reported its scratch shown" }
+    if (-not (Wait-Until { @(Get-Panes $window).Count -eq 1 -and (Get-PaneText $state $id "scratch") -match "\$ " } 30)) {
+        $failures += "the scratch is not the one terminal in view with a prompt"
+    } else {
+        Invoke-Ctl $state @("session", "type", "--target", $id, "--pane", "scratch", "echo server-scratch-ok`r") | Out-Null
+        if (-not (Wait-Until { (Get-PaneText $state $id "scratch") -match "server-scratch-ok" } 15)) { $failures += "the scratch did not run what was typed into it" }
+    }
+    Invoke-Ctl $state @("session", "scratch", "off", "--target", $id) | Out-Null
+    if (-not (Wait-Until { -not (Get-Node $state $id).scratch -and @(Get-Panes $window).Count -eq 2 } 30)) { $failures += "hiding the scratch did not bring both panes back" }
+
+    Note "close"
+    Invoke-Ctl $state @("session", "split", "close", "--target", $id) | Out-Null
+    if (-not (Wait-Until { -not (Get-Node $state $id).hasSplit -and @(Get-Panes $window).Count -eq 1 } 30)) { $failures += "split close left the split" }
+    Invoke-Ctl $state @("session", "close", "--target", $id) | Out-Null
     $failures
 }

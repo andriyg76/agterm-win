@@ -34,8 +34,8 @@ function ShellCaseSkipReason([string]$Name) {
     if ($Name -eq "overlay-keys" -and $native -eq "ARM64") {
         return "arm64: Ctrl+W closes the session under a program overlay instead of dismissing the overlay (x64 passes; SendChord/GetFocus on windows-11-arm). Re-enable when fixed."
     }
-    if ($Name -eq "docker-remote") { return DockerRemoteSkipReason }
-    if ($Name -in @("overlay-server-program", "overlay-server-html", "presentation-surfaces", "server-panes") -and -not $env:AGTERM_WIN_GATE_WSL) {
+    if ($Name -in @("docker-remote", "server-panes")) { return DockerRemoteSkipReason }
+    if ($Name -in @("overlay-server-program", "overlay-server-html", "presentation-surfaces") -and -not $env:AGTERM_WIN_GATE_WSL) {
         return "CI runs overlay-server-disconnected; set AGTERM_WIN_GATE_WSL for full WSL catalog overlay/presentation gates"
     }
     return $null

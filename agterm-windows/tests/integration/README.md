@@ -71,7 +71,7 @@ passed and are recorded in `cases.json` under `skipped`.
 | Case | Where | Issue |
 |------|--------|--------|
 | `overlay-keys` | native **ARM64** (`windows-11-arm`) | After `SendChord` sends Ctrl+W to the overlay terminal, the session under the overlay is closed instead of dismissing the overlay only. The same case passes on x64. Suspect focus / duplicate Close Session delivery on the arm64 runner. Track in PR/overlay work; remove the skip when arm64 matches x64. |
-| `overlay-server-program`, `overlay-server-html`, `presentation-surfaces`, `server-panes` | CI without `AGTERM_WIN_GATE_WSL` | **SKIP** (smoke runs in `overlay-server-disconnected`). Set `AGTERM_WIN_GATE_WSL` for full WSL catalog gates (`docs/remote-linux-gate.md`). |
+| `overlay-server-program`, `overlay-server-html`, `presentation-surfaces` | CI without `AGTERM_WIN_GATE_WSL` | **SKIP** (smoke runs in `overlay-server-disconnected`). Set `AGTERM_WIN_GATE_WSL` for full WSL catalog gates (`docs/remote-linux-gate.md`). |
 
 | Case | Scope | CI |
 |------|--------|-----|
@@ -82,7 +82,7 @@ passed and are recorded in `cases.json` under `skipped`.
 | `overlay-server-disconnected` | WSL smoke, overlay on unknown id | always |
 | `overlay-server-program` | WSL catalog program overlay | skip unless `AGTERM_WIN_GATE_WSL` |
 | `overlay-server-html` | WSL catalog `--html` | skip unless `AGTERM_WIN_GATE_WSL` |
-| `server-panes` | WSL catalog split, scratch, ratio and focus | skip unless `AGTERM_WIN_GATE_WSL` |
+| `server-panes` | agterm-server split, scratch, ratio and focus, on the `docker-remote` container | skip without Docker running Linux containers |
 
 Sandbox needs the `Containers-DisposableClientVM` feature, a restart, and one manual start from Start to finish
 installing its client. Each case leaves `screen.txt`, its state directory (`agterm-win.log`, `crash.log`) and
