@@ -113,6 +113,14 @@ struct NativeMenuTests {
         #expect(flat.first { $0.pick == .command(.expandWorkspaces) }?.enabled == false)
     }
 
+    @Test func fullScreenIsTitledForWhatItDoesOnF11() {
+        var view = NativeMenu.View()
+        let enter = NativeMenu.view(view).first { $0.pick == .command(.toggleFullscreen) }
+        #expect(enter?.title == "Enter Full Screen" && enter?.shortcut == "F11")
+        view.fullscreen = true
+        #expect(NativeMenu.view(view).first { $0.pick == .command(.toggleFullscreen) }?.title == "Exit Full Screen")
+    }
+
     @Test func copyNameFollowsRenameOnSessionAndWorkspaceRows() {
         let session = NativeMenu.sidebar(profiles: profiles, defaultProfile: 0, servers: [], destination: nil,
                                          canLaunch: true, canRename: true, canRestart: true, canClose: true).compactMap(\.pick)

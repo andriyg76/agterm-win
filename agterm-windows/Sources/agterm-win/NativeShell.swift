@@ -164,6 +164,8 @@ final class NativeShell {
     let zmxClient: ZmxClient
     var window: HWND?
     var tree: UnsafeMutableRawPointer?
+    /// beforeFullscreen is the style and placement full screen replaced, nil while the window is not full screen.
+    var beforeFullscreen: (style: LONG_PTR, placement: WINDOWPLACEMENT)?
     var noticeWindow: NoticeBarWindow?
     private var findBar: HWND?
     private var findFailed = false
@@ -742,7 +744,8 @@ final class NativeShell {
         for id in serverHuds.keys { clearServerHud(id) }
         var placement = WINDOWPLACEMENT()
         placement.length = UINT(MemoryLayout<WINDOWPLACEMENT>.size)
-        if GetWindowPlacement(window, &placement) {
+        if let saved = beforeFullscreen?.placement { placement = saved } else if !GetWindowPlacement(window, &placement) { placement.length = 0 }
+        if placement.length != 0 {
             let rect = placement.rcNormalPosition
             settings.frame = .init(left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom)
             settings.maximized = placement.showCmd == UINT(SW_SHOWMAXIMIZED)
@@ -1439,10 +1442,12 @@ final class NativeShell {
     func windowCommand(_ command: NativeMenu.Command) {
         log("native shell: \(command)")
         if command == .attentionPalette, pickPalette != nil { return }
-        if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .selectTheme, .about, .quit, .editKeymap, .editProfiles, .reloadKeymap, .commandPalette, .toggleSidebar].contains(command) {
+        if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .selectTheme, .about, .quit, .editKeymap, .editProfiles, .reloadKeymap, .commandPalette, .toggleSidebar,
+              .toggleFullscreen].contains(command) {
             closeDashboard()
         }
         switch command {
+        case .toggleFullscreen: setFullscreen(!fullscreen)
         case .toggleSidebar:
             setSidebarVisible(!settings.sidebarVisible)
             focus()
@@ -2826,7 +2831,7 @@ final class NativeShell {
     private func titleBar(of window: HWND?) -> TitleBar {
         var client = RECT()
         GetClientRect(window, &client)
-        return TitleBar(width: client.right, sidebarWidth: sidebarWidth, dpi: dpi)
+        return TitleBar(width: client.right, sidebarWidth: sidebarWidth, dpi: dpi, hidden: fullscreen)
     }
 
     func invalidateTitleBar() {
@@ -2878,7 +2883,9 @@ final class NativeShell {
         }
         let top = params.pointee.rgrc.0.top
         let result = DefWindowProcW(window, UINT(WM_NCCALCSIZE), wParam, lParam)
-        params.pointee.rgrc.0.top = top + (IsZoomed(window) ? frameThickness(window) : 0)
+        // full screen drops the frame, so a maximized window's top no longer hangs above the monitor
+        let framed = GetWindowLongPtrW(window, GWL_STYLE) & LONG_PTR(WS_THICKFRAME) != 0
+        params.pointee.rgrc.0.top = top + (framed && IsZoomed(window) ? frameThickness(window) : 0)
         return result
     }
 

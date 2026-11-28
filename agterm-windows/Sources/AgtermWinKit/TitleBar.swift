@@ -64,12 +64,13 @@ public struct TitleBar: Equatable, Sendable {
     private let sidebarWidth: Int32
     public let dpi: UInt32
 
-    public init(width: Int32, sidebarWidth: Int32, dpi: UInt32) {
+    /// A `hidden` bar, the full-screen window's, has no height, so nothing in it is drawn or hit.
+    public init(width: Int32, sidebarWidth: Int32, dpi: UInt32, hidden: Bool = false) {
         func scaled(_ value: Int32) -> Int32 { Int32((Int64(value) * Int64(dpi) + 48) / 96) }
         self.width = width
         self.sidebarWidth = sidebarWidth
         self.dpi = dpi
-        height = scaled(40)
+        height = hidden ? 0 : scaled(40)
         contentTop = height
         actionWidth = scaled(40)
         captionWidth = scaled(46)

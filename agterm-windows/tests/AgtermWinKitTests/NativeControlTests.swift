@@ -242,6 +242,8 @@ private final class FakeHost: NativeControlHost {
 
     var sidebarVisible = true
     func setSidebarVisible(_ visible: Bool) { sidebarVisible = visible }
+    var fullscreen = false
+    func setFullscreen(_ on: Bool) { fullscreen = on }
     var sidebarWidthPoints: Double = AppStore.sidebarWidthDefault
     func setSidebarWidth(points: Double) { sidebarWidthPoints = AppStore.clampSidebarWidth(points) }
 
@@ -345,6 +347,16 @@ struct NativeControlTests {
         #expect(await handle(ControlRequest(cmd: .sidebarExpand), host).ok)
         let flagged = folds()
         #expect(flagged == [true, false])
+    }
+
+    @Test func windowFullscreenTogglesTheOneWindowAndWindowListReadsItBack() async {
+        let host = FakeHost()
+        let entered = await handle(ControlRequest(cmd: .windowFullscreen), host)
+        #expect(entered.ok && entered.result?.id == LocalWindow.id.uuidString && host.fullscreen)
+        let windows = await handle(ControlRequest(cmd: .windowList), host).result?.windows ?? []
+        #expect(windows.first?.fullscreen == true)
+        #expect(await handle(ControlRequest(cmd: .windowFullscreen, target: LocalWindow.id.uuidString), host).ok && !host.fullscreen)
+        #expect(await handle(ControlRequest(cmd: .windowFullscreen, target: "ffffffff"), host).ok == false && !host.fullscreen)
     }
 
     @Test func windowListPutsTheLocalWindowFirst() async {
