@@ -270,6 +270,30 @@ $shellCases["server-panes"] = {
     Invoke-Ctl $state @("session", "scratch", "off", "--target", $id) | Out-Null
     if (-not (Wait-Until { -not (Get-Node $state $id).scratch -and @(Get-Panes $window).Count -eq 2 } 30)) { $failures += "hiding the scratch did not bring both panes back" }
 
+    # mail between the server's own panes reaches Windows as the pane's pending count and a `message` event, while a
+    # Windows sender is refused: the server row's panes live in its server's bus (#158)
+    Note "server mail"
+    $out = Join-Path $Shell.Dir "server-message-events.jsonl"
+    $env:AGTERM_STATE_DIR = $state
+    try {
+        $stream = Start-Process -FilePath $ctl -ArgumentList @("events", "--kind", "message", "--json") -NoNewWindow -PassThru `
+            -RedirectStandardOutput $out
+    } finally { Remove-Item Env:AGTERM_STATE_DIR }
+    Start-Sleep -Seconds 2
+    Invoke-Ctl $state @("session", "type", "--target", $id, "--pane", "left",
+        "`$HOME/.local/bin/agtermctl msg send --to ${id}:right server-mail-ok`r") | Out-Null
+    if (-not (Wait-Until { (Get-PaneNode $state $id "right").pendingMessages -eq 1 } 30)) {
+        $failures += "the server split never showed one pending message: $(Get-PaneText $state $id 'left')"
+    }
+    $event = Wait-Until { if (Test-Path $out) { $text = Get-Content $out -Raw; if ($text -match $id) { $text } } } 15
+    if (-not $event) { $failures += "no message event for the server row: '$(if (Test-Path $out) { Get-Content $out -Raw })'" }
+    Stop-Process -Id $stream.Id -Force -ErrorAction SilentlyContinue
+    $refused = Invoke-Ctl $state @("msg", "send", "--to", "${id}:left", "x")
+    if (@($refused.result.rejected)[0].detail -ne "remote session") { $failures += "a Windows send to the server row replied $($refused | ConvertTo-Json -Compress -Depth 5)" }
+    Invoke-Ctl $state @("session", "type", "--target", $id, "--pane", "right", "`$HOME/.local/bin/agtermctl msg read --ack`r") | Out-Null
+    if (-not (Wait-Until { (Get-PaneText $state $id "right") -match "server-mail-ok" } 15)) { $failures += "the server split did not read its mail" }
+    if (-not (Wait-Until { -not (Get-PaneNode $state $id "right").pendingMessages } 15)) { $failures += "the ack left the server mail pending" }
+
     # Windows' hello leaves out page.content, so the origin keeps a markdown page instead of handing it over (#152)
     Note "unlisted page kind"
     $page = Invoke-InContainer ('echo hi > page.md; $HOME/.local/bin/agtermctl session overlay open --markdown $HOME/page.md --target ' + $id)
