@@ -14,13 +14,13 @@ enforces it). The last 4-part tag, `v0.44.1.11`, counts as the Store's `0.44.101
 | `kind` | Branch | Next |
 |---|---|---|
 | `incremental` | `windows-port` or `version/v<major>.<minor>` | `0.44.1012` → `0.44.1013` |
-| `minor` | `windows-port` | `0.45.0`; also creates `version/v0.44` at the last `0.44` tag |
-| `major` | `windows-port` | `1.0.0`; also creates `version/v<previous line>` |
+| `minor` | `windows-port` | `0.45.1`; also creates `version/v0.44` at the last `0.44` tag |
+| `major` | `windows-port` | `1.0.1`; also creates `version/v<previous line>` |
 
 Moving `AGTERM_VERSION` to a new upstream release is a separate change (merge the upstream tag and bump the file in
 one PR) and implies no release kind.
 `agterm-windows/VERSION` holds the current line as `<major>.<minor>.0`, the version every unreleased build (CI,
-`stage.ps1`) carries. An `incremental` leaves it alone; a `minor` or `major` release commits the new line's `.0` to the
+`stage.ps1`) carries, so a line's first release is `.1`. An `incremental` leaves it alone; a `minor` or `major` release commits the new line's `.0` to the
 branch first and builds that commit. Locally, set it by hand before `release.ps1 -Publish` of a new line.
 A `version/v*` release maintains a superseded line and is published without GitHub's Latest.
 Any other branch or kind/branch pairing fails before the build, and `windows-port` refuses a patch for a line once its

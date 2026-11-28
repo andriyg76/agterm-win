@@ -1,6 +1,7 @@
 # agterm-win versions are its own major.minor.patch, independent of AGTERM_VERSION (the upstream pin the build is locked to).
 # windows-port releases any kind; version/v<major>.<minor> maintains a superseded line and releases only its patches.
-# agterm-windows\VERSION holds the line as major.minor.0 for unreleased builds; a minor or major release rewrites it.
+# agterm-windows\VERSION holds the line as major.minor.0 for unreleased builds, so a line's first release is .1;
+# a minor or major release rewrites it.
 #   scripts\release-version.ps1 -Kind major|minor|incremental [-Branch <name>]   the next version and its base tag
 #   scripts\release-version.ps1 -Version 0.44.1012 [-Branch <name>]             throws unless the branch may release it
 param(
@@ -35,7 +36,7 @@ if ($Version) {
     if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION must be a.b.c, got $Version" }
     if ($maintenance -and $Version -notlike "$line.*") { throw "$Branch releases only $line.<patch>, not $Version" }
     $versionLine = ($Version -split '\.')[0..1] -join '.'
-    if ($versionLine -ne $baseLine -and -not $Version.EndsWith(".0")) { throw "$Version skips the $versionLine line's .0 release" }
+    if ($versionLine -ne $baseLine -and -not $Version.EndsWith(".1")) { throw "$Version skips the $versionLine line's first release, .1" }
     if ($stored -and $stored -ne "$versionLine.0") { throw "VERSION is $stored; set it to $versionLine.0 before releasing $Version" }
     exit 0
 }
@@ -48,8 +49,8 @@ if (-not $maintenance -and $Kind -eq "incremental" -and (git -C $root ls-remote 
 }
 
 $next = switch ($Kind) {
-    "major" { "$($major + 1).0.0" }
-    "minor" { "$major.$($minor + 1).0" }
+    "major" { "$($major + 1).0.1" }
+    "minor" { "$major.$($minor + 1).1" }
     "incremental" { "$major.$minor.$($patch + 1)" }
 }
 if (git -C $root tag --list "v$next") { throw "v$next is already tagged" }
