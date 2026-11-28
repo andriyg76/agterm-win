@@ -1,0 +1,43 @@
+{
+    "version": "{{Version}}",
+    "description": "Native Windows port of agterm: a terminal with a workspace and session sidebar and a control API for scripts and coding agents.",
+    "homepage": "https://github.com/andriyg76/agterm-win",
+    "license": "MIT",
+    "notes": [
+        "Live sessions keep their zmx daemons running from the app folder after agterm-win quits, and scoop update refuses",
+        "to update while they run. End the sessions first, or allow it with: scoop config ignore_running_processes true"
+    ],
+    "architecture": {
+        "64bit": {
+            "url": "{{PortableUrlX64}}",
+            "hash": "{{PortableSha256X64}}"
+        },
+        "arm64": {
+            "url": "{{PortableUrlArm64}}",
+            "hash": "{{PortableSha256Arm64}}"
+        }
+    },
+    "bin": "agtermctl.exe",
+    "shortcuts": [
+        [
+            "agterm-win.exe",
+            "agterm-win"
+        ]
+    ],
+    "checkver": {
+        "github": "https://github.com/andriyg76/agterm-win"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/andriyg76/agterm-win/releases/download/v$version/agterm-win-$version-x64-portable.zip"
+            },
+            "arm64": {
+                "url": "https://github.com/andriyg76/agterm-win/releases/download/v$version/agterm-win-$version-arm64-portable.zip"
+            }
+        },
+        "hash": {
+            "url": "$url.sha256"
+        }
+    }
+}
