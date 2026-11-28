@@ -270,6 +270,13 @@ $shellCases["server-panes"] = {
     Invoke-Ctl $state @("session", "scratch", "off", "--target", $id) | Out-Null
     if (-not (Wait-Until { -not (Get-Node $state $id).scratch -and @(Get-Panes $window).Count -eq 2 } 30)) { $failures += "hiding the scratch did not bring both panes back" }
 
+    # Windows' hello leaves out page.content, so the origin refuses a markdown page instead of handing it over (#152)
+    Note "unlisted page kind"
+    $page = Invoke-InContainer ('printf "# hi\n" > page.md; $HOME/.local/bin/agtermctl session overlay open --markdown $HOME/page.md --target ' + $id)
+    if ($page.Code -eq 0) { $failures += "the origin opened a markdown page for a presenter that does not list page.content: $($page.Out)" }
+    if ((Get-Node $state $id).htmlOverlays) { $failures += "Windows was handed a markdown page it does not list" }
+    Note "refused: $(@($page.Out -split "`n")[0])"
+
     Note "close"
     Invoke-Ctl $state @("session", "split", "close", "--target", $id) | Out-Null
     if (-not (Wait-Until { -not (Get-Node $state $id).hasSplit -and @(Get-Panes $window).Count -eq 1 } 30)) { $failures += "split close left the split" }
