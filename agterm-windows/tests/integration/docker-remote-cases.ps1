@@ -272,8 +272,9 @@ $shellCases["server-panes"] = {
 
     # Windows' hello leaves out page.content, so the origin refuses a markdown page instead of handing it over (#152)
     Note "unlisted page kind"
-    $page = Invoke-InContainer ('printf "# hi\n" > page.md; $HOME/.local/bin/agtermctl session overlay open --markdown $HOME/page.md --target ' + $id)
+    $page = Invoke-InContainer ('echo hi > page.md; $HOME/.local/bin/agtermctl session overlay open --markdown $HOME/page.md --target ' + $id)
     if ($page.Code -eq 0) { $failures += "the origin opened a markdown page for a presenter that does not list page.content: $($page.Out)" }
+    elseif ($page.Out -notmatch "^Error:") { $failures += "the markdown page did not reach the origin's agtermctl: $($page.Out)" }
     if ((Get-Node $state $id).htmlOverlays) { $failures += "Windows was handed a markdown page it does not list" }
     Note "refused: $(@($page.Out -split "`n")[0])"
 
