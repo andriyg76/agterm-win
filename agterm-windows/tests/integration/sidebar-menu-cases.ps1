@@ -163,3 +163,99 @@ $shellCases["workspace-folds"] = {
     if (-not (Wait-Until { $f = Get-Folds $state; $f.ops -and -not $f.dev } 5)) { $failures += "Collapse Workspaces did not fold ops alone" }
     $failures
 }
+
+# Open-Submenu opens the item titled `Title` of an open menu and returns the submenu's window.
+function Open-Submenu($Shell, [IntPtr]$Menu, [string]$Title) {
+    $before = @([AgtermWin32]::Visible($Shell.Process.Id, "#32768"))
+    $position = [AgtermWin32]::MenuPosition($Menu, $Title)
+    if ($position -lt 0 -or -not (Click-MenuItem $Menu ([uint32]$position))) { return $null }
+    Wait-Until { [AgtermWin32]::Visible($Shell.Process.Id, "#32768") | ? { $before -notcontains $_ } | Select-Object -First 1 } 5
+}
+
+# Choose-Tint picks Tint > `Title` on the `Row`-th row's menu.
+function Choose-Tint($Shell, [IntPtr]$Window, [int]$Row, [string]$Title) {
+    $menu = Open-RowMenu $Shell $Window $Row
+    if (-not $menu) { return $false }
+    $tint = Open-Submenu $Shell $menu "Tint"
+    if (-not $tint) { Send-Escape $menu; return $false }
+    Choose-MenuItem $Shell $tint $Title
+}
+
+# Get-TealSpan is how wide the teal pixels (macOS teal, light or dark) of the sidebar's `Row`-th row spread, 0 with none.
+function Get-TealSpan($Shell, [IntPtr]$Window, [int]$Row) {
+    $tree = [AgtermWin32]::VisibleChildren($Window, "SysTreeView32") | Select-Object -First 1
+    $height = [int][AgtermWin32]::SendMessageW($tree, 0x111C, [IntPtr]::Zero, [IntPtr]::Zero)
+    $rect = New-Object AgtermWin32+Rect
+    [AgtermWin32]::GetClientRect($tree, [ref]$rect) | Out-Null
+    $origin = Get-ScreenPoint $tree 0 0
+    $client = Get-ScreenPoint $Window 0 0
+    $shot = Get-Shot $Window
+    $left = $null
+    $right = $null
+    for ($x = 0; $x -lt $rect.Right; $x++) {
+        for ($y = $Row * $height; $y -lt ($Row + 1) * $height; $y++) {
+            $c = $shot.Bitmap.GetPixel($origin.X - $client.X + $x + $shot.X, $origin.Y - $client.Y + $y + $shot.Y)
+            if ($c.R -lt 0x70 -and $c.G -gt 0x90 -and $c.B -gt 0xA0 -and $c.B - $c.R -gt 0x60) {
+                if ($null -eq $left) { $left = $x }
+                $right = $x
+            }
+        }
+    }
+    $shot.Bitmap.Dispose()
+    if ($null -eq $left) { 0 } else { $right - $left + 1 }
+}
+
+# Tint from the row menus colors a session's dot, then its name, a workspace starting on the last Show On pick, and
+# None clears it; the tree reads each back and session.tint's hex shows as the menu's checked Custom entry
+$shellCases["sidebar-tint"] = {
+    param($Shell)
+    $state = $Shell.State
+    $window = Get-ShellWindow $Shell
+    if (-not $window) { return @("no visible agterm-shell window") }
+    $id = New-PowerShellSession $state
+    if (-not $id -or -not (Wait-Prompt $state $id)) { return @("the session never reached its prompt") }
+    Get-SessionNodes $state | ? { $_.id -ne $id } | % { Invoke-Ctl $state @("session", "close", "--target", $_.id) | Out-Null }
+    $workspace = (Invoke-Ctl $state @("workspace", "new", "Tinted")).result.id
+    if (-not (Wait-Until { @(Get-SessionNodes $state).Count -eq 1 } 10)) { return @("the window did not settle on one session") }
+    $failures = @()
+    if ((Get-TealSpan $Shell $window 0) -ne 0) { $failures += "an untinted row already shows teal" }
+
+    Note "Tint > Teal starts on the icon"
+    if (-not (Choose-Tint $Shell $window 0 "Teal")) { return $failures + "the session row's menu has no Tint > Teal" }
+    if (-not (Wait-Until { $n = Get-Node $state $id; $n.tint -eq "teal" -and ($n.tintOn -join ",") -eq "icon" } 5)) {
+        $n = Get-Node $state $id
+        return $failures + "the session reads back tint '$($n.tint)' on '$($n.tintOn -join ",")', not teal on icon"
+    }
+    $dot = Wait-Until { $s = Get-TealSpan $Shell $window 0; if ($s -gt 0) { $s } } 5
+    if (-not $dot) { $failures += "no teal dot was drawn on the row" }
+    Save-ScreenSnapshot $Shell "tint-icon"
+
+    Note "Show On > Name"
+    if (-not (Choose-Tint $Shell $window 0 "Name")) { return $failures + "the Tint submenu has no Name" }
+    if (-not (Wait-Until { ((Get-Node $state $id).tintOn -join ",") -eq "name" } 5)) { $failures += "Show On > Name did not move the tint to the name" }
+    $name = Wait-Until { $s = Get-TealSpan $Shell $window 0; if ($s -gt 2 * $dot) { $s } } 5
+    if (-not $name) { $failures += "the teal name is no wider than the dot ($(Get-TealSpan $Shell $window 0) px vs $dot)" }
+    Save-ScreenSnapshot $Shell "tint-name"
+
+    Note "a workspace starts on the last Show On pick"
+    if (-not (Choose-Tint $Shell $window 1 "Orange")) { return $failures + "the workspace row's menu has no Tint > Orange" }
+    $tinted = Wait-Until { (Invoke-Ctl $state @("tree")).result.tree.workspaces | ? { $_.id -eq $workspace -and $_.tint -eq "orange" } } 5
+    if (-not $tinted) { $failures += "the workspace did not read back orange" }
+    elseif (($tinted.tintOn -join ",") -ne "name") { $failures += "the workspace started on '$($tinted.tintOn -join ",")', not the last pick, name" }
+
+    Note "None clears"
+    if (-not (Choose-Tint $Shell $window 0 "None")) { return $failures + "the Tint submenu has no None" }
+    if (-not (Wait-Until { -not (Get-Node $state $id).tint } 5)) { $failures += "None left the session tinted" }
+    if (-not (Wait-Until { (Get-TealSpan $Shell $window 0) -eq 0 } 5)) { $failures += "a cleared row still shows teal" }
+
+    Note "a hex from session.tint"
+    Invoke-Ctl $state @("session", "tint", "#123abc", "--target", $id) | Out-Null
+    if (-not (Wait-Until { (Get-Node $state $id).tint -eq "#123abc" } 5)) { $failures += "session tint set #123abc did not read back" }
+    $menu = Open-RowMenu $Shell $window 0
+    $tint = if ($menu) { Open-Submenu $Shell $menu "Tint" }
+    if (-not $tint) { $failures += "the Tint submenu did not open" }
+    elseif ([AgtermWin32]::MenuTitles($tint) -notcontains "Custom #123abc") { $failures += "the submenu lists $([AgtermWin32]::MenuTitles($tint) -join ',')" }
+    if ($tint) { Send-Escape $tint }
+    if ($menu) { Send-Escape $menu }
+    $failures
+}

@@ -15,7 +15,7 @@
 namespace {
 
 // Decoration is what an agent reported for a session row: a status glyph drawn at the row's right edge and an info
-// line drawn under its title, which makes the row two lines tall.
+// line drawn under its title, which makes the row two lines tall; and a session or workspace row's tint.
 // A fixed table, since NativeShim links no C++ library; a sidebar past its size draws its later rows plain.
 struct Decoration {
     HTREEITEM item;
@@ -23,7 +23,17 @@ struct Decoration {
     COLORREF color;
     bool blink;
     wchar_t info[256];
+    COLORREF tintLight, tintDark;
+    int tintParts;
 };
+
+constexpr int tintIcon = 1, tintName = 2;
+
+COLORREF tintColor(const Decoration &decoration) { return nt_chrome_is_dark() ? decoration.tintDark : decoration.tintLight; }
+
+// ownsTitle is whether the post-paint pass draws the title, over a default label drawn in the background color: a
+// two-line row's and one whose tint dot pushes the title right.
+bool ownsTitle(const Decoration &decoration) { return decoration.info[0] || decoration.tintParts & tintIcon; }
 
 constexpr int maxDecorations = 512;
 Decoration decorations[maxDecorations];
@@ -37,8 +47,7 @@ const Decoration *findDecoration(HTREEITEM item) {
     return nullptr;
 }
 
-// drawDecoration paints a session row's glyph and, for a row with an info line, both of its lines over the default
-// label, which was drawn in the background color
+// drawDecoration paints a session row's glyph, its tint dot, and the title and info line a row that owns its title draws
 void drawDecoration(const NMTVCUSTOMDRAW *draw, HTREEITEM handle, const Decoration &decoration, COLORREF text) {
     HWND window = draw->nmcd.hdr.hwndFrom;
     HDC dc = draw->nmcd.hdc;
@@ -73,7 +82,21 @@ void drawDecoration(const NMTVCUSTOMDRAW *draw, HTREEITEM handle, const Decorati
             DrawTextW(dc, decoration.glyph, -1, &at, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
         }
     }
-    if (decoration.info[0]) {
+    if (ownsTitle(decoration)) {
+        int shift = 0;
+        if (decoration.tintParts & tintIcon) {
+            const int dot = MulDiv(8, dpi, 96);
+            const int lineBottom = decoration.info[0] ? (row.top + row.bottom) / 2 : row.bottom;
+            const int top = row.top + (lineBottom - row.top - dot) / 2;
+            const auto oldBrush = SelectObject(dc, GetStockObject(DC_BRUSH));
+            const auto oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
+            const auto oldBrushColor = SetDCBrushColor(dc, tintColor(decoration));
+            Ellipse(dc, label.left + 2, top, label.left + 2 + dot, top + dot);
+            SetDCBrushColor(dc, oldBrushColor);
+            SelectObject(dc, oldPen);
+            SelectObject(dc, oldBrush);
+            shift = dot + MulDiv(6, dpi, 96);
+        }
         wchar_t title[512] = {};
         TVITEMW item{};
         item.mask = TVIF_TEXT;
@@ -82,12 +105,14 @@ void drawDecoration(const NMTVCUSTOMDRAW *draw, HTREEITEM handle, const Decorati
         item.cchTextMax = 512;
         SendMessageW(window, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&item));
         int right = row.right - margin - (glyphWidth ? glyphWidth + margin / 2 : 0);
-        int middle = (row.top + row.bottom) / 2;
-        RECT top{label.left + 2, row.top, right, middle}, bottom{label.left + 2, middle, right, row.bottom};
-        SetTextColor(dc, text);
+        int middle = decoration.info[0] ? (row.top + row.bottom) / 2 : row.bottom;
+        RECT top{label.left + 2 + shift, row.top, right, middle}, bottom{label.left + 2, middle, right, row.bottom};
+        SetTextColor(dc, decoration.tintParts & tintName ? tintColor(decoration) : text);
         DrawTextW(dc, title, -1, &top, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        SetTextColor(dc, nt_chrome_sb_dim());
-        DrawTextW(dc, decoration.info, -1, &bottom, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        if (decoration.info[0]) {
+            SetTextColor(dc, nt_chrome_sb_dim());
+            DrawTextW(dc, decoration.info, -1, &bottom, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        }
     }
     SetTextColor(dc, oldColor);
     SetBkMode(dc, oldMode);
@@ -158,9 +183,10 @@ extern "C" void nt_tree_clear(void *tree) {
     TreeView_DeleteAllItems(static_cast<HWND>(tree));
 }
 
-extern "C" void nt_tree_decorate(void *tree, void *item, const uint16_t *glyph, uint32_t rgb, int32_t blink, const uint16_t *info) {
+extern "C" void nt_tree_decorate(void *tree, void *item, const uint16_t *glyph, uint32_t rgb, int32_t blink, const uint16_t *info,
+                                 uint32_t tint_light, uint32_t tint_dark, int32_t tint_parts) {
     bool hasGlyph = glyph && glyph[0], hasInfo = info && info[0];
-    if ((!hasGlyph && !hasInfo) || decorationCount == maxDecorations) return;
+    if ((!hasGlyph && !hasInfo && !tint_parts) || decorationCount == maxDecorations) return;
     Decoration &decoration = decorations[decorationCount++];
     decoration.item = static_cast<HTREEITEM>(item);
     decoration.glyph[0] = decoration.info[0] = 0;
@@ -168,6 +194,9 @@ extern "C" void nt_tree_decorate(void *tree, void *item, const uint16_t *glyph, 
     if (hasInfo) wcsncpy_s(decoration.info, reinterpret_cast<const wchar_t *>(info), _TRUNCATE);
     decoration.color = RGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
     decoration.blink = blink != 0;
+    decoration.tintLight = RGB((tint_light >> 16) & 0xFF, (tint_light >> 8) & 0xFF, tint_light & 0xFF);
+    decoration.tintDark = RGB((tint_dark >> 16) & 0xFF, (tint_dark >> 8) & 0xFF, tint_dark & 0xFF);
+    decoration.tintParts = tint_parts;
     if (hasInfo) {
         TVITEMEXW change{};
         change.mask = TVIF_INTEGRAL;
@@ -242,7 +271,7 @@ extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *di
     if (draw->nmcd.dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
     int64_t tag = static_cast<int64_t>(draw->nmcd.lItemlParam);
     const auto handle = reinterpret_cast<HTREEITEM>(draw->nmcd.dwItemSpec);
-    const Decoration *found = tag > 0 ? findDecoration(handle) : nullptr;
+    const Decoration *found = tag != 0 ? findDecoration(handle) : nullptr;
     bool dim = tag > 0 && tag <= count && dimmed[tag - 1];
     const COLORREF text = dim ? nt_chrome_sb_dim() : nt_chrome_sb_text();
     if (draw->nmcd.dwDrawStage == CDDS_ITEMPOSTPAINT && found) {
@@ -257,8 +286,13 @@ extern "C" intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *di
         draw->clrTextBk = nt_chrome_sb_highlight();
         draw->nmcd.uItemState &= ~(CDIS_SELECTED | CDIS_FOCUS);
     }
-    if (found && found->info[0]) draw->clrText = draw->clrTextBk;
-    return found ? CDRF_NOTIFYPOSTPAINT : CDRF_DODEFAULT;
+    if (!found) return CDRF_DODEFAULT;
+    if (ownsTitle(*found)) {
+        draw->clrText = draw->clrTextBk;
+    } else if (found->tintParts & tintName) {
+        draw->clrText = tintColor(*found);
+    }
+    return found->glyph[0] || ownsTitle(*found) ? CDRF_NOTIFYPOSTPAINT : CDRF_DODEFAULT;
 }
 
 extern "C" int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y) {

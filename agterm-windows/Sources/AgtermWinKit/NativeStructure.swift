@@ -10,7 +10,7 @@ public struct NativeStructure: ControlActions {
     /// commands are the ones NativeControl hands to the dispatcher.
     public static let commands: Set<Command> = [
         .workspaceNew, .workspaceRename, .workspaceDelete, .workspaceSelect, .workspaceGo, .workspaceMove, .workspaceFocus,
-        .workspaceFilter, .workspaceCollapse, .workspaceExpand, .workspaceFlag, .sessionMove, .sessionFlag,
+        .workspaceFilter, .workspaceCollapse, .workspaceExpand, .workspaceFlag, .workspaceTint, .sessionMove, .sessionFlag, .sessionTint,
         .sessionCollapse, .sessionExpand, .sessionCompanionNew, .sessionCompanionConvert, .sessionCompanionMove,
         .sessionCompanionPromote, .sidebarMode, .sidebarExpand, .sidebarCollapse,
     ]
@@ -209,6 +209,13 @@ public struct NativeStructure: ControlActions {
         }
     }
 
+    public func setWorkspaceTint(_ target: String?, window: String?, update: ControlTintUpdate) -> ControlResponse {
+        withNamedWorkspace(target) { id in
+            store.setTint(update.resolved(over: store.workspaces.first { $0.id == id }?.tint), forWorkspace: id)
+            return ok(id)
+        }
+    }
+
     public func setSidebarViewMode(_ mode: ControlSidebarViewMode) -> ControlResponse {
         switch mode {
         case .tree: store.setSidebarMode(.tree)
@@ -247,6 +254,13 @@ public struct NativeStructure: ControlActions {
             default: return failure("invalid flag mode: \(mode)")
             }
             store.setFlag(want, forSession: id)
+            return ok(id)
+        }
+    }
+
+    public func setSessionTint(_ target: String?, window: String?, update: ControlTintUpdate) -> ControlResponse {
+        withSession(target) { id in
+            store.setTint(update.resolved(over: store.session(withID: id)?.tint), forSession: id)
             return ok(id)
         }
     }

@@ -122,7 +122,10 @@ int64_t nt_tree_item_at(void *tree, int32_t *x, int32_t *y);
 intptr_t nt_tree_custom_draw(intptr_t notification, const uint8_t *dimmed, int64_t count);
 // nt_tree_decorate gives a session row an agent's status glyph (0xRRGGBB, pulsing when `blink`) at its right edge and an
 // info line under its title, which makes it two lines tall; null or empty strings draw nothing. A clear drops them.
-void nt_tree_decorate(void *tree, void *item, const uint16_t *glyph, uint32_t rgb, int32_t blink, const uint16_t *info);
+// A session or workspace row's tint (0xRRGGBB for light and dark chrome) shows on the parts `tint_parts` names:
+// 1 a dot before the title standing for the Mac's row icon, 2 the title, 0 none.
+void nt_tree_decorate(void *tree, void *item, const uint16_t *glyph, uint32_t rgb, int32_t blink, const uint16_t *info,
+                      uint32_t tint_light, uint32_t tint_dark, int32_t tint_parts);
 // nt_tree_blink sets the pulse phase and repaints when a row blinks; 1 while any does.
 int32_t nt_tree_blink(void *tree, int32_t dimmed);
 // The find bar: an edit control posting NT_FIND_NEXT (wParam 1 with Shift) on Enter and NT_FIND_CLOSE on Escape to

@@ -16,9 +16,10 @@ public enum SessionSidebar {
         public let info: String?
         /// expanded is whether the row shows its children: a folded workspace or companion group does not.
         public var expanded = true
+        public var tint: SidebarTint?
 
         public init(id: UUID, title: String, isWorkspace: Bool, ended: Bool, children: [Item], status: AgentIndicator = AgentIndicator(),
-                    info: String? = nil, expanded: Bool = true) {
+                    info: String? = nil, expanded: Bool = true, tint: SidebarTint? = nil) {
             self.id = id
             self.title = title
             self.isWorkspace = isWorkspace
@@ -27,6 +28,7 @@ public enum SessionSidebar {
             self.status = status
             self.info = info
             self.expanded = expanded
+            self.tint = tint
         }
     }
 
@@ -52,7 +54,8 @@ public enum SessionSidebar {
         return store.visibleWorkspaces.flatMap { workspace in
             let sessions = groupedItems(workspace.sessions, name: marked)
             return workspace.isRoot ? sessions
-                : [Item(id: workspace.id, title: workspace.name, isWorkspace: true, ended: false, children: sessions, expanded: workspace.isExpanded)]
+                : [Item(id: workspace.id, title: workspace.name, isWorkspace: true, ended: false, children: sessions, expanded: workspace.isExpanded,
+                        tint: workspace.tint)]
         }
     }
 
@@ -66,7 +69,7 @@ public enum SessionSidebar {
 
     private static func row(_ session: Session, _ label: Label, children: [Item]) -> Item {
         Item(id: session.id, title: label.title, isWorkspace: false, ended: label.ended, children: children, status: label.status,
-             info: label.info, expanded: session.isExpanded)
+             info: label.info, expanded: session.isExpanded, tint: session.tint)
     }
 
     private static func catalogTitle(_ session: Session, unseen: [UUID: Int]) -> String {
@@ -85,7 +88,7 @@ public enum SessionSidebar {
         workspaces.flatMap { workspace in
             let sessions = sessionItems(workspace.sessions, unseen: unseen)
             return workspace.isRoot ? sessions
-                : [Item(id: workspace.id, title: workspace.name, isWorkspace: true, ended: false, children: sessions)]
+                : [Item(id: workspace.id, title: workspace.name, isWorkspace: true, ended: false, children: sessions, tint: workspace.tint)]
         }
     }
 
@@ -111,7 +114,7 @@ public enum SessionSidebar {
         let marker = count > 0 ? "● \(NotificationRules.countLabel(count)) " : ""
         return Item(id: session.id, title: marker + (session.ended ? "\(session.displayName) (ended)" : session.displayName),
                     isWorkspace: false, ended: session.ended, children: children, status: session.agentIndicator,
-                    info: StatusGlyph.infoText(session.effectiveInfo))
+                    info: StatusGlyph.infoText(session.effectiveInfo), tint: session.tint)
     }
 
     /// localTitle is a local session's sidebar label: ● while it wants attention (a bell or notification since it was
