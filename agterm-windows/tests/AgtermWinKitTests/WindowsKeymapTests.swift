@@ -76,11 +76,11 @@ struct WindowsKeymapTests {
     }
 
     @Test func whatWindowsLacksIsReported() {
-        let keymap = WindowsKeymap(text: "map ctrl+alt+d toggle_fullscreen\ncommand \"git\" ctrl+alt+g lazygit")
+        let keymap = WindowsKeymap(text: "map ctrl+alt+d new_window\ncommand \"git\" ctrl+alt+g lazygit")
         let messages = keymap.diagnostics.map(\.message)
-        #expect(messages.contains("'toggle_fullscreen' is not available on Windows"))
+        #expect(messages.contains("'new_window' is not available on Windows"))
         #expect(messages.contains("custom commands are not supported on Windows yet; 1 skipped"))
-        #expect(keymap.control.actions.allSatisfy { $0.action != "toggle_fullscreen" } && keymap.control.commands.isEmpty)
+        #expect(keymap.control.actions.allSatisfy { $0.action != "new_window" } && keymap.control.commands.isEmpty)
     }
 
     @Test func aGlobalHotkeyBecomesRegisterHotKeysChord() {
