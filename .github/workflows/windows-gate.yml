@@ -27,27 +27,27 @@ permissions:
 jobs:
   gate:
     runs-on: [self-hosted, windows, x64, agterm-gate]
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults:
       run:
         shell: pwsh
     env:
       GH_TOKEN: ${{ github.token }}
-      AGTERM_WIN_GATE_WSL: "1"
-      GATE_DISTRIBUTION: Ubuntu
+      # the job's own distribution (tests/integration/gate-wsl.ps1); the cases read its name from AGTERM_WIN_GATE_WSL
+      AGTERM_WIN_GATE_WSL: agterm-gate-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Box preconditions
         run: |
           $failures = @()
           $session = (Get-Process -Id $PID).SessionId
           if ($session -eq 0) { $failures += "the runner is in session 0 (a service); the cases need the interactive desktop" }
-          $list = (& wsl.exe -l -q 2>&1 | Out-String) -replace "`0", ""
-          if ($list -notmatch "(?m)^\s*$env:GATE_DISTRIBUTION\s*$") { $failures += "no WSL distribution $env:GATE_DISTRIBUTION" }
+          & wsl.exe --status *> $null
+          if ($LASTEXITCODE) { $failures += "wsl --status exited $LASTEXITCODE; WSL2 is not installed" }
           $os = (& docker.exe version --format '{{.Server.Os}}' 2>&1 | Out-String).Trim()
           if ($os -ne "linux") { $failures += "docker answers '$os', not linux containers" }
           if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { $failures += "no gh on PATH" }
           if ($failures) { $failures | % { Write-Host "::error::$_" }; exit 1 }
-          Write-Host "session $session, $env:GATE_DISTRIBUTION present, docker runs $os containers"
+          Write-Host "session $session, WSL present, docker runs $os containers"
       - id: build
         name: Resolve the build
         env:
@@ -79,12 +79,26 @@ jobs:
           "app=$app" >> $env:GITHUB_OUTPUT
           "## $label" >> $env:GITHUB_STEP_SUMMARY
           Write-Host "testing $label from $($zip[0].Name)"
-      # the cases the build was made with, not today's branch
+      # the distribution script comes with this workflow, the cases with the build they test
+      - uses: actions/checkout@v7
+        with:
+          path: gate-tools
+          sparse-checkout: agterm-windows/tests/integration/gate-wsl.ps1
+          sparse-checkout-cone-mode: false
       - uses: actions/checkout@v7
         with:
           ref: ${{ steps.build.outputs.sha }}
+          path: build-tree
+      - name: Gate distribution
+        run: |
+          # older cases start a server in the first distribution wsl -l lists, which may be someone's own
+          if (-not (Select-String -Quiet 'AGTERM_WIN_GATE_WSL' build-tree/agterm-windows/tests/integration/wsl-cases.ps1)) {
+            Write-Host "::error::this build's cases predate the gate distribution and would reach a working one"; exit 1
+          }
+          ./gate-tools/agterm-windows/tests/integration/gate-wsl.ps1 -RemoveStale
+          ./gate-tools/agterm-windows/tests/integration/gate-wsl.ps1 -New $env:AGTERM_WIN_GATE_WSL -App "${{ steps.build.outputs.app }}"
       - name: Integration
-        working-directory: agterm-windows
+        working-directory: build-tree/agterm-windows
         env:
           CASES: ${{ inputs.cases }}
         run: |
@@ -98,8 +112,11 @@ jobs:
           exit $code
       - name: WSL server gate
         if: inputs.server-gate && (success() || failure())
-        working-directory: agterm-windows
-        run: ./tests/integration/wsl-server-gate.ps1 -App "${{ steps.build.outputs.app }}" -Results "$env:RUNNER_TEMP\wsl-gate" -Distribution $env:GATE_DISTRIBUTION
+        working-directory: build-tree/agterm-windows
+        run: ./tests/integration/wsl-server-gate.ps1 -App "${{ steps.build.outputs.app }}" -Results "$env:RUNNER_TEMP\wsl-gate" -Distribution $env:AGTERM_WIN_GATE_WSL
+      - name: Remove the gate distribution
+        if: always()
+        run: if (Test-Path ./gate-tools) { ./gate-tools/agterm-windows/tests/integration/gate-wsl.ps1 -Remove $env:AGTERM_WIN_GATE_WSL }
       - if: always()
         uses: actions/upload-artifact@v7
         with:
