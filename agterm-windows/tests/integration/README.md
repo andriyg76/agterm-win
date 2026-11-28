@@ -104,7 +104,7 @@ container's loopback is not reachable from Windows: a defined remote gets no `-L
 removed whether the case passed or not. It needs Docker running Linux containers and skips without them, as on CI; run
 it alone with `-Case docker-remote`.
 
-On a machine with a working agterm-server in WSL, run the optional gate (not part of CI):
+On a machine with a working agterm-server in WSL, run the optional gate; the self-hosted `windows-gate.yml` job runs it on CI (`docs/windows-gate-runner.md`):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests\integration\wsl-server-gate.ps1 -App $env:TEMP\agterm-win-stage -Results $env:TEMP\wsl-gate -Distribution Ubuntu
