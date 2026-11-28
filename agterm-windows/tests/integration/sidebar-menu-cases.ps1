@@ -102,7 +102,11 @@ $shellCases["reveal-explorer"] = {
         if (-not (Wait-NewFolderWindow $before $leaf) -and $script:InFront) { $failures += "Reveal in Explorer opened no Explorer window on $leaf" }
 
         Note "a folder that is gone"
-        Remove-Item -Recurse -Force $parent
+        # the shell holds its folder; the session keeps the folder it last reported once the shell exits
+        Invoke-Ctl $state @("session", "type", "exit`r", "--target", $id) | Out-Null
+        if (-not (Wait-Until { Remove-Item -Recurse -Force $parent -ErrorAction SilentlyContinue; -not (Test-Path $parent) } 15)) {
+            return $failures + "$parent could not be removed after the shell exited"
+        }
         $reply = Invoke-Ctl $state @("session", "reveal", "--target", $id)
         if ($reply.ok -or $reply.error -ne "session cwd is not an existing directory") { $failures += "session reveal on a removed folder answered $($reply | ConvertTo-Json -Compress)" }
         $failures
