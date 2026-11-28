@@ -16,6 +16,13 @@ host's architecture; its header lists the tools and the signing variables.
   that release's two installers into `build\package-managers\<version>`. The winget folder goes to a `microsoft/winget-pkgs` PR as
   `manifests/a/andriyg76/agterm-win/<version>`; the `.nupkg` is pushed with `choco push` and the account's API key.
   Both identifiers are `agterm-win`, leaving `agterm` to upstream.
+- **Scoop**: the same script renders `scoop\agterm-win.json`, a manifest for the two portable zips. It lives as
+  `bucket/agterm-win.json` in [andriyg76/scoop-bucket](https://github.com/andriyg76/scoop-bucket), whose Excavator
+  workflow picks up each new release through the manifest's `checkver` and `autoupdate`, so a release needs no
+  bucket commit; re-render it only when the manifest's shape changes. Users install with
+  `scoop bucket add andriyg76 https://github.com/andriyg76/scoop-bucket` and `scoop install andriyg76/agterm-win`.
+  `scoop update` refuses while a process runs from the app folder, Live sessions' zmx daemons included; the
+  manifest's notes say so.
 - **CI (`windows.yml`)**: after tests, `scripts\package-ci.ps1` builds an unsigned Inno installer, a portable zip and a
   Store MSIX (plus a registerable layout) and uploads `ci-installer-*`, `ci-portable-*`, `ci-msix-*`, and
   `msix-store-layout-*` on every run.

@@ -1,8 +1,10 @@
-# Renders packaging\winget and packaging\chocolatey for a published release into build\package-managers\<version>,
-# taking the x64 and arm64 installers' sha256 from the release, and packs the Chocolatey .nupkg when choco is on PATH.
+# Renders packaging\winget, packaging\chocolatey and packaging\scoop for a published release into
+# build\package-managers\<version>, taking the x64 and arm64 installers' and portable zips' sha256 from the release,
+# and packs the Chocolatey .nupkg when choco is on PATH.
 #   scripts\package-managers.ps1 -Version 0.44.1.1
 # winget: the winget folder is the manifests/a/andriyg76/agterm-win/<version> directory of a microsoft/winget-pkgs PR.
 # Chocolatey: choco push <nupkg> --source https://push.chocolatey.org/ with the account's API key.
+# Scoop: scoop\agterm-win.json is bucket/agterm-win.json in andriyg76/scoop-bucket, whose Excavator updates it from then on.
 param([Parameter(Mandatory)][string]$Version)
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -15,18 +17,20 @@ $tokens = @{
     ReleaseDate = ([datetime]$release.publishedAt).ToUniversalTime().ToString("yyyy-MM-dd")
 }
 foreach ($arch in @{ X64 = "x64"; Arm64 = "arm64" }.GetEnumerator()) {
-    $setup = "agterm-win-$Version-$($arch.Value)-setup.exe"
-    $sha256 = ((gh release download $tag --repo $repo --pattern "$setup.sha256" --output -) -split '\s+')[0].ToLowerInvariant()
-    if ($sha256 -notmatch '^[0-9a-f]{64}$') { throw "release $tag has no readable $setup.sha256" }
-    $tokens["Url$($arch.Key)"] = "https://github.com/$repo/releases/download/$tag/$setup"
-    $tokens["Sha256$($arch.Key)"] = $sha256
-    $tokens["Sha256$($arch.Key)Upper"] = $sha256.ToUpperInvariant()
+    foreach ($asset in @{ "" = "setup.exe"; Portable = "portable.zip" }.GetEnumerator()) {
+        $file = "agterm-win-$Version-$($arch.Value)-$($asset.Value)"
+        $sha256 = ((gh release download $tag --repo $repo --pattern "$file.sha256" --output -) -split '\s+')[0].ToLowerInvariant()
+        if ($sha256 -notmatch '^[0-9a-f]{64}$') { throw "release $tag has no readable $file.sha256" }
+        $tokens["$($asset.Key)Url$($arch.Key)"] = "https://github.com/$repo/releases/download/$tag/$file"
+        $tokens["$($asset.Key)Sha256$($arch.Key)"] = $sha256
+        $tokens["$($asset.Key)Sha256$($arch.Key)Upper"] = $sha256.ToUpperInvariant()
+    }
 }
 
 $out = Join-Path $root "build\package-managers\$Version"
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 $utf8 = New-Object System.Text.UTF8Encoding $false
-foreach ($kind in "winget", "chocolatey") {
+foreach ($kind in "winget", "chocolatey", "scoop") {
     $source = Join-Path $root "packaging\$kind"
     foreach ($file in Get-ChildItem $source -Recurse -File) {
         $text = [IO.File]::ReadAllText($file.FullName)
