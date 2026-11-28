@@ -194,6 +194,9 @@ public enum NativeControl {
         case _ where NativeStructure.interactionCommands.contains(request.cmd):
             return await ControlDispatcher(actions: NativeStructure(store: host.localStore, interactions: host)).dispatch(request)
                 ?? failure("\(request.cmd.rawValue) is not supported on Windows")
+        case .msgSend, .msgRead, .msgAck:
+            return await ControlDispatcher(actions: NativeStructure(store: host.localStore, messages: host)).dispatch(request)
+                ?? failure("\(request.cmd.rawValue) is not supported on Windows")
         case .eventsRead:
             // the dispatcher parses the cursor, kinds and limit and refuses them as on a Mac
             return await ControlDispatcher(actions: NativeStructure(store: host.localStore, events: host.events)).dispatch(request)

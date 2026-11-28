@@ -5,18 +5,18 @@ import agtermCore
 @MainActor
 public enum WindowsPresentation {
     public static let handled: Set<String> = Set(PresentationHub.pageKinds + PresentationHub.pickKinds + [
-        "status", "hud", "notify", "context", "info",
+        "status", "hud", "notify", "context", "info", "message", "mail",
         PresentationHub.askFormKind, PresentationHub.askOtherKind, PresentationHub.jobTokenKind,
         PresentationHub.statusShapesKind, PresentationHub.statusCheckmarkKind, PresentationHub.statusClearKind,
         PresentationHub.pendingSnapshotKind, PresentationHub.presenterVacantKind, PresentationHub.offerIdentityKind,
         PresentationHub.endedKind,
     ])
 
-    /// unhandled lists what an agterm-win viewer cannot show yet: messages and mail, status sounds, companion following,
+    /// unhandled lists what an agterm-win viewer cannot show yet: status sounds, companion following,
     /// attached-pane layout, respawns and leads, link clicks and snapshots, point-sized overlays, and every page source but
     /// a URL, an HTML file and an image.
     public static let unhandled: Set<String> = [
-        "message", "mail", "sound", "layout",
+        "sound", "layout",
         PresentationHub.companionsKind, PresentationHub.restartRespawnKind, PresentationHub.leadReportKind,
         PresentationHub.linkClickKind, PresentationHub.linkSnapshotKind, PresentationHub.overlayPointsKind,
         PresentationHub.pageContentKind, PresentationHub.pageDocumentKind, PresentationHub.pageLinksKind,

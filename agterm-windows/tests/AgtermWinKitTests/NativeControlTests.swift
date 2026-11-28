@@ -11,6 +11,15 @@ private func scratchStore() -> AppStore {
     return store
 }
 
+/// PaneSurface is a started pane carrying the token its shell's `AGTERM_PANE_ID` names.
+private final class PaneSurface: TerminalSurface {
+    let paneToken: String
+    let isRealized = true
+    init(_ pane: UUID) { paneToken = pane.uuidString }
+    func teardown() {}
+    func promoteToPrimaryPane() {}
+}
+
 @MainActor
 private final class FakeHost: NativeControlHost {
     let localStore: AppStore
@@ -757,6 +766,35 @@ struct NativeControlTests {
         #expect(resized.result?.ratio == 0.3 && row.splitRatio == 0.3)
         _ = await handle(ControlRequest(cmd: .sessionType, target: target, args: ControlArgs(text: "x", pane: "right")), host)
         #expect(host.typedPanes == [.split])
+    }
+
+    @Test func messagesGoBetweenLocalPanesWhileAServerRowIsRefused() async throws {
+        let host = FakeHost()
+        let panes = [UUID(), UUID()]
+        let ids = [host.add("a"), host.add("b")]
+        for (id, pane) in zip(ids, panes) { try #require(host.localStore.session(withID: id)).surface = PaneSurface(pane) }
+        let sender = MessageAddress.canonical(session: ids[0], pane: panes[0])
+        let receiver = MessageAddress.canonical(session: ids[1], pane: panes[1])
+
+        let sent = await handle(ControlRequest(cmd: .msgSend, args: ControlArgs(body: "hi", recipients: ["\(ids[1].uuidString):left"],
+                                                                               identity: sender)), host)
+        #expect(sent.result?.delivered == [receiver])
+        let node = NativeControl.tree(host).workspaces.flatMap(\.sessions).first { $0.id == ids[1].uuidString }
+        #expect(node?.surfaces?.first { $0.paneID == panes[1].uuidString }?.pendingMessages == 1)
+        let read = await handle(ControlRequest(cmd: .msgRead, args: ControlArgs(identity: receiver, ack: true)), host)
+        #expect(read.result?.messages?.map(\.body) == ["hi"] && read.result?.messages?.first?.from == sender)
+        let all = await handle(ControlRequest(cmd: .msgSend, args: ControlArgs(body: "all", all: true, identity: sender)), host)
+        #expect(all.result?.delivered == [receiver])
+        _ = await handle(ControlRequest(cmd: .msgRead, args: ControlArgs(identity: receiver, ack: true)), host)
+
+        let served = scratchStore()
+        let row = Session(initialCwd: "", remoteHost: "Ubuntu")
+        served.workspaces[served.workspaces.count - 1].sessions.append(row)
+        host.remotes[NativeControl.remoteWindowID("Ubuntu")] = served
+        host.serverWorkspaces = served.controlTree(paneForeground: { _ in nil }).workspaces
+        let refused = await handle(ControlRequest(cmd: .msgSend, args: ControlArgs(body: "x", recipients: ["\(row.id.uuidString):left"],
+                                                                                  identity: sender)), host)
+        #expect(refused.result?.rejected?.first?.detail == "remote session")
     }
 
     @Test func quickShowsPinnedTypesAndReadsBack() async {
