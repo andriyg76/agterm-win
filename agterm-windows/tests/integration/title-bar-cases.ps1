@@ -527,13 +527,15 @@ $shellCases["fullscreen"] = {
     $screen = $monitor.Monitor
     $failures = @()
     $before = Get-WindowRect $window
+    $bar = Get-Bar $window
+    $dragX = [int](($bar.Title[0] + $bar.Title[1]) / 2)
 
     Note "window fullscreen"
     if (-not (Invoke-Ctl $state @("window", "fullscreen")).ok) { return @("window fullscreen was refused") }
     if (-not (Wait-Until { Get-Fullscreen $state } 5)) { $failures += "window list does not read full screen back" }
     $full = Wait-Until { $r = Get-WindowRect $window; if ($r.Left -eq $screen.Left -and $r.Top -eq $screen.Top -and $r.Right -eq $screen.Right -and $r.Bottom -eq $screen.Bottom) { $r } } 5
     if (-not $full) { $r = Get-WindowRect $window; $failures += "full screen is ($($r.Left),$($r.Top),$($r.Right),$($r.Bottom)), not the monitor's" }
-    if ((Get-Hit $window 200 5) -ne $hitClient) { $failures += "the top of a full-screen window still hits the title bar" }
+    if ((Get-Hit $window $dragX $bar.Middle) -ne $hitClient) { $failures += "the top of a full-screen window still hits the title bar" }
     Save-ScreenSnapshot $Shell "fullscreen"
 
     Note "F11 leaves"
@@ -543,7 +545,7 @@ $shellCases["fullscreen"] = {
     if (-not (Wait-Until { -not (Get-Fullscreen $state) } 5)) { return $failures + "F11 did not leave full screen" }
     $after = Wait-Until { $r = Get-WindowRect $window; if ($r.Left -eq $before.Left -and $r.Top -eq $before.Top -and $r.Right -eq $before.Right -and $r.Bottom -eq $before.Bottom) { $r } } 5
     if (-not $after) { $r = Get-WindowRect $window; $failures += "leaving put the window at ($($r.Left),$($r.Top),$($r.Right),$($r.Bottom)), not where it was" }
-    if ((Get-Hit $window 200 20) -eq $hitClient) { $failures += "the title bar did not come back" }
+    if ((Get-Hit $window $dragX $bar.Middle) -ne $hitCaption) { $failures += "the title bar did not come back" }
 
     Note "a maximized window"
     [AgtermWin32]::ShowWindow($window, 3) | Out-Null
