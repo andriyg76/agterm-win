@@ -143,6 +143,6 @@ is the presenter (`tree` → `presenters.presenter == true` for that row).
 
 | surface | manual check |
 |---|---|
-| ask | Task Dialog answers; `askPending` clears from `tree`; origin receives the choice |
+| ask | the ask panel over the session answers (keys or a click); the session node's `ask` clears from `tree`; origin receives the choice |
 | pick | Command palette lists items; choice reaches the server (`pick.result`) |
 | HUD | passive panel over the remote terminal; `tree` shows overlay/HUD state; dismiss does not end the session row |

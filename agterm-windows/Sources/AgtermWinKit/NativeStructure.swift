@@ -33,9 +33,13 @@ public struct NativeStructure: ControlActions {
     let newSession: NewSession?
     let zmxContext: NativeZmx.Context?
     let events: NativeEvents?
+    /// interactions is the window whose pick and ask slots `interactionCommands` reach.
+    let interactions: NativeControlHost?
 
-    public init(store: AppStore, newSession: NewSession? = nil, zmx: NativeZmx.Context? = nil, events: NativeEvents? = nil) {
+    public init(store: AppStore, newSession: NewSession? = nil, zmx: NativeZmx.Context? = nil, events: NativeEvents? = nil,
+                interactions: NativeControlHost? = nil) {
         self.store = store
+        self.interactions = interactions
         self.newSession = newSession
         zmxContext = zmx
         self.events = events

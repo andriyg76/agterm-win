@@ -300,8 +300,12 @@ LRESULT CALLBACK findBarProcedure(HWND edit, UINT message, WPARAM wParam, LPARAM
 }  // namespace
 
 extern "C" void *nt_find_bar_create(void *parent, uint32_t dpi) {
+    // only comctl32 6's EDIT draws a cue banner: the find bar's "Find", a palette's hint and a pick's --prompt
+    uintptr_t cookie = 0;
+    bool active = nt_common_controls_activate(&cookie);
     HWND edit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_BORDER | ES_AUTOHSCROLL, 0, 0, 100, 24, static_cast<HWND>(parent),
                                 nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (active) nt_common_controls_deactivate(cookie);
     if (!edit) return nullptr;
     SetWindowSubclass(edit, findBarProcedure, 1, 0);
     SendMessageW(edit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Find"));

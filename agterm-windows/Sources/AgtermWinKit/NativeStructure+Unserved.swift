@@ -63,9 +63,6 @@ extension NativeStructure {
     public func windowZoom(_ target: String?) -> ControlResponse { unserved("windowZoom") }
     public func windowFullscreen(_ target: String?) -> ControlResponse { unserved("windowFullscreen") }
     public func windowMinimize(_ target: String?, mode: ControlToggleMode) async -> ControlResponse { unserved("windowMinimize") }
-    public func openPick(_ pick: PendingPick, window: String?, follow: Bool) -> ControlResponse { unserved("openPick") }
-    public func pickResult(_ target: String, window: String?) -> ControlResponse { unserved("pickResult") }
-    public func cancelPick(_ target: String, window: String?) -> ControlResponse { unserved("cancelPick") }
     public func clearRestoreCommands() -> ControlResponse { unserved("clearRestoreCommands") }
     public func captureRestoreCommands() -> ControlResponse { unserved("captureRestoreCommands") }
 

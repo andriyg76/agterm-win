@@ -150,6 +150,7 @@ loop: while true {
         // Tab, Enter and Esc move through Settings' controls as in a dialog
         if let settings = MainActor.assumeIsolated({ SettingsWindow.current?.handle }), IsDialogMessageW(settings, &message) { continue }
         if MainActor.assumeIsolated({ NativeShell.handleSidebarShortcut(message) }) { continue }
+        if MainActor.assumeIsolated({ AskPanel.handleKey(message) }) { continue }
         TranslateMessage(&message)
         DispatchMessageW(&message)
     }
