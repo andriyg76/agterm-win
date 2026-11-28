@@ -12,7 +12,7 @@ public struct NativeStructure: ControlActions {
         .workspaceNew, .workspaceRename, .workspaceDelete, .workspaceSelect, .workspaceGo, .workspaceMove, .workspaceFocus,
         .workspaceFilter, .workspaceCollapse, .workspaceExpand, .workspaceFlag, .sessionMove, .sessionFlag,
         .sessionCollapse, .sessionExpand, .sessionCompanionNew, .sessionCompanionConvert, .sessionCompanionMove,
-        .sessionCompanionPromote, .sidebarMode,
+        .sessionCompanionPromote, .sidebarMode, .sidebarExpand, .sidebarCollapse,
     ]
 
     /// NewSession is what a `session.new` without those options gets: Settings ▸ General's folder and the default
@@ -215,6 +215,18 @@ public struct NativeStructure: ControlActions {
         case .flagged: store.setSidebarMode(.flagged)
         case .toggle: store.setSidebarMode(store.sidebarMode == .tree ? .flagged : .tree)
         }
+        return ControlResponse(ok: true)
+    }
+
+    /// expandSidebar opens every workspace; collapseSidebar folds all but the current one, as the Mac's do. The flat
+    /// flagged list has no workspace rows, so both leave it alone.
+    public func expandSidebar(window: String?) -> ControlResponse {
+        if store.sidebarMode == .tree { store.setWorkspacesExpanded(Set(store.workspaces.map(\.id))) }
+        return ControlResponse(ok: true)
+    }
+
+    public func collapseSidebar(window: String?) -> ControlResponse {
+        if store.sidebarMode == .tree { store.setWorkspacesExpanded(store.currentWorkspaceID.map { [$0] } ?? []) }
         return ControlResponse(ok: true)
     }
 

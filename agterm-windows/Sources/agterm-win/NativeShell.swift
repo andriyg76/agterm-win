@@ -1530,6 +1530,11 @@ final class NativeShell {
             guard let workspace else { return }
             structure(.workspaceFocus, target: workspace)
         case .toggleWorkspaceFilter: structure(.workspaceFilter, target: nil, args)
+        case .expandWorkspaces: structure(.sidebarExpand, target: nil, args)
+        case .collapseWorkspaces: structure(.sidebarCollapse, target: nil, args)
+        case .toggleWorkspaceCollapse:
+            guard let workspace, let named = namedWorkspace(workspace) else { return }
+            structure(named.isExpanded ? .workspaceCollapse : .workspaceExpand, target: workspace, args)
         case .toggleFlaggedView: structure(.sidebarMode, target: nil, args)
         case .previousWorkspace, .nextWorkspace:
             args.to = command == .nextWorkspace ? "next" : "prev"
@@ -1560,6 +1565,8 @@ final class NativeShell {
         }
         state.canFilter = !store.focusedWorkspaceIDs.isEmpty
         state.canToggleFlaggedView = state.flaggedView || !store.flaggedSessions.isEmpty
+        state.workspaceRows = store.sidebarMode == .tree && store.workspaces.contains { !$0.isRoot }
+        state.collapsed = workspace.flatMap { id in store.workspaces.first { $0.id == id } }?.isExpanded == false
         return state
     }
 

@@ -31,8 +31,6 @@ extension NativeStructure {
     public func setTheme(args: ControlArgs?) -> ControlResponse { unserved("setTheme") }
     public func listThemes() -> ControlResponse { unserved("listThemes") }
     public func setSidebarVisibility(_ mode: ControlToggleMode) -> ControlResponse { unserved("setSidebarVisibility") }
-    public func expandSidebar(window: String?) -> ControlResponse { unserved("expandSidebar") }
-    public func collapseSidebar(window: String?) -> ControlResponse { unserved("collapseSidebar") }
     public func setQuickTerminal(mode: String?) -> ControlResponse { unserved("setQuickTerminal") }
     public func typeQuick(text: String) async -> ControlResponse { unserved("typeQuick") }
     public func readQuickText(all: Bool, lines: Int?) async -> ControlResponse { unserved("readQuickText") }

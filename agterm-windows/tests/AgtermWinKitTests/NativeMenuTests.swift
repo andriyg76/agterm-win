@@ -82,7 +82,8 @@ struct NativeMenuTests {
                                                                                       .newWorkspace, .renameWorkspace, .deleteWorkspace, .toggleFlag, .toggleFlaggedView,
                                                                                       .focusWorkspace, .toggleWorkspaceFilter, .previousWorkspace, .nextWorkspace,
                                                                                       .newCompanion, .convertCompanion, .selectTheme, .about, .toggleSidebar, .editProfiles,
-                                                                                      .copyName, .revealSession])
+                                                                                      .copyName, .revealSession, .expandWorkspaces, .collapseWorkspaces,
+                                                                                      .toggleWorkspaceCollapse])
     }
 
     @Test func revealSitsBeforeCloseOnTheRowAndInTheFileMenu() {
@@ -92,6 +93,24 @@ struct NativeMenuTests {
         #expect(row.first { $0.pick == .command(.revealSession) }?.enabled == true)
         let file = NativeMenu.file(profiles: profiles, canCloseSession: true).compactMap { $0.pick == .command(.revealSession) ? $0 : nil }
         #expect(file.count == 1 && file.first?.enabled == false)
+    }
+
+    @Test func workspaceFoldIsTitledForWhatItDoesAndNeedsWorkspaceRows() {
+        var structure = NativeMenu.Structure(workspace: true)
+        structure.workspaceRows = true
+        structure.collapsed = true
+        let view = NativeMenu.view(NativeMenu.View(), structure: structure)
+        #expect(view.first { $0.pick == .command(.toggleWorkspaceCollapse) }?.title == "Expand Workspace")
+        let bulk = view.filter { $0.pick == .command(.expandWorkspaces) || $0.pick == .command(.collapseWorkspaces) }.map(\.enabled)
+        #expect(bulk == [true, true])
+        let row = NativeMenu.structure(structure).first { $0.pick == .command(.toggleWorkspaceCollapse) }
+        #expect(row?.title == "Expand Workspace" && row?.enabled == true)
+        structure.collapsed = false
+        structure.workspaceRows = false
+        let flat = NativeMenu.view(NativeMenu.View(), structure: structure)
+        let fold = flat.first { $0.pick == .command(.toggleWorkspaceCollapse) }
+        #expect(fold?.title == "Collapse Workspace" && fold?.enabled == false)
+        #expect(flat.first { $0.pick == .command(.expandWorkspaces) }?.enabled == false)
     }
 
     @Test func copyNameFollowsRenameOnSessionAndWorkspaceRows() {
