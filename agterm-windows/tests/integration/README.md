@@ -50,6 +50,9 @@ buttons and the keymap's chords, and reads back the tree, each pane's text and w
 `agent-status-cases.ps1` sets agent status, context and info and reads them back through the tree and the title bar,
 then runs the staged Claude Code and Codex adapters with a hook's JSON on stdin, as the agents run them.
 
+`message-cases.ps1` sends `agtermctl msg` from inside one pane to another, reads the pending count, the `message` event
+and the receiver's own `msg read --ack`; `server-panes` repeats it between a server row's panes.
+
 `pick-ask-cases.ps1` opens picks and asks with `agtermctl --no-block`, answers them with keys posted to the palette
 field and the ask panel (arrows, Enter, Esc, hotkeys, a typed query or field), and reads each outcome back through
 `pick result` and `ask result`, the tree's `pickPending`/`askPending` and the session node's `ask`.
