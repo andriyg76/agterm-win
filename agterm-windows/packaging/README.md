@@ -6,19 +6,19 @@ arm64 installers natively on `windows-2022` and `windows-11-arm` with `scripts\r
 `SIGNPATH_ORGANIZATION_ID` is set (releases ship unsigned until then), and publishes the release. `scripts\release.ps1 -Version <version> [-Arch x64|arm64] [-Publish]` does the same locally for the
 host's architecture; its header lists the tools and the signing variables.
 
-**Versions** are `<major>.<minor>.<patch>`: `major.minor` is the pinned upstream's (`AGTERM_VERSION`), `patch` counts
-agterm-win releases on that line, so `0.44.1012` is built on agterm `0.44.1` and the two patches are unrelated.
-The 0.44 line continues from the Store's `0.44.1011.0` (the last 4-part tag, `v0.44.1.11`); later lines start at `.0`.
-The release title and About show both, as `agterm-win 0.44.1012 (agterm 0.44.1)`. The workflow's `kind` picks the next one
-(`scripts\release-version.ps1` enforces it):
+**Versions** are agterm-win's own `<major>.<minor>.<patch>`, independent of `AGTERM_VERSION`, the upstream release
+the build is locked to; the release title and About show both, as `agterm-win 0.44.1012 (agterm 0.44.1)`.
+The workflow's `kind` bumps that part of the last release reachable from the branch (`scripts\release-version.ps1`
+enforces it). The last 4-part tag, `v0.44.1.11`, counts as the Store's `0.44.1011.0`, so the next patch is `0.44.1012`.
 
-| `kind` | Branch | Next | When |
-|---|---|---|---|
-| `incremental` | `windows-port` | `0.44.1012` → `0.44.1013` | any release on the same upstream minor, an upstream patch bump included |
-| `master` | `windows-port` | `0.45.0` | `AGTERM_VERSION` moved to a new upstream minor; also creates `version/v0.44` at the last `0.44` tag |
-| `hotfix` | `version/v0.44` | `0.44.1020` → `0.44.1021` | a fix for a line `windows-port` has left; published without GitHub's Latest |
+| `kind` | Branch | Next |
+|---|---|---|
+| `incremental` | `windows-port` or `version/v<major>.<minor>` | `0.44.1012` → `0.44.1013` |
+| `minor` | `windows-port` | `0.45.0`; also creates `version/v0.44` at the last `0.44` tag |
+| `major` | `windows-port` | `1.0.0`; also creates `version/v<previous line>` |
 
-Any other branch or kind/branch pairing fails before the build, and `windows-port` refuses a line once its
+A `version/v*` release maintains a superseded line and is published without GitHub's Latest.
+Any other branch or kind/branch pairing fails before the build, and `windows-port` refuses a patch for a line once its
 `version/v*` branch exists. MSIX takes the version with a `.0` fourth part, as the Store requires.
 
 - **GitHub**: `-Publish` uploads the installer, the portable zip and their `.sha256` files to this fork's release

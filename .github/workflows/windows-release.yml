@@ -1,7 +1,7 @@
 name: windows-release
 
-# Run by hand with a release kind (scripts/release-version.ps1 owns the rules): master starts the AGTERM_VERSION minor's
-# line on windows-port, incremental adds a patch there, hotfix adds one on version/v<major>.<minor>. Builds the x64 and arm64
+# Run by hand with a release kind (scripts/release-version.ps1 owns the rules): major, minor or incremental bumps that part
+# of the last release reachable from the branch; version/v<major>.<minor> takes only incremental. Builds the x64 and arm64
 # installers and MSIX packages on GitHub-hosted runners (as SignPath Foundation requires of every job before a signing request), has SignPath sign it
 # once SIGNPATH_ORGANIZATION_ID is set, and publishes the release, which creates the tag on the built commit.
 # Without SignPath configured the release ships unsigned.
@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       kind:
-        description: "master: new line for a new upstream minor (windows-port); incremental: next patch (windows-port); hotfix: next patch (version/v*)"
+        description: "which part to bump; version/v* branches take only incremental"
         required: true
         type: choice
-        options: [incremental, master, hotfix]
+        options: [incremental, minor, major]
 
 concurrency:
   group: windows-release
@@ -33,6 +33,7 @@ jobs:
       version: ${{ steps.next.outputs.version }}
       base: ${{ steps.next.outputs.base }}
       base-line: ${{ steps.next.outputs.base-line }}
+      latest: ${{ steps.next.outputs.latest }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -49,6 +50,7 @@ jobs:
           "version=$($next.Version)" >> $env:GITHUB_OUTPUT
           "base=$($next.Base)" >> $env:GITHUB_OUTPUT
           "base-line=$($next.BaseLine)" >> $env:GITHUB_OUTPUT
+          "latest=$($next.Latest.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "releasing $($next.Version) ($env:KIND after $($next.Base))"
 
   # each architecture builds natively, since Swift on Windows does not cross-compile the app here
@@ -231,6 +233,7 @@ jobs:
           BASE_LINE: ${{ needs.version.outputs.base-line }}
           BRANCH: ${{ github.ref_name }}
           KIND: ${{ inputs.kind }}
+          LATEST: ${{ needs.version.outputs.latest }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
         run: |
@@ -259,13 +262,13 @@ jobs:
           } else {
             Add-Content $notesPath "`nUnsigned: SmartScreen warns on first run."
           }
-          # a hotfix is an older line than windows-port's, so it must not take GitHub's Latest
-          $latest = if ($env:KIND -eq 'hotfix') { '--latest=false' } else { '--latest' }
+          # a version/v* release is an older line than windows-port's, so it must not take GitHub's Latest
+          $latest = if ($env:LATEST -eq 'true') { '--latest' } else { '--latest=false' }
           gh release create "v$env:VERSION" --target $env:GITHUB_SHA @assets --title "agterm-win $env:VERSION (agterm $agterm)" `
             --notes-file $notesPath $latest
           if ($LASTEXITCODE) { throw 'gh release create failed' }
-          # master supersedes the previous line; its maintenance branch starts at that line's last release
-          if ($env:KIND -eq 'master') {
+          # a minor or major supersedes the previous line; its maintenance branch starts at that line's last release
+          if ($env:KIND -ne 'incremental') {
             $branch = "version/v$env:BASE_LINE"
             if (git ls-remote --heads origin $branch) { "$branch exists" } else {
               gh api "repos/$env:GITHUB_REPOSITORY/git/refs" -f "ref=refs/heads/$branch" -f "sha=$(git rev-list -n 1 $env:BASE)"
