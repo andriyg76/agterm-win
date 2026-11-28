@@ -138,7 +138,12 @@ final class RemoteWindow: RemoteCatalogEffects {
             },
             hud: { [weak self] hud in self?.onReplicaHud?(id, hud) },
             notify: { [weak self] in self?.onNotification(id, $0) },
-            connection: { log("presentation for \(id): \($0)") },
+            // the tree reads the stream's state back, and leaving connected withdraws what it put on screen
+            connection: { [weak self] connection in
+                log("presentation for \(id): \(connection)")
+                self?.store.setRemoteConnection(connection, forSession: id)
+                self?.changed()
+            },
             context: { [weak self] context in
                 self?.store.applyRemoteContext(context, forSession: id)
                 self?.changed()
