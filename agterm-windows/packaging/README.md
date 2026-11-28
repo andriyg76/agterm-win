@@ -17,6 +17,8 @@ enforces it). The last 4-part tag, `v0.44.1.11`, counts as the Store's `0.44.101
 | `minor` | `windows-port` | `0.45.0`; also creates `version/v0.44` at the last `0.44` tag |
 | `major` | `windows-port` | `1.0.0`; also creates `version/v<previous line>` |
 
+Moving `AGTERM_VERSION` to a new upstream release is a separate change (merge the upstream tag and bump the file in
+one PR) and implies no release kind.
 A `version/v*` release maintains a superseded line and is published without GitHub's Latest.
 Any other branch or kind/branch pairing fails before the build, and `windows-port` refuses a patch for a line once its
 `version/v*` branch exists. MSIX takes the version with a `.0` fourth part, as the Store requires.

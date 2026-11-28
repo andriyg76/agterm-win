@@ -12,6 +12,12 @@ agterm-win stops borrowing the upstream release number (`v0.44.1.11`) and gets i
 - User-facing name: `agterm-win 0.44.1012 (agterm 0.44.1)` in the release title, Inno `AppVerName` and About.
 - MSIX: `a.b.c` → `a.b.c.0`.
 
+## Upstream sync
+
+Moving to a new upstream release is its own change, never part of a release: merge the upstream tag into
+`windows-port` and bump `AGTERM_VERSION` in the same PR (as `0f4a085` did for 0.44.1). It changes no agterm-win
+version; the next release picks the kind its changes deserve.
+
 ## Release kind (workflow input `kind`)
 
 The base is the newest release tag reachable from the dispatched commit (`git describe --tags --abbrev=0 --match 'v*'`).
