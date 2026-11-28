@@ -343,3 +343,98 @@ $shellCases["attention-close-shortcuts"] = {
     if (-not (Get-SessionNodes $state | Where-Object { $_.id -eq $idle.result.id })) { return @("Ctrl+F4 also closed the other session") }
     @()
 }
+
+function Get-TreeCount([IntPtr]$Window) {
+    $tree = [AgtermWin32]::VisibleChildren($Window, "SysTreeView32") | Select-Object -First 1
+    if ($tree) { [int][AgtermWin32]::SendMessageW($tree, 0x1105, [IntPtr]::Zero, [IntPtr]::Zero) } else { -1 }   # TVM_GETCOUNT
+}
+
+function Get-Flagged([string]$State) { @(Get-SessionNodes $State | ? { $_.flagged } | % { $_.name } | Sort-Object) -join "," }
+
+# Run-Command runs a command palette row by its title.
+function Run-Command([IntPtr]$Window, [string]$Query, [string]$Title) {
+    $palette = Open-Palette $Window $true
+    if (-not $palette) { return $false }
+    [AgtermInput]::SetText($palette.Edit, $Query)
+    if (-not (Wait-Until { @(Get-Rows $palette)[0] -eq $Title } 5)) { Send-Key $palette.Edit 0x1B; return $false }
+    Send-Key $palette.Edit 0x0D
+    $true
+}
+
+$shellCases["flagged-editing"] = {
+    param($Shell)
+    [AgtermWin32]::SetThreadDpiAwarenessContext([IntPtr](-4)) | Out-Null
+    $state = $Shell.State
+    $window = Get-ShellWindow $Shell
+    if (-not $window) { return @("no visible agterm-shell window") }
+    $ids = @()
+    $dev = $null
+    foreach ($spec in @(@("top"), @("api", "--workspace"), @("web", "--workspace"))) {
+        # a new workspace takes the selection, so the top-level session comes first
+        if ($spec.Count -gt 1) {
+            if (-not $dev) { $dev = (Invoke-Ctl $state @("workspace", "new", "dev")).result.id }
+            $spec += $dev
+        }
+        $reply = Invoke-Ctl $state (@("session", "new", "--name", $spec[0], "--command", "cmd.exe /d /k") + @($spec | Select-Object -Skip 1))
+        if (-not $reply.ok) { return @("session new $($spec[0]) failed: $($reply | ConvertTo-Json -Compress)") }
+        $ids += $reply.result.id
+    }
+    Get-SessionNodes $state | ? { $ids -notcontains $_.id } | % { Invoke-Ctl $state @("session", "close", "--target", $_.id) | Out-Null }
+    if (-not (Wait-Until { @(Get-SessionNodes $state).Count -eq 3 } 10)) { return @("the window did not settle on top, api and web") }
+    $failures = @()
+
+    Note "Flag All Sessions on the workspace row"
+    $menu = Open-RowMenu $Shell $window 1
+    if (-not $menu) { return @("the dev row opened no menu") }
+    $titles = [AgtermWin32]::MenuTitles($menu) -join ","
+    if (-not (Choose-MenuItem $Shell $menu "Flag All Sessions")) { return @("the dev row's menu has no Flag All Sessions: $titles") }
+    if (-not (Wait-Until { (Get-Flagged $state) -eq "api,web" } 5)) { $failures += "Flag All flagged '$(Get-Flagged $state)', not api,web" }
+    $menu = Open-RowMenu $Shell $window 1
+    if ($menu) {
+        if ([AgtermWin32]::MenuTitles($menu) -notcontains "Unflag All Sessions") { $failures += "a fully flagged workspace does not offer Unflag All Sessions" }
+        Send-Escape $menu
+        Wait-Until { [AgtermWin32]::Visible($Shell.Process.Id, "#32768").Count -eq 0 } 5 | Out-Null
+    }
+
+    Note "Edit Flagged Sessions toggles and stays open"
+    $script:InFront = Bring-Front $window
+    if (-not (Run-Command $window "edit flagged" "View › Edit Flagged Sessions…")) { return $failures + @("the command palette has no View › Edit Flagged Sessions…") }
+    $editor = Wait-Until { $p = Get-Palette $window; if ($p -and ((Get-Rows $p) -join "|") -eq "top|api|web") { $p } } 5
+    if (-not $editor) { return $failures + @("the flag editor lists '$((Get-Rows (Get-Palette $window)) -join "|")', not top|api|web") }
+    Send-Key $editor.Edit 0x0D
+    if (-not (Wait-Until { (Get-Flagged $state) -eq "api,top,web" } 5)) { $failures += "Enter on top left '$(Get-Flagged $state)' flagged" }
+    Start-Sleep -Milliseconds 500
+    if (-not (Get-Palette $window)) { return $failures + @("a flag pick closed the editor") }
+    Send-Key $editor.Edit 0x28
+    Wait-Until { [AgtermInput]::Highlight($editor.List) -eq 1 } 2 | Out-Null
+    Send-Key $editor.Edit 0x0D
+    if (-not (Wait-Until { (Get-Flagged $state) -eq "top,web" } 5)) { $failures += "Enter on api left '$(Get-Flagged $state)' flagged" }
+    Start-Sleep -Milliseconds 300
+    if ([AgtermInput]::Highlight($editor.List) -ne 1) { $failures += "the toggle moved the highlight to $([AgtermInput]::Highlight($editor.List))" }
+    Save-Snapshot $Shell "flag-editor"
+    Send-Key $editor.Edit 0x1B
+    Wait-Until { -not (Get-Palette $window) } 5 | Out-Null
+
+    Note "the flagged view layouts"
+    Invoke-Ctl $state @("sidebar", "mode", "flagged") | Out-Null
+    if (-not (Wait-Until { (Get-TreeCount $window) -eq 2 } 5)) { $failures += "the flat flagged view has $(Get-TreeCount $window) rows, not top and web" }
+    $reply = Invoke-Ctl $state @("sidebar", "flagged-layout", "tree")
+    if ($reply.result.text -ne "tree") { $failures += "sidebar flagged-layout tree answered $($reply | ConvertTo-Json -Compress)" }
+    if ((Invoke-Ctl $state @("tree")).result.tree.sidebarFlaggedLayout -ne "tree") { $failures += "the tree does not read back the tree layout" }
+    if (-not (Wait-Until { (Get-TreeCount $window) -eq 3 } 5)) { $failures += "the tree layout has $(Get-TreeCount $window) rows, not top, dev and web" }
+    Save-Snapshot $Shell "flagged-tree"
+    Invoke-Ctl $state @("sidebar", "flagged-layout", "flat") | Out-Null
+    Invoke-Ctl $state @("sidebar", "mode", "tree") | Out-Null
+
+    Note "Clear Flagged asks first"
+    foreach ($answer in @(2, 1)) {
+        if (-not (Run-Command $window "clear flagged" "View › Clear Flagged")) { return $failures + @("the command palette has no View › Clear Flagged") }
+        $dialog = Wait-Until { [AgtermWin32]::Visible($Shell.Process.Id, "#32770") | Select-Object -First 1 } 5
+        if (-not $dialog) { return $failures + @("Clear Flagged did not ask") }
+        [AgtermWin32]::PostMessageW($dialog, 0x0111, [IntPtr]$answer, [IntPtr]::Zero) | Out-Null   # WM_COMMAND IDCANCEL, then IDOK
+        Wait-Until { [AgtermWin32]::Visible($Shell.Process.Id, "#32770").Count -eq 0 } 5 | Out-Null
+        $expected = if ($answer -eq 2) { "top,web" } else { "" }
+        if (-not (Wait-Until { (Get-Flagged $state) -eq $expected } 5)) { $failures += "answer $answer left '$(Get-Flagged $state)' flagged, not '$expected'" }
+    }
+    $failures
+}

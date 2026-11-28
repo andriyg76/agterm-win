@@ -246,6 +246,8 @@ private final class FakeHost: NativeControlHost {
     func setFullscreen(_ on: Bool) { fullscreen = on }
     var sidebarWidthPoints: Double = AppStore.sidebarWidthDefault
     func setSidebarWidth(points: Double) { sidebarWidthPoints = AppStore.clampSidebarWidth(points) }
+    var flaggedLayout = FlaggedViewLayout.flat
+    func setFlaggedLayout(_ layout: FlaggedViewLayout) { flaggedLayout = layout }
 
     func exitOverlay(_ id: UUID, code: Int) {
         localStore.recordOverlayExit(id, code: code)
@@ -404,6 +406,38 @@ struct NativeControlTests {
         clear.mode = "clear"
         #expect(await handle(ControlRequest(cmd: .sessionTint, target: session.uuidString, args: clear), host).ok)
         #expect(host.localStore.session(withID: session)?.tint == nil)
+    }
+
+    @Test func flaggedLayoutIsSetToggledAndReadBack() async {
+        let host = FakeHost()
+        var args = ControlArgs()
+        args.mode = "plain"
+        #expect(await handle(ControlRequest(cmd: .sidebarFlaggedLayout, args: args), host).result?.text == "plain")
+        #expect(host.flaggedLayout == .plain)
+        #expect(await handle(ControlRequest(cmd: .sidebarFlaggedLayout), host).result?.text == "tree")
+        #expect(await handle(ControlRequest(cmd: .tree), host).result?.tree?.sidebarFlaggedLayout == "tree")
+        args.mode = "nested"
+        #expect(await handle(ControlRequest(cmd: .sidebarFlaggedLayout, args: args), host).error == "invalid flagged layout: nested")
+    }
+
+    @Test func flaggedViewListsByTheLayout() {
+        let host = FakeHost()
+        let store = host.localStore
+        let dev = store.addWorkspace(name: "dev")
+        let top = host.add("top")
+        let api = host.add("api")
+        store.renameSession(top, to: "top")
+        store.renameSession(api, to: "api")
+        _ = store.moveSession(api, toWorkspace: dev.id)
+        store.setFlag(true, forSessions: store.workspaces.flatMap(\.sessions).map(\.id))
+        store.setSidebarMode(.flagged)
+        let titles = { SessionSidebar.items(store).map { $0.isWorkspace ? "[\($0.title)] \($0.children.map(\.title))" : $0.title } }
+        store.useFlaggedLayout(.flat)
+        #expect(titles().contains("api : dev"))
+        store.useFlaggedLayout(.plain)
+        #expect(titles().contains("api") && !titles().contains("api : dev"))
+        store.useFlaggedLayout(.tree)
+        #expect(titles() == ["top", "[dev] [\"api\"]"])
     }
 
     @Test func aCompanionNestsUnderItsSessionInTheTree() async {

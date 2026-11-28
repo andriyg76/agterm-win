@@ -39,6 +39,27 @@ struct PaletteTests {
         #expect(rows.map(\.title) == ["alpha", "zeta", "zeta › logs"])
     }
 
+    @Test func theFlagEditorListsEverySessionMarkingTheFlaggedOnes() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let top = Session(initialCwd: "/home/u", customName: "top"), api = Session(initialCwd: "/home/u", customName: "api")
+        api.flagged = true
+        let local = AppStore(workspaces: [Workspace(name: "", sessions: [top], isRoot: true), Workspace(name: "dev", sessions: [api])],
+                             persistence: PersistenceStore(directory: directory), paneFinalizer: nil, headless: true)
+        guard case .success = local.addCompanion(to: api.id, options: CompanionOptions(name: "logs", select: false)) else {
+            Issue.record("addCompanion refused")
+            return
+        }
+        let server = AppStore(workspaces: [Workspace(name: "ops", sessions: [Session(initialCwd: "/home/u", customName: "db")])],
+                              persistence: PersistenceStore(directory: directory, fileName: "server.json"), paneFinalizer: nil, headless: true)
+        let rows = Palette.flagRows([(nil, local, true), ("WSL Ubuntu", server, false)])
+        #expect(rows.map(\.title) == ["top", "api", "api › logs", "db"])
+        #expect(rows.map(\.subtitle) == ["", "dev", "dev", "WSL Ubuntu · ops"])
+        #expect(rows.map(\.detail) == ["", "\u{2691}", "", ""])
+        #expect(rows.map(\.enabled) == [true, true, true, false])
+        #expect(rows[1].target == .flag(api.id))
+    }
+
     @Test func unseenAndAttentionMarkASession() {
         let quiet = Palette.Local(id: UUID(), name: "a", exited: false, attention: true)
         let counted = Palette.Local(id: UUID(), name: "b", exited: false, attention: true, unseen: 3)

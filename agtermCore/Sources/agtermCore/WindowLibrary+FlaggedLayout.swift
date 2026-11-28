@@ -7,3 +7,10 @@ extension WindowLibrary {
         for store in stores.values { store.flaggedLayout = layout }
     }
 }
+
+extension AppStore {
+    /// useFlaggedLayout mirrors the app-wide layout on a store no `WindowLibrary` owns, as agterm-win's are.
+    public func useFlaggedLayout(_ layout: FlaggedViewLayout) {
+        flaggedLayout = layout
+    }
+}

@@ -19,6 +19,8 @@ public struct GeneralSettings: Codable, Equatable, Sendable {
     public var scrollLines = GeneralSettings.defaultScrollLines
     /// restoreMode is how a restart brings sessions back, read once at launch as on macOS.
     public var restoreMode = RestoreMode.none
+    /// flaggedViewLayout is a `FlaggedViewLayout` raw value, as macOS stores it; nil is flat.
+    public var flaggedViewLayout: String?
 
     public static let defaultScrollLines = 3
     public static let scrollLineRange = 1...10
@@ -35,6 +37,11 @@ public struct GeneralSettings: Codable, Equatable, Sendable {
         let lines = try container.decodeIfPresent(Int.self, forKey: .scrollLines) ?? Self.defaultScrollLines
         scrollLines = Self.scrollLineRange.contains(lines) ? lines : Self.defaultScrollLines
         restoreMode = try container.decodeIfPresent(RestoreMode.self, forKey: .restoreMode) ?? .none
+        flaggedViewLayout = try container.decodeIfPresent(String.self, forKey: .flaggedViewLayout)
+    }
+
+    public var flaggedLayout: FlaggedViewLayout {
+        flaggedViewLayout.flatMap(FlaggedViewLayout.init(rawValue:)) ?? .flat
     }
 
     public var directory: AppSettings.NewSessionDirectory {

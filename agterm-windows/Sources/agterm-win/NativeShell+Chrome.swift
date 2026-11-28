@@ -86,6 +86,15 @@ extension NativeShell {
 
     var sidebarWidthPoints: Double { settings.sidebarWidthPoints }
 
+    var flaggedLayout: FlaggedViewLayout { settings.general.flaggedLayout }
+
+    func setFlaggedLayout(_ layout: FlaggedViewLayout) {
+        guard layout != flaggedLayout else { return }
+        settings.general.flaggedViewLayout = layout == .flat ? nil : layout.rawValue
+        saveSettings()
+        rebuild()
+    }
+
     func onSidebarDivider(x: Int32) -> Bool {
         guard settings.sidebarVisible else { return false }
         let edge = sidebarWidth

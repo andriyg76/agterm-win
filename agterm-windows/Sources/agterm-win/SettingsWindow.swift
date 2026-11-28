@@ -43,7 +43,7 @@ final class SettingsWindow {
 
     private enum Control: Int32 {
         case theme = 101, follows, darkTheme, fontFamily, size, sizeArrows, banners, sound, unseenCount, flash
-        case directory, customDirectory, placement, confirmClose, rightClickPastes, scrollLines, scrollArrows, restoreMode
+        case directory, customDirectory, placement, confirmClose, rightClickPastes, scrollLines, scrollArrows, restoreMode, flaggedLayout
     }
 
     // the check box for `distributions[index]` has this id plus the index
@@ -54,6 +54,9 @@ final class SettingsWindow {
     ]
     private static let placements: [(AppSettings.NewSessionPlacement, String)] = [
         (.end, "At the end of the list"), (.afterCurrent, "Right after the selected session"),
+    ]
+    private static let flaggedLayouts: [(FlaggedViewLayout, String)] = [
+        (.flat, "Flat list"), (.plain, "Flat list, names only"), (.tree, "Workspace tree"),
     ]
     // Re-run commands joins once agterm-win reads a pane's foreground command
     private static let restoreModes: [RestoreMode] = [.none, .live]
@@ -156,6 +159,8 @@ final class SettingsWindow {
                          id: Control.customDirectory.rawValue, exStyle: Int32(WS_EX_CLIENTEDGE))
         _ = add("STATIC", "New sessions go", 0, 28, 136, 300, 18)
         let placement = add("COMBOBOX", "", list, 28, 156, 300, 200, id: Control.placement.rawValue)
+        _ = add("STATIC", "Flagged view layout", 0, 340, 136, 152, 18)
+        let flaggedLayout = add("COMBOBOX", "", list, 340, 156, 152, 200, id: Control.flaggedLayout.rawValue)
         _ = add("STATIC", "Restore sessions", 0, 28, 192, 300, 18)
         let restore = add("COMBOBOX", "", list, 28, 212, 220, 200, id: Control.restoreMode.rawValue)
         let restoreHint = ["Changes apply after restarting agterm.", original.liveUnavailable].compactMap { $0 }.joined(separator: " ")
@@ -209,6 +214,8 @@ final class SettingsWindow {
         EnableWindow(custom, general.directory == .custom ? true : false)
         Self.placements.forEach { addString($0.1, to: placement, message: CB_ADDSTRING) }
         SendMessageW(placement, UINT(CB_SETCURSEL), WPARAM(Self.placements.firstIndex { $0.0 == general.placement } ?? 0), 0)
+        Self.flaggedLayouts.forEach { addString($0.1, to: flaggedLayout, message: CB_ADDSTRING) }
+        SendMessageW(flaggedLayout, UINT(CB_SETCURSEL), WPARAM(Self.flaggedLayouts.firstIndex { $0.0 == general.flaggedLayout } ?? 0), 0)
         Self.restoreModes.forEach { addString($0.displayName, to: restore, message: CB_ADDSTRING) }
         SendMessageW(restore, UINT(CB_SETCURSEL), WPARAM(Self.restoreModes.firstIndex(of: general.restoreMode) ?? 0), 0)
         check(confirmClose, general.confirmCloseSession)
@@ -313,6 +320,9 @@ final class SettingsWindow {
         let custom = text(.customDirectory).trimmingCharacters(in: .whitespaces)
         general.newSessionCustomDirectory = custom.isEmpty ? nil : custom
         general.newSessionPlacement = Self.placements.indices.contains(placementRow) ? Self.placements[placementRow].0.rawValue : nil
+        let layoutRow = row(.flaggedLayout)
+        let layout = Self.flaggedLayouts.indices.contains(layoutRow) ? Self.flaggedLayouts[layoutRow].0 : .flat
+        general.flaggedViewLayout = layout == .flat ? nil : layout.rawValue
         let restoreRow = row(.restoreMode)
         general.restoreMode = Self.restoreModes.indices.contains(restoreRow) ? Self.restoreModes[restoreRow] : .none
         general.confirmCloseSession = checked(.confirmClose)

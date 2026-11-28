@@ -14,7 +14,7 @@ public struct WindowsKeymap: Sendable {
         (.toggleHorizontalSplit, .toggleHorizontalSplit), (.focusLeftPane, .focusLeftPane), (.focusRightPane, .focusRightPane),
         (.toggleScratch, .toggleScratch), (.toggleOverlay, .toggleOverlay), (.quickTerminal, .quickTerminal), (.dashboard, .dashboard),
         (.toggleSidebar, .toggleSidebar), (.newWorkspace, .newWorkspace), (.renameWorkspace, .renameWorkspace), (.deleteWorkspace, .deleteWorkspace), (.toggleFlag, .toggleFlag),
-        (.toggleFlaggedView, .toggleFlaggedView), (.focusWorkspace, .focusWorkspace), (.toggleWorkspaceFilter, .toggleWorkspaceFilter),
+        (.toggleFlaggedView, .toggleFlaggedView), (.editFlaggedSessions, .editFlaggedSessions), (.focusWorkspace, .focusWorkspace), (.toggleWorkspaceFilter, .toggleWorkspaceFilter),
         (.previousWorkspace, .previousWorkspace), (.nextWorkspace, .nextWorkspace), (.newCompanion, .newCompanion),
         (.convertCompanion, .convertCompanion), (.toggleWorkspaceCollapse, .toggleWorkspaceCollapse),
         (.toggleFullscreen, .toggleFullscreen),

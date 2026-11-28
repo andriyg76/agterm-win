@@ -9,7 +9,8 @@ public enum NativeMenu {
              focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard, toggleOverlay, newWorkspace, renameWorkspace,
              deleteWorkspace, toggleFlag, toggleFlaggedView, focusWorkspace, toggleWorkspaceFilter, previousWorkspace, nextWorkspace,
              newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar, editProfiles, copyName, revealSession,
-             expandWorkspaces, collapseWorkspaces, toggleWorkspaceCollapse, toggleFullscreen
+             expandWorkspaces, collapseWorkspaces, toggleWorkspaceCollapse, toggleFullscreen, clearFlagged, editFlaggedSessions,
+             flagAllSessions
 
         public var title: String {
             switch self {
@@ -54,6 +55,9 @@ public enum NativeMenu {
             case .deleteWorkspace: "Delete Workspace"
             case .toggleFlag: "Flag Session"
             case .toggleFlaggedView: "Show Flagged Sessions"
+            case .clearFlagged: "Clear Flagged"
+            case .editFlaggedSessions: "Edit Flagged Sessions…"
+            case .flagAllSessions: "Flag All Sessions"
             case .focusWorkspace: "Focus"
             case .toggleWorkspaceFilter: "Toggle Workspace Filter"
             case .previousWorkspace: "Previous Workspace"
@@ -74,7 +78,7 @@ public enum NativeMenu {
             switch self {
             case .newWorkspace, .renameWorkspace, .deleteWorkspace, .focusWorkspace, .toggleWorkspaceFilter, .toggleFlaggedView,
                  .previousWorkspace, .nextWorkspace, .toggleFlag, .newCompanion, .convertCompanion, .expandWorkspaces,
-                 .collapseWorkspaces, .toggleWorkspaceCollapse: true
+                 .collapseWorkspaces, .toggleWorkspaceCollapse, .clearFlagged, .flagAllSessions: true
             default: false
             }
         }
@@ -333,6 +337,7 @@ public enum NativeMenu {
                             children: [])
         return [sidebar, .separator]
             + fontSizing(shortcuts) + [.separator, .command(.selectTheme), .separator, flaggedView(structure, shortcuts), flag,
+                .command(.clearFlagged, enabled: structure.canClearFlagged, shortcuts), .command(.editFlaggedSessions, shortcuts),
                 .separator, focus, workspaceFilter(structure, shortcuts), .command(.expandWorkspaces, enabled: structure.workspaceRows, shortcuts),
                 .command(.collapseWorkspaces, enabled: structure.workspaceRows, shortcuts), workspaceFold(structure, shortcuts), .separator,
                 .command(.toggleSplit, enabled: view.canSplit, shortcuts), .command(.toggleHorizontalSplit, enabled: view.canSplit, shortcuts),
@@ -379,6 +384,11 @@ public enum NativeMenu {
         /// collapsed is whether the workspace row is folded; workspaceRows is a tree with a named workspace to fold.
         public var collapsed = false
         public var workspaceRows = false
+        /// canClearFlagged is a flagged session to clear; workspaceSessions and allFlagged are the workspace row's sessions
+        /// and whether each is flagged, for Flag All or Unflag All.
+        public var canClearFlagged = false
+        public var workspaceSessions = false
+        public var allFlagged = false
         /// tints are the row's tint, one per target, when it offers Tint; tintPlacement is the last Show On pick.
         public var tints: [SidebarTint?]?
         public var tintPlacement: Set<TintPart> = [.icon]
@@ -405,7 +415,13 @@ public enum NativeMenu {
             focus.checked = structure.focused
             menu += [.command(.renameWorkspace, enabled: named, shortcuts), .command(.copyName, enabled: named, shortcuts),
                      .command(.deleteWorkspace, enabled: named, shortcuts), workspaceFold(structure, shortcuts), focus]
-            if named { menu += tint(structure) }
+            if named {
+                let flagAll = Command.flagAllSessions
+                menu.append(Entry(title: structure.allFlagged ? "Unflag All Sessions" : flagAll.title,
+                                  shortcut: shortcuts[flagAll] ?? flagAll.shortcut, pick: .command(flagAll),
+                                  enabled: structure.workspaceSessions && structure.canTint, children: []))
+                menu += tint(structure)
+            }
         }
         if let flagged = structure.flagged {
             var flag = Entry.command(.toggleFlag, shortcuts)

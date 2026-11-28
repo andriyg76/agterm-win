@@ -1444,7 +1444,7 @@ final class NativeShell {
 
     func windowCommand(_ command: NativeMenu.Command) {
         log("native shell: \(command)")
-        if command == .attentionPalette, pickPalette != nil { return }
+        if command == .attentionPalette || command == .editFlaggedSessions, pickPalette != nil { return }
         if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .selectTheme, .about, .quit, .editKeymap, .editProfiles, .reloadKeymap, .commandPalette, .toggleSidebar,
               .toggleFullscreen].contains(command) {
             closeDashboard()
@@ -1474,6 +1474,7 @@ final class NativeShell {
         case .find: showFindBar()
         case .sessionPalette: openPalette(.sessions)
         case .commandPalette: openPalette(.commands)
+        case .editFlaggedSessions: openPalette(.flagEditor)
         case .attentionPalette:
             if paletteMode == .attention { closePalette(refocus: true) } else { openPalette(.attention) }
         case .quit: if confirmQuit() { DestroyWindow(window) }
@@ -1544,6 +1545,19 @@ final class NativeShell {
             guard let workspace, let named = namedWorkspace(workspace) else { return }
             structure(named.isExpanded ? .workspaceCollapse : .workspaceExpand, target: workspace, args)
         case .toggleFlaggedView: structure(.sidebarMode, target: nil, args)
+        case .clearFlagged:
+            let count = storeOf(destination).clearableFlagCount
+            guard count > 0 else { return }
+            let question = count == 1 ? "Clear flagged sessions? This unflags 1 session. The session itself is not closed."
+                : "Clear flagged sessions? This unflags \(count) sessions. The sessions themselves are not closed."
+            guard MessageBoxW(window, Array(question.utf16) + [0], Array("agterm".utf16) + [0],
+                              UINT(MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)) == IDOK else { return }
+            args.mode = "clear"
+            structure(.sessionFlag, target: nil, args)
+        case .flagAllSessions:
+            guard let workspace, namedWorkspace(workspace) != nil else { return }
+            args.mode = storeOf(destination).workspaceAllFlagged(workspace) ? "off" : "on"
+            structure(.workspaceFlag, target: workspace, args)
         case .previousWorkspace, .nextWorkspace:
             args.to = command == .nextWorkspace ? "next" : "prev"
             structure(.workspaceGo, target: nil, args)
@@ -1574,6 +1588,12 @@ final class NativeShell {
         state.canFilter = !store.focusedWorkspaceIDs.isEmpty
         state.canToggleFlaggedView = state.flaggedView || !store.flaggedSessions.isEmpty
         state.workspaceRows = store.sidebarMode == .tree && store.workspaces.contains { !$0.isRoot }
+        state.canClearFlagged = store.clearableFlagCount > 0 && !store.marksBlocked
+        state.canTint = !store.marksBlocked
+        if let workspace {
+            state.workspaceSessions = store.workspaceHasSessions(workspace)
+            state.allFlagged = state.workspaceSessions && store.workspaceAllFlagged(workspace)
+        }
         state.collapsed = workspace.flatMap { id in store.workspaces.first { $0.id == id } }?.isExpanded == false
         return state
     }
@@ -1595,7 +1615,6 @@ final class NativeShell {
             state.tints = [store.workspaces.first { $0.id == id }?.tint]
         }
         state.tintPlacement = tintPlacement
-        state.canTint = !store.marksBlocked
         return (NativeMenu.structure(state, shortcuts: menuShortcuts), targets)
     }
 
@@ -2288,6 +2307,9 @@ final class NativeShell {
 
     func rebuild() {
         guard let tree else { return }
+        // the layout is app-wide; every tree, a server's included, lists and navigates its flagged sessions by it
+        let layout = settings.general.flaggedLayout
+        ([localStore] + servers.map(\.remote.store)).forEach { $0.useFlaggedLayout(layout) }
         let unseen = settings.notifications.unseenCount ? serverUnseen : [:]
         let counting = settings.notifications.unseenCount
         let runtimes = Dictionary(uniqueKeysWithValues: locals.map { ($0.id, $0) })
@@ -2739,6 +2761,9 @@ final class NativeShell {
             }
             return Palette.sessionRows(locals: localRows, servers: servers.map { (label: $0.label, workspaces: $0.remote.store.workspaces) },
                                        unseen: counting ? serverUnseen : [:])
+        case .flagEditor:
+            return Palette.flagRows([(nil, localStore, !localStore.marksBlocked)]
+                + servers.map { ($0.label, $0.remote.store, $0.remote.connected && !$0.remote.store.marksBlocked) })
         case .commands:
             return Palette.commandRows(windowEntries + NativeMenu.sessionTints(enabled: selected != nil && !activeStore.marksBlocked))
         case .attention:
@@ -2772,13 +2797,13 @@ final class NativeShell {
         nt_palette_place(palette, left, top, width)
     }
 
-    fileprivate func paletteQueryChanged() {
+    fileprivate func paletteQueryChanged(keeping highlight: Int = 0) {
         guard let palette, paletteMode != nil || pickPalette != nil else { return }
         if pickPalette == nil, let mode = paletteMode { paletteRows = rows(for: mode) }
         var text = [UInt16](repeating: 0, count: 512)
         let length = nt_palette_query(palette, &text, Int32(text.count))
         let query = String(decoding: text.prefix(Int(max(length, 0))), as: UTF16.self)
-        var selection: Int32 = 0
+        var selection = Int32(highlight)
         if let pick = pickPalette {
             paletteShown = Palette.pickRows(pick, query: query)
             if query == pickSeedQuery { selection = Int32(Palette.pickSeed(pick, rows: paletteShown)) } else { pickSeedQuery = nil }
@@ -2821,8 +2846,17 @@ final class NativeShell {
             log("native shell: palette row \(row.title) cannot run now")
             return
         }
+        if case .flag(let id) = row.target {
+            var args = ControlArgs()
+            args.mode = "toggle"
+            structure(.sessionFlag, target: id, args) { [weak self] _ in
+                if self?.paletteMode == .flagEditor { self?.paletteQueryChanged(keeping: index) }
+            }
+            return
+        }
         closePalette(refocus: false)
         switch row.target {
+        case .flag: break
         case .session(let id):
             let indicator = mode == .attention ? local(id)?.activity.indicator : nil
             select(id)

@@ -5,19 +5,22 @@ import agtermCore
 /// the ☰ menu's commands. Rows match their title and subtitle; an empty query keeps the source order.
 public enum Palette {
     public enum Mode: Equatable, Sendable {
-        case sessions, commands, attention
+        case sessions, commands, attention, flagEditor
 
         public var cue: String {
             switch self {
             case .sessions: "Go to session"
             case .commands: "Run a command"
             case .attention: "Go to attention"
+            case .flagEditor: "Flag or unflag sessions"
             }
         }
     }
 
     public enum Target: Equatable, Sendable {
         case session(UUID)
+        /// flag toggles a session's flag in Edit Flagged Sessions, which stays open.
+        case flag(UUID)
         case pick(NativeMenu.Pick)
         /// pickChoice is one item of a pick, by its id.
         case pickChoice(String)
@@ -115,6 +118,25 @@ public enum Palette {
             return (lhs.changedAt ?? .distantPast) > (rhs.changedAt ?? .distantPast)
         }.map { session in
             Row(title: session.title, subtitle: session.subtitle, detail: session.status.rawValue.capitalized, target: .session(session.id))
+        }
+    }
+
+    /// FlagGroup is one tree Edit Flagged Sessions lists: the local window's, unlabelled, or a server's under its label;
+    /// `editable` is false while that tree's flags cannot be written.
+    public typealias FlagGroup = (label: String?, store: AppStore, editable: Bool)
+
+    /// flagRows are Edit Flagged Sessions' rows, the Mac's flagged editor: every session in sidebar order, a companion
+    /// titled `parent › companion`, ⚑ while flagged; a pick toggles the flag and keeps the palette open.
+    @MainActor
+    public static func flagRows(_ groups: [FlagGroup]) -> [Row] {
+        groups.flatMap { group in
+            group.store.displayWorkspaces.flatMap { workspace in
+                let place = [group.label, workspace.isRoot ? nil : workspace.name].compactMap { $0 }.joined(separator: " · ")
+                return workspace.sessions.map { session in
+                    Row(title: group.store.listLabel(for: session), subtitle: place, detail: session.flagged ? "\u{2691}" : "", enabled: group.editable,
+                        target: .flag(session.id))
+                }
+            }
         }
     }
 

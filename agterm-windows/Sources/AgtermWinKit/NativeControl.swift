@@ -109,6 +109,9 @@ public protocol NativeControlHost: AnyObject {
     var fullscreen: Bool { get }
     func setFullscreen(_ on: Bool)
     func setSidebarWidth(points: Double)
+    /// flaggedLayout is Settings ▸ General's flagged view layout, app-wide as on a Mac.
+    var flaggedLayout: FlaggedViewLayout { get }
+    func setFlaggedLayout(_ layout: FlaggedViewLayout)
     func openDashboard(_ members: [DashboardMember], fontMode: DashboardFontMode)
     func closeDashboard()
     /// pickController is the window modal slot, shared by picks and GUI asks.
@@ -193,7 +196,8 @@ public enum NativeControl {
             case .success(nil): return ControlResponse(ok: true, result: ControlResult(tree: tree(host)))
             case .success(let remote?):
                 guard let store = host.remoteStore(remote) else { return failure("remote window is not connected") }
-                return ControlResponse(ok: true, result: ControlResult(tree: store.controlTree(paneForeground: { _ in nil })))
+                return ControlResponse(ok: true, result: ControlResult(tree: store.controlTree(paneForeground: { _ in nil },
+                                                                                           flaggedLayout: host.flaggedLayout)))
             }
         case .version:
             return ControlResponse(ok: true, result: ControlResult(app: AppIdentity(version: version)))
@@ -340,6 +344,17 @@ public enum NativeControl {
             }
             host.setSidebarWidth(points: points)
             return ControlResponse(ok: true, result: ControlResult(sidebarWidth: host.sidebarWidthPoints))
+        case .sidebarFlaggedLayout:
+            let layout: FlaggedViewLayout
+            switch ControlFlaggedLayoutMode.parse(request.args?.mode) {
+            case .flat?: layout = .flat
+            case .plain?: layout = .plain
+            case .tree?: layout = .tree
+            case .toggle?: layout = host.flaggedLayout == .tree ? .flat : .tree
+            case nil: return failure("invalid flagged layout: \(request.args?.mode ?? "toggle")")
+            }
+            host.setFlaggedLayout(layout)
+            return ControlResponse(ok: true, result: ControlResult(text: layout.rawValue))
         default:
             return failure("\(request.cmd.rawValue) is not supported on Windows")
         }
@@ -471,7 +486,7 @@ public enum NativeControl {
     /// runs here. The store's selection is `active`, as a Mac window keeps its own while another is in front.
     public static func tree(_ host: NativeControlHost) -> ControlTree {
         let store = host.localStore
-        let shape = store.controlTree(paneForeground: { _ in nil })
+        let shape = store.controlTree(paneForeground: { _ in nil }, flaggedLayout: host.flaggedLayout)
         let locals = Dictionary(host.localSessions.map { ($0.id.uuidString, $0) }) { first, _ in first }
         let workspaces = shape.workspaces.map { workspace in
             ControlWorkspaceNode(id: workspace.id, name: workspace.name, active: workspace.active, focused: workspace.focused,
@@ -480,7 +495,7 @@ public enum NativeControl {
         }
         let dashboard = host.dashboard
         return ControlTree(workspaces: workspaces, sidebarVisible: host.sidebarVisible, sidebarMode: shape.sidebarMode,
-                           flaggedOrder: shape.flaggedOrder, sidebarWidth: host.sidebarWidthPoints, workspaceFilter: shape.workspaceFilter, quickVisible: host.quickShown,
+                           sidebarFlaggedLayout: shape.sidebarFlaggedLayout, flaggedOrder: shape.flaggedOrder, sidebarWidth: host.sidebarWidthPoints, workspaceFilter: shape.workspaceFilter, quickVisible: host.quickShown,
                            dashboardMembers: dashboard?.members.map(\.controlRef), dashboardHighlighted: dashboard?.highlighted?.controlRef,
                            dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) },
                            pickPending: host.pickController.pending?.id, askPending: host.pickController.pendingAsk?.id)
