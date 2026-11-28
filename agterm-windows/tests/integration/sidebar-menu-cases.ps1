@@ -84,19 +84,22 @@ $shellCases["reveal-explorer"] = {
         if (-not (Wait-Until { @(Get-SessionNodes $state).Count -eq 1 } 10)) { return @("the other sessions did not close") }
         $failures = @()
         $leaf = Split-Path $parent -Leaf
+        # without the foreground, the folder window opens behind and is closed, but not required
+        $script:InFront = Bring-Front $window
 
         Note "session.reveal"
         $before = Get-FolderWindows
         $reply = Invoke-Ctl $state @("session", "reveal", "--target", $id)
         if (-not $reply.ok) { $failures += "session reveal refused an existing folder: $($reply.error)" }
-        elseif ($script:InFront -and -not (Wait-NewFolderWindow $before $leaf)) { $failures += "session reveal opened no Explorer window on $leaf" }
+        elseif (-not (Wait-NewFolderWindow $before $leaf) -and $script:InFront) { $failures += "session reveal opened no Explorer window on $leaf" }
 
         Note "row menu"
+        $script:InFront = Bring-Front $window
         $before = Get-FolderWindows
         $menu = Open-RowMenu $Shell $window 0
         if (-not $menu) { return $failures + "a right click on the session row opened no menu" }
         if (-not (Choose-MenuItem $Shell $menu "Reveal in Explorer")) { return $failures + "the session row's menu has no Reveal in Explorer" }
-        if ($script:InFront -and -not (Wait-NewFolderWindow $before $leaf)) { $failures += "Reveal in Explorer opened no Explorer window on $leaf" }
+        if (-not (Wait-NewFolderWindow $before $leaf) -and $script:InFront) { $failures += "Reveal in Explorer opened no Explorer window on $leaf" }
 
         Note "a folder that is gone"
         Remove-Item -Recurse -Force $parent
