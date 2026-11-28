@@ -1,10 +1,30 @@
 # agterm-win packaging
 
-Running `.github/workflows/windows-release.yml` on `windows-port` (Actions ▸ windows-release ▸ Run workflow, or
-`gh workflow run windows-release.yml --ref windows-port`) tags the next `v<AGTERM_VERSION>.<n>`, builds the x64 and
+Running `.github/workflows/windows-release.yml` (Actions ▸ windows-release ▸ Run workflow, or
+`gh workflow run windows-release.yml --ref windows-port -f kind=incremental`) tags the next version, builds the x64 and
 arm64 installers natively on `windows-2022` and `windows-11-arm` with `scripts\release.ps1`, has SignPath sign them once
 `SIGNPATH_ORGANIZATION_ID` is set (releases ship unsigned until then), and publishes the release. `scripts\release.ps1 -Version <version> [-Arch x64|arm64] [-Publish]` does the same locally for the
 host's architecture; its header lists the tools and the signing variables.
+
+**Versions** are agterm-win's own `<major>.<minor>.<patch>`, independent of `AGTERM_VERSION`, the upstream release
+the build is locked to; the release title and About show both, as `agterm-win 0.44.1012 (agterm 0.44.1)`.
+The workflow's `kind` bumps that part of the last release reachable from the branch (`scripts\release-version.ps1`
+enforces it). The last 4-part tag, `v0.44.1.11`, counts as the Store's `0.44.1011.0`, so the next patch is `0.44.1012`.
+
+| `kind` | Branch | Next |
+|---|---|---|
+| `incremental` | `windows-port` or `version/v<major>.<minor>` | `0.44.1012` → `0.44.1013` |
+| `minor` | `windows-port` | `0.45.1`; also creates `version/v0.44` at the last `0.44` tag |
+| `major` | `windows-port` | `1.0.1`; also creates `version/v<previous line>` |
+
+Moving `AGTERM_VERSION` to a new upstream release is a separate change (merge the upstream tag and bump the file in
+one PR) and implies no release kind.
+`agterm-windows/VERSION` holds the current line as `<major>.<minor>.0`, the version every unreleased build (CI,
+`stage.ps1`) carries, so a line's first release is `.1`. An `incremental` leaves it alone; a `minor` or `major` release commits the new line's `.0` to the
+branch first and builds that commit. Locally, set it by hand before `release.ps1 -Publish` of a new line.
+A `version/v*` release maintains a superseded line and is published without GitHub's Latest.
+Any other branch or kind/branch pairing fails before the build, and `windows-port` refuses a patch for a line once its
+`version/v*` branch exists. MSIX takes the version with a `.0` fourth part, as the Store requires.
 
 - **GitHub**: `-Publish` uploads the installer, the portable zip and their `.sha256` files to this fork's release
   `v<version>`, creating it for the first architecture and adding to it for the second.
@@ -57,4 +77,4 @@ for the Store listing's privacy policy URL, is [PRIVACY.md](../PRIVACY.md).
 4. In this repository: secret `SIGNPATH_API_TOKEN`, variable `SIGNPATH_ORGANIZATION_ID`. MFA on GitHub and SignPath
    for every member.
 
-**Release notes (`scripts/release-notes.ps1`):** the publish step lists commits and merged PRs on `windows-port` since the previous `v<AGTERM_VERSION>.<n>` tag. Optional secret **`OPENAI_API_KEY`** and variable **`OPENAI_MODEL`** (default `GPT-6.1-terra`) ask the API to group features vs refactors; without the key, notes list PRs and commits directly.
+**Release notes (`scripts/release-notes.ps1`):** the publish step lists commits and merged PRs on the released branch since the previous release tag reachable from it. Optional secret **`OPENAI_API_KEY`** and variable **`OPENAI_MODEL`** (default `GPT-6.1-terra`) ask the API to group features vs refactors; without the key, notes list PRs and commits directly.

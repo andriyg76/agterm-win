@@ -1,6 +1,6 @@
 # Renders packaging\winget and packaging\chocolatey for a published release into build\package-managers\<version>,
 # taking the x64 and arm64 installers' sha256 from the release, and packs the Chocolatey .nupkg when choco is on PATH.
-#   scripts\package-managers.ps1 -Version 0.44.1.1
+#   scripts\package-managers.ps1 -Version 0.44.1012
 # winget: the winget folder is the manifests/a/andriyg76/agterm-win/<version> directory of a microsoft/winget-pkgs PR.
 # Chocolatey: choco push <nupkg> --source https://push.chocolatey.org/ with the account's API key.
 param([Parameter(Mandatory)][string]$Version)

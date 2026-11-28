@@ -1,6 +1,6 @@
 # Unsigned Inno installer, portable zip and Store MSIX (and registerable layout) from an existing release build.
 # CI runs swift build -c release first, then:
-#   scripts\package-ci.ps1 -Version (Get-Content AGTERM_VERSION -TotalCount 1).0 -Arch x64 -Output $env:RUNNER_TEMP\ci-packages
+#   scripts\package-ci.ps1 -Version (Get-Content VERSION -TotalCount 1) -Arch x64 -Output $env:RUNNER_TEMP\ci-packages
 param(
     [Parameter(Mandatory)][string]$Version,
     [ValidateSet("x64", "arm64")][string]$Arch = "x64",
@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $agterm = Get-Content (Join-Path $root "AGTERM_VERSION") -TotalCount 1
-if ($Version -notmatch "^$([regex]::Escape($agterm))\.\d+$") { throw "VERSION must be $agterm.N, got $Version" }
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION must be a.b.c, got $Version" }
 
 $build = Join-Path $root ".build\release"
 foreach ($exe in "agterm-win.exe", "agtermctl.exe") {
@@ -29,7 +29,7 @@ if (-not $zmxRev) { throw "staged without zmx; run scripts\fetch-zmx.ps1 -Arch $
 
 $iscc = if ($env:AGTERM_ISCC) { $env:AGTERM_ISCC } else { "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
 if (-not (Test-Path $iscc)) { throw "no ISCC at $iscc; install Inno Setup 6" }
-& $iscc /DAppVersion=$Version /DArch=$Arch /DStage=$stage /DOutput=$Output /DZmxRev=$zmxRev (Join-Path $root "packaging\agterm.iss")
+& $iscc /DAppVersion=$Version /DAgtermVersion=$agterm /DArch=$Arch /DStage=$stage /DOutput=$Output /DZmxRev=$zmxRev (Join-Path $root "packaging\agterm.iss")
 if ($LASTEXITCODE) { throw "ISCC failed" }
 
 & (Join-Path $PSScriptRoot "portable-zip.ps1") -Stage $stage -Output (Join-Path $Output "agterm-win-$Version-$Arch-portable.zip")

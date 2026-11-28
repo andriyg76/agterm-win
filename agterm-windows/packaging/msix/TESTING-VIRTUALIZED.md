@@ -11,8 +11,8 @@ via `scripts/msix.ps1 -Unvirtualized` (not for Store submission).
 After `scripts/stage.ps1`:
 
 ```powershell
-.\scripts\msix.ps1 -Version 0.44.1.999 -Arch x64 -Stage build\release\stage -Output build\release -LayoutOnly
-.\scripts\msix.ps1 -Version 0.44.1.999 -Arch x64 -Stage build\release\stage -Output build\release
+.\scripts\msix.ps1 -Version 0.44.999 -Arch x64 -Stage build\release\stage -Output build\release -LayoutOnly
+.\scripts\msix.ps1 -Version 0.44.999 -Arch x64 -Stage build\release\stage -Output build\release
 ```
 
 Every `windows` workflow run uploads `ci-installer-<arch>` (Inno setup), `ci-msix-<arch>` (`.msix`), and `msix-store-layout-<arch>` (registerable layout with sideload `.bat` files).

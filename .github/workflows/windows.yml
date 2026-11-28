@@ -69,8 +69,8 @@ jobs:
         run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
       - name: Package unsigned installer, portable zip and MSIX
         run: |
-          $agterm = Get-Content AGTERM_VERSION -TotalCount 1
-          ./scripts/package-ci.ps1 -Version "$agterm.0" -Arch ${{ matrix.arch }} -Output "$env:RUNNER_TEMP\ci-packages"
+          $version = (Get-Content VERSION -TotalCount 1).Trim()
+          ./scripts/package-ci.ps1 -Version $version -Arch ${{ matrix.arch }} -Output "$env:RUNNER_TEMP\ci-packages"
       - run: ./scripts/stage.ps1 -Output "$env:RUNNER_TEMP\agterm-win"
       - name: Silence the privacy settings screen
         # windows-11-arm raises "Choose privacy settings for your device" over the desktop, where screen snapshots

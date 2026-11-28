@@ -1,27 +1,19 @@
-# Builds GitHub release notes for agterm-win from commits and merged PRs since the previous v<agterm>.<n> tag.
+# Builds GitHub release notes for agterm-win from commits and merged PRs since the previous release tag reachable from HEAD.
 # With OPENAI_API_KEY set, summarizes via the chat API; otherwise emits a structured list from gh/git.
-#   scripts\release-notes.ps1 -Version 0.44.1.5 [-BaseBranch windows-port] [-OutFile notes.md]
+#   scripts\release-notes.ps1 -Version 0.44.1012 [-BaseTag v0.44.1.11] [-BaseBranch windows-port] [-OutFile notes.md]
 param(
     [Parameter(Mandatory)][string]$Version,
-    [string]$BaseBranch = "windows-port",
+    [string]$BaseTag = "",
+    [string]$BaseBranch = "",
     [string]$OutFile = ""
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $agterm = Get-Content (Join-Path $root "AGTERM_VERSION") -TotalCount 1
-if ($Version -notmatch "^$([regex]::Escape($agterm))\.\d+$") { throw "VERSION must be $agterm.N, got $Version" }
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION must be a.b.c, got $Version" }
+if (-not $BaseBranch) { $BaseBranch = git -C $root rev-parse --abbrev-ref HEAD }
 
-$build = [int]($Version -replace "^$([regex]::Escape($agterm))\.", "")
-if ($build -le 1) {
-    $prefix = ($agterm -split '\.')[0..1] -join '.'
-    $minor = [int](($agterm -split '\.')[1])
-    $prevAgterm = if ($minor -gt 0) { "$prefix.$($minor - 1)" } else { throw "no previous agterm series for $Version" }
-    $prevTag = git tag --list "v$prevAgterm.*" | ForEach-Object { if ($_ -match "^v$([regex]::Escape($prevAgterm))\.(\d+)$") { [pscustomobject]@{ Tag = $_; N = [int]$Matches[1] } } } |
-        Sort-Object N -Descending | Select-Object -First 1 -ExpandProperty Tag
-    if (-not $prevTag) { $prevTag = "v$prevAgterm.0" }
-} else {
-    $prevTag = "v$agterm.$($build - 1)"
-}
+$prevTag = if ($BaseTag) { $BaseTag } else { git -C $root describe --tags --abbrev=0 --match "v[0-9]*" HEAD 2>$null }
 
 $range = if (git rev-parse --verify "${prevTag}^{commit}" 2>$null) { "$prevTag..HEAD" } else { "HEAD" }
 $commits = @(git log $range --no-merges --pretty=format:"%h %s" 2>$null)

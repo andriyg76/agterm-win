@@ -1,9 +1,12 @@
 ; agterm-win's per-user installer, compiled by scripts/release.ps1 from a stage.ps1 folder:
-;   ISCC /DAppVersion=0.44.0.1 /DArch=x64|arm64 /DStage=... /DOutput=... /DZmxRev=... [/DSign /Sagterm=...] agterm.iss
+;   ISCC /DAppVersion=0.44.2 /DAgtermVersion=0.44.1 /DArch=x64|arm64 /DStage=... /DOutput=... /DZmxRev=... [/DSign /Sagterm=...] agterm.iss
 ; Silent install for winget and the Store: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 #ifndef AppVersion
   #error pass /DAppVersion
+#endif
+#ifndef AgtermVersion
+  #error pass /DAgtermVersion
 #endif
 #ifndef Arch
   #define Arch "x64"
@@ -19,7 +22,7 @@
 AppId={{33086B3F-821D-4FAF-9EC9-F6490E82190B}
 AppName=agterm
 AppVersion={#AppVersion}
-AppVerName=agterm {#AppVersion}
+AppVerName=agterm-win {#AppVersion} (agterm {#AgtermVersion})
 AppPublisher=andriyg76
 AppPublisherURL=https://github.com/andriyg76/agterm-win
 DefaultDirName={autopf}\agterm
