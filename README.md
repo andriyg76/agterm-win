@@ -4,6 +4,12 @@
 
 agterm-win is a native Windows terminal with a workspace and session sidebar and a scripting API. Run PowerShell, Command Prompt, and WSL side by side, and control sessions from scripts or coding agents with the bundled `agtermctl`. The Windows port of [agterm](https://github.com/umputun/agterm) shares the `agtermCore` session model with the upstream macOS app.
 
+- **Wire-compatible with agterm.** The same control protocol and `agtermctl` as upstream, from the shared `agtermCore`, so scripts and agent integrations target one API on every platform.
+- **WSL as the default remote.** Start agterm-server in a WSL distribution from the sidebar; its sessions keep running when the app closes. The server is upstream's release build, unchanged.
+- **Persistent local sessions** on [zmx-win](https://github.com/andriyg76/zmx-win), a Windows port of the session daemon upstream agterm uses.
+
+Next and planned work, including a native agterm-server for Windows that a Mac can attach to over ssh: [roadmap](docs/windows-roadmap.md).
+
 ## Install
 
 <a href="https://get.microsoft.com/installer/download/9n0dd68bcxzx?referrer=appbadge" target="_self">
@@ -34,6 +40,7 @@ Use `agtermctl --help` to explore the CLI. The [upstream command reference](http
 
 ## Documentation and support
 
+- [Roadmap](docs/windows-roadmap.md): what is shipped, next and planned
 - [Windows troubleshooting](docs/windows-troubleshooting.md): logs, state and config locations, common problems
 - [Windows keyboard shortcuts](docs/windows-shortcuts.md)
 - [Windows development and contributing](CONTRIBUTING.md#windows-development)
