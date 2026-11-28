@@ -190,6 +190,11 @@ final class RemoteWindow: RemoteCatalogEffects {
             pageCommand: { [weak self] command in
                 self?.onReplicaPageCommand?(id, command)
             },
+            message: { [weak self] in self?.store.emitRemoteMessage($0, forSession: id) },
+            mail: { [weak self] mail in
+                self?.store.applyRemoteMail(mail, forSession: id)
+                self?.changed()
+            },
             warn: { log("presentation for \(id): \($0)") })
         let client = RemotePresentationClient(argv: argv, presentationVersion: binding.presentationVersion, transport: transport,
                                               effects: effects, presents: true, kinds: WindowsPresentation.kinds)

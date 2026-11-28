@@ -258,6 +258,7 @@ $shellCases = [ordered]@{
 . (Join-Path $PSScriptRoot "panes-cases.ps1")
 . (Join-Path $PSScriptRoot "sidebar-resize-cases.ps1")
 . (Join-Path $PSScriptRoot "agent-status-cases.ps1")
+. (Join-Path $PSScriptRoot "message-cases.ps1")
 
 # seeds a case's state directory before its window starts; a keymap problem at launch would open a message box
 $shellPreparations = @{
