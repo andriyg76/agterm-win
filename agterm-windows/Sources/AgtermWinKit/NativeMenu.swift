@@ -8,7 +8,8 @@ public enum NativeMenu {
              editKeymap, reloadKeymap, settings, sessionPalette, commandPalette, toggleSplit, toggleHorizontalSplit, closeSplit, swapPanes,
              focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard, toggleOverlay, newWorkspace, renameWorkspace,
              deleteWorkspace, toggleFlag, toggleFlaggedView, focusWorkspace, toggleWorkspaceFilter, previousWorkspace, nextWorkspace,
-             newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar, editProfiles, copyName, revealSession
+             newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar, editProfiles, copyName, revealSession,
+             expandWorkspaces, collapseWorkspaces, toggleWorkspaceCollapse
 
         public var title: String {
             switch self {
@@ -61,6 +62,9 @@ public enum NativeMenu {
             case .convertCompanion: "Convert to Companion"
             case .copyName: "Copy Name"
             case .revealSession: "Reveal in Explorer"
+            case .expandWorkspaces: "Expand Workspaces"
+            case .collapseWorkspaces: "Collapse Workspaces"
+            case .toggleWorkspaceCollapse: "Collapse Workspace"
             }
         }
 
@@ -68,7 +72,8 @@ public enum NativeMenu {
         public var isStructure: Bool {
             switch self {
             case .newWorkspace, .renameWorkspace, .deleteWorkspace, .focusWorkspace, .toggleWorkspaceFilter, .toggleFlaggedView,
-                 .previousWorkspace, .nextWorkspace, .toggleFlag, .newCompanion, .convertCompanion: true
+                 .previousWorkspace, .nextWorkspace, .toggleFlag, .newCompanion, .convertCompanion, .expandWorkspaces,
+                 .collapseWorkspaces, .toggleWorkspaceCollapse: true
             default: false
             }
         }
@@ -315,7 +320,8 @@ public enum NativeMenu {
         let focus = toggle(.focusWorkspace, checked: structure.focused, enabled: structure.workspace == true, shortcuts)
         return [toggle(.toggleSidebar, checked: view.sidebarVisible, enabled: true, shortcuts), .separator]
             + fontSizing(shortcuts) + [.separator, .command(.selectTheme), .separator, flaggedView(structure, shortcuts), flag,
-                .separator, focus, workspaceFilter(structure, shortcuts), .separator,
+                .separator, focus, workspaceFilter(structure, shortcuts), .command(.expandWorkspaces, enabled: structure.workspaceRows, shortcuts),
+                .command(.collapseWorkspaces, enabled: structure.workspaceRows, shortcuts), workspaceFold(structure, shortcuts), .separator,
                 .command(.toggleSplit, enabled: view.canSplit, shortcuts), .command(.toggleHorizontalSplit, enabled: view.canSplit, shortcuts),
                 .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), scratch, overlay,
                 .separator, .command(.find, shortcuts), quick]
@@ -357,6 +363,9 @@ public enum NativeMenu {
         public var filtered = false
         public var canToggleFlaggedView = true
         public var canFilter = true
+        /// collapsed is whether the workspace row is folded; workspaceRows is a tree with a named workspace to fold.
+        public var collapsed = false
+        public var workspaceRows = false
 
         public init(workspace: Bool? = nil, focused: Bool = false, flagged: Bool? = nil, canConvert: Bool = false, moveTargets: [String] = [],
                     flaggedView: Bool = false, filtered: Bool = false) {
@@ -378,7 +387,7 @@ public enum NativeMenu {
             var focus = Entry.command(.focusWorkspace, enabled: named, shortcuts)
             focus.checked = structure.focused
             menu += [.command(.renameWorkspace, enabled: named, shortcuts), .command(.copyName, enabled: named, shortcuts),
-                     .command(.deleteWorkspace, enabled: named, shortcuts), focus]
+                     .command(.deleteWorkspace, enabled: named, shortcuts), workspaceFold(structure, shortcuts), focus]
         }
         if let flagged = structure.flagged {
             var flag = Entry.command(.toggleFlag, shortcuts)
@@ -396,6 +405,13 @@ public enum NativeMenu {
         var entry = Entry.command(command, enabled: enabled, shortcuts)
         entry.checked = checked
         return entry
+    }
+
+    /// workspaceFold folds or unfolds the workspace, titled for what it will do, as the Mac's Collapse/Expand Workspace.
+    private static func workspaceFold(_ structure: Structure, _ shortcuts: Shortcuts) -> Entry {
+        let command = Command.toggleWorkspaceCollapse
+        return Entry(title: structure.collapsed ? "Expand Workspace" : command.title, shortcut: shortcuts[command] ?? command.shortcut,
+                     pick: .command(command), enabled: structure.workspace == true && structure.workspaceRows, children: [])
     }
 
     private static func flaggedView(_ structure: Structure, _ shortcuts: Shortcuts) -> Entry {

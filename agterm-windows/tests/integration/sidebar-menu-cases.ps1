@@ -112,3 +112,54 @@ $shellCases["reveal-explorer"] = {
         $failures
     } finally { Remove-Item -Recurse -Force $parent -ErrorAction SilentlyContinue }
 }
+
+# Get-Folds is each named workspace's `collapsed`, by name.
+function Get-Folds([string]$State) {
+    $folds = @{}
+    (Invoke-Ctl $State @("tree")).result.tree.workspaces | ? { $_.name } | % { $folds[$_.name] = [bool]$_.collapsed }
+    $folds
+}
+
+# Expand Workspaces opens every workspace and Collapse Workspaces folds all but the current one, from View and
+# sidebar.expand/collapse; a workspace row's fold item is titled for what it does
+$shellCases["workspace-folds"] = {
+    param($Shell)
+    $state = $Shell.State
+    $window = Get-ShellWindow $Shell
+    if (-not $window) { return @("no visible agterm-shell window") }
+    $dev = (Invoke-Ctl $state @("workspace", "new", "dev", "--collapsed")).result.id
+    $ops = (Invoke-Ctl $state @("workspace", "new", "ops", "--collapsed")).result.id
+    if (-not $dev -or -not $ops) { return @("workspace new did not create dev and ops") }
+    $id = New-PowerShellSession $state @("--workspace", $dev)
+    if (-not $id -or -not (Wait-Prompt $state $id)) { return @("the session never reached its prompt") }
+    Get-SessionNodes $state | ? { $_.id -ne $id } | % { Invoke-Ctl $state @("session", "close", "--target", $_.id) | Out-Null }
+    if (-not (Wait-Until { @(Get-SessionNodes $state).Count -eq 1 } 10)) { return @("the other sessions did not close") }
+    $failures = @()
+
+    Note "sidebar expand and collapse"
+    Invoke-Ctl $state @("sidebar", "expand") | Out-Null
+    $folds = Get-Folds $state
+    if ($folds.dev -or $folds.ops) { $failures += "sidebar expand left dev collapsed=$($folds.dev), ops collapsed=$($folds.ops)" }
+    Invoke-Ctl $state @("sidebar", "collapse") | Out-Null
+    $folds = Get-Folds $state
+    if ($folds.dev -or -not $folds.ops) { $failures += "sidebar collapse gave dev collapsed=$($folds.dev), ops collapsed=$($folds.ops)" }
+
+    # rows top down: dev, its session, ops
+    Note "workspace row"
+    $menu = Open-RowMenu $Shell $window 2
+    if (-not $menu) { return $failures + "a right click on the ops row opened no menu" }
+    if ([AgtermWin32]::MenuTitles($menu) -notcontains "Rename Workspace") { $failures += "row 2 is not a workspace: $([AgtermWin32]::MenuTitles($menu) -join ',')" }
+    if (-not (Choose-MenuItem $Shell $menu "Expand Workspace")) { return $failures + "the folded ops row's menu has no Expand Workspace" }
+    if (-not (Wait-Until { -not (Get-Folds $state).ops } 5)) { $failures += "Expand Workspace left ops folded" }
+
+    Note "View menu"
+    $sidebarPts = (Invoke-Ctl $state @("tree")).result.tree.sidebarWidth
+    $bar = Get-Bar $window $(if ($sidebarPts) { $sidebarPts } else { 220 })
+    Send-Click $window (Get-Centre $bar "view") $bar.MenuMiddle
+    $menu = Wait-Until { [AgtermWin32]::Visible($Shell.Process.Id, "#32768") | Select-Object -First 1 } 5
+    if (-not $menu) { return $failures + "View opened no menu" }
+    if ([AgtermWin32]::MenuTitles($menu) -notcontains "Collapse Workspace") { $failures += "View does not offer the open dev's Collapse Workspace" }
+    if (-not (Choose-MenuItem $Shell $menu "Collapse Workspaces")) { return $failures + "View has no Collapse Workspaces" }
+    if (-not (Wait-Until { $f = Get-Folds $state; $f.ops -and -not $f.dev } 5)) { $failures += "Collapse Workspaces did not fold ops alone" }
+    $failures
+}

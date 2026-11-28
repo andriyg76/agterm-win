@@ -329,6 +329,24 @@ struct NativeControlTests {
         #expect(server.workspaces.contains { $0.name == "srv" } && !tree.workspaces.contains { $0.name == "srv" })
     }
 
+    @Test func sidebarExpandOpensEveryWorkspaceAndCollapseKeepsTheCurrentOneOpen() async {
+        let host = FakeHost()
+        let dev = host.localStore.addWorkspace(name: "dev", collapsed: true)
+        let ops = host.localStore.addWorkspace(name: "ops", collapsed: true)
+        _ = host.localStore.selectSession(host.add("shell", in: dev.id))
+        let folds = { [dev.id, ops.id].map { id in host.localStore.workspaces.first { $0.id == id }?.isExpanded } }
+        #expect(await handle(ControlRequest(cmd: .sidebarExpand), host).ok)
+        let opened = folds()
+        #expect(opened == [true, true])
+        #expect(await handle(ControlRequest(cmd: .sidebarCollapse), host).ok)
+        let collapsed = folds()
+        #expect(collapsed == [true, false])
+        host.localStore.setSidebarMode(.flagged)
+        #expect(await handle(ControlRequest(cmd: .sidebarExpand), host).ok)
+        let flagged = folds()
+        #expect(flagged == [true, false])
+    }
+
     @Test func windowListPutsTheLocalWindowFirst() async {
         let windows = await handle(ControlRequest(cmd: .windowList), FakeHost()).result?.windows ?? []
         #expect(windows.first?.id == LocalWindow.id.uuidString && windows.first?.active == true)

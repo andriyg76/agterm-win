@@ -16,7 +16,7 @@ public struct WindowsKeymap: Sendable {
         (.toggleSidebar, .toggleSidebar), (.newWorkspace, .newWorkspace), (.renameWorkspace, .renameWorkspace), (.deleteWorkspace, .deleteWorkspace), (.toggleFlag, .toggleFlag),
         (.toggleFlaggedView, .toggleFlaggedView), (.focusWorkspace, .focusWorkspace), (.toggleWorkspaceFilter, .toggleWorkspaceFilter),
         (.previousWorkspace, .previousWorkspace), (.nextWorkspace, .nextWorkspace), (.newCompanion, .newCompanion),
-        (.convertCompanion, .convertCompanion),
+        (.convertCompanion, .convertCompanion), (.toggleWorkspaceCollapse, .toggleWorkspaceCollapse),
     ]
 
     /// reserved are the fixed chords of commands with no built-in action; a binding on one never fires.
