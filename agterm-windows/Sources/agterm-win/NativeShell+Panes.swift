@@ -27,12 +27,14 @@ extension NativeShell {
     var viewState: NativeMenu.View {
         let session = local(selected)
         let served = serverRowInView != nil
-        return NativeMenu.View(canSplit: (session != nil || served) && dashboard == nil,
+        var view = NativeMenu.View(canSplit: (session != nil || served) && dashboard == nil,
                                hasSplit: session?.splitTerminal != nil || served && serverSplit != nil,
                                scratchShown: session?.scratchShown == true || served && serverScratchShown, quickShown: quickShown,
                                canDashboard: !locals.isEmpty,
                                dashboardOpen: dashboard != nil, canToggleOverlay: selectedOverlayHidden != nil,
                                overlayShown: selectedOverlayHidden == false, sidebarVisible: settings.sidebarVisible)
+        view.fullscreen = fullscreen
+        return view
     }
 
     /// enabled is whether a title bar button can act now; one that cannot stays in place, drawn dimmed.

@@ -104,6 +104,10 @@ public protocol NativeControlHost: AnyObject {
     var sidebarWidthPoints: Double { get }
     var sidebarVisible: Bool { get }
     func setSidebarVisible(_ visible: Bool)
+    /// fullscreen is the window covering its monitor with no frame or title bar; leaving it restores the bounds and
+    /// maximized state it had.
+    var fullscreen: Bool { get }
+    func setFullscreen(_ on: Bool)
     func setSidebarWidth(points: Double)
     func openDashboard(_ members: [DashboardMember], fontMode: DashboardFontMode)
     func closeDashboard()
@@ -213,6 +217,13 @@ public enum NativeControl {
             return await withSession(request.target, host: host) { await host.renameSession($0, to: name) }
         case .sessionRestart:
             return await withSession(request.target, host: host) { await host.restartSession($0) }
+        case .windowFullscreen:
+            switch window(request.target, host: host) {
+            case .failure(let refusal): return failure(refusal.message)
+            case .success(let id):
+                host.setFullscreen(!host.fullscreen)
+                return ControlResponse(ok: true, result: ControlResult(id: (id ?? LocalWindow.id).uuidString))
+            }
         case .sessionReveal:
             return await withSession(request.target, host: host) { id in
                 host.revealSession(id) ? ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
@@ -396,9 +407,11 @@ public enum NativeControl {
     /// remoteWindows are agterm-win's own window, then the `remote.properties` remotes as remote windows: open while the
     /// server is started, with its stream's state, under an id derived from the name.
     static func remoteWindows(_ host: NativeControlHost) -> [ControlWindowNode] {
-        [ControlWindowNode(id: LocalWindow.id.uuidString, name: "agterm", open: true, active: true)] + host.remoteServers.map { server in
+        // a remote window is a section of this one window, so it shares its full screen
+        [ControlWindowNode(id: LocalWindow.id.uuidString, name: "agterm", open: true, active: true, fullscreen: host.fullscreen)]
+            + host.remoteServers.map { server in
             var node = ControlWindowNode(id: remoteWindowID(server.name).uuidString, name: server.name, open: server.started,
-                                         active: false)
+                                         active: false, fullscreen: server.started ? host.fullscreen : nil)
             node.remote = ControlRemoteWindow(host: server.name, catalogID: nil, state: server.state)
             return node
         }

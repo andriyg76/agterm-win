@@ -9,7 +9,7 @@ public enum NativeMenu {
              focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard, toggleOverlay, newWorkspace, renameWorkspace,
              deleteWorkspace, toggleFlag, toggleFlaggedView, focusWorkspace, toggleWorkspaceFilter, previousWorkspace, nextWorkspace,
              newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar, editProfiles, copyName, revealSession,
-             expandWorkspaces, collapseWorkspaces, toggleWorkspaceCollapse
+             expandWorkspaces, collapseWorkspaces, toggleWorkspaceCollapse, toggleFullscreen
 
         public var title: String {
             switch self {
@@ -65,6 +65,7 @@ public enum NativeMenu {
             case .expandWorkspaces: "Expand Workspaces"
             case .collapseWorkspaces: "Collapse Workspaces"
             case .toggleWorkspaceCollapse: "Collapse Workspace"
+            case .toggleFullscreen: "Enter Full Screen"
             }
         }
 
@@ -296,6 +297,7 @@ public enum NativeMenu {
         public var canToggleOverlay = false
         public var overlayShown = false
         public var sidebarVisible = true
+        public var fullscreen = false
 
         public init(canSplit: Bool = false, hasSplit: Bool = false, scratchShown: Bool = false, quickShown: Bool = false,
                     canDashboard: Bool = false, dashboardOpen: Bool = false, canToggleOverlay: Bool = false, overlayShown: Bool = false,
@@ -327,7 +329,7 @@ public enum NativeMenu {
                 .command(.collapseWorkspaces, enabled: structure.workspaceRows, shortcuts), workspaceFold(structure, shortcuts), .separator,
                 .command(.toggleSplit, enabled: view.canSplit, shortcuts), .command(.toggleHorizontalSplit, enabled: view.canSplit, shortcuts),
                 .command(.swapPanes, enabled: view.hasSplit), .command(.closeSplit, enabled: view.hasSplit), scratch, overlay,
-                .separator, .command(.find, shortcuts), quick]
+                .separator, .command(.find, shortcuts), quick, fullscreen(view, shortcuts)]
     }
 
     /// File groups workspace and session actions, followed by configuration.
@@ -415,6 +417,12 @@ public enum NativeMenu {
         let command = Command.toggleWorkspaceCollapse
         return Entry(title: structure.collapsed ? "Expand Workspace" : command.title, shortcut: shortcuts[command] ?? command.shortcut,
                      pick: .command(command), enabled: structure.workspace == true && structure.workspaceRows, children: [])
+    }
+
+    private static func fullscreen(_ view: View, _ shortcuts: Shortcuts) -> Entry {
+        let command = Command.toggleFullscreen
+        return Entry(title: view.fullscreen ? "Exit Full Screen" : command.title, shortcut: shortcuts[command] ?? command.shortcut,
+                     pick: .command(command), enabled: true, children: [])
     }
 
     private static func flaggedView(_ structure: Structure, _ shortcuts: Shortcuts) -> Entry {

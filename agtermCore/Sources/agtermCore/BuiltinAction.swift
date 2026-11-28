@@ -64,6 +64,7 @@ public enum BuiltinAction: String, CaseIterable, Sendable {
         case .toggleOverlay: Chord(mods: [.control, .shift], key: "j")
         case .quickTerminal: Chord(mods: [.control], key: "`")
         case .dashboard: Chord(mods: [.control, .shift], key: "g")
+        case .toggleFullscreen: Chord(mods: [], key: "f11")
         default: nil
         }
     }

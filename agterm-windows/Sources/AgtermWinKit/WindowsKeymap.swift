@@ -17,6 +17,7 @@ public struct WindowsKeymap: Sendable {
         (.toggleFlaggedView, .toggleFlaggedView), (.focusWorkspace, .focusWorkspace), (.toggleWorkspaceFilter, .toggleWorkspaceFilter),
         (.previousWorkspace, .previousWorkspace), (.nextWorkspace, .nextWorkspace), (.newCompanion, .newCompanion),
         (.convertCompanion, .convertCompanion), (.toggleWorkspaceCollapse, .toggleWorkspaceCollapse),
+        (.toggleFullscreen, .toggleFullscreen),
     ]
 
     /// reserved are the fixed chords of commands with no built-in action; a binding on one never fires.

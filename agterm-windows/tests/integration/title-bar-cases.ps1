@@ -503,3 +503,60 @@ $shellCases["title-bar-menus"] = {
     } else { $failures += "Help did not reopen for About" }
     $failures
 }
+
+function Get-WindowRect([IntPtr]$Window) {
+    $rect = New-Object AgtermWin32+Rect
+    [AgtermWin32]::GetWindowRect($Window, [ref]$rect) | Out-Null
+    $rect
+}
+
+function Get-Fullscreen([string]$State) { [bool]((Invoke-Ctl $State @("window", "list")).result.windows | Select-Object -First 1).fullscreen }
+
+# Full screen covers the monitor with no title bar, from window.fullscreen and F11, and leaving it puts back the
+# bounds a normal window had and the maximized state of a maximized one
+$shellCases["fullscreen"] = {
+    param($Shell)
+    $state = $Shell.State
+    $window = Get-ShellWindow $Shell
+    if (-not $window) { return @("no visible agterm-shell window") }
+    $id = New-PowerShellSession $state
+    if (-not $id -or -not (Wait-Prompt $state $id)) { return @("the session never reached its prompt") }
+    $monitor = New-Object AgtermWin32+MonitorInfo
+    $monitor.Size = [System.Runtime.InteropServices.Marshal]::SizeOf($monitor)
+    [AgtermWin32]::GetMonitorInfoW([AgtermWin32]::MonitorFromWindow($window, 2), [ref]$monitor) | Out-Null
+    $screen = $monitor.Monitor
+    $failures = @()
+    $before = Get-WindowRect $window
+    $bar = Get-Bar $window
+    $dragX = [int](($bar.Title[0] + $bar.Title[1]) / 2)
+
+    Note "window fullscreen"
+    if (-not (Invoke-Ctl $state @("window", "fullscreen")).ok) { return @("window fullscreen was refused") }
+    if (-not (Wait-Until { Get-Fullscreen $state } 5)) { $failures += "window list does not read full screen back" }
+    $full = Wait-Until { $r = Get-WindowRect $window; if ($r.Left -eq $screen.Left -and $r.Top -eq $screen.Top -and $r.Right -eq $screen.Right -and $r.Bottom -eq $screen.Bottom) { $r } } 5
+    if (-not $full) { $r = Get-WindowRect $window; $failures += "full screen is ($($r.Left),$($r.Top),$($r.Right),$($r.Bottom)), not the monitor's" }
+    if ((Get-Hit $window $dragX $bar.Middle) -ne $hitClient) { $failures += "the top of a full-screen window still hits the title bar" }
+    Save-ScreenSnapshot $Shell "fullscreen"
+
+    Note "F11 leaves"
+    $terminal = [AgtermInput]::FocusOf($window)
+    [AgtermWin32]::PostMessageW($terminal, 0x0100, [IntPtr]0x7A, [IntPtr]::Zero) | Out-Null
+    [AgtermWin32]::PostMessageW($terminal, 0x0101, [IntPtr]0x7A, [IntPtr]::Zero) | Out-Null
+    if (-not (Wait-Until { -not (Get-Fullscreen $state) } 5)) { return $failures + "F11 did not leave full screen" }
+    $after = Wait-Until { $r = Get-WindowRect $window; if ($r.Left -eq $before.Left -and $r.Top -eq $before.Top -and $r.Right -eq $before.Right -and $r.Bottom -eq $before.Bottom) { $r } } 5
+    if (-not $after) { $r = Get-WindowRect $window; $failures += "leaving put the window at ($($r.Left),$($r.Top),$($r.Right),$($r.Bottom)), not where it was" }
+    if ((Get-Hit $window $dragX $bar.Middle) -ne $hitCaption) { $failures += "the title bar did not come back" }
+
+    Note "a maximized window"
+    [AgtermWin32]::ShowWindow($window, 3) | Out-Null
+    if (-not (Wait-Until { [AgtermWin32]::IsZoomed($window) } 5)) { return $failures + "the window did not maximize" }
+    Invoke-Ctl $state @("window", "fullscreen") | Out-Null
+    Invoke-Ctl $state @("window", "fullscreen") | Out-Null
+    if (Get-Fullscreen $state) { $failures += "two toggles left the window full screen" }
+    if (-not (Wait-Until { [AgtermWin32]::IsZoomed($window) } 5)) { $failures += "leaving full screen lost the maximized state" }
+    $work = $monitor.Work
+    $top = (Get-ScreenPoint $window 0 0).Y
+    if ($top -ne $work.Top) { $failures += "back from full screen, the maximized client starts at $top, not the work area's top $($work.Top)" }
+    [AgtermWin32]::ShowWindow($window, 9) | Out-Null
+    $failures
+}
