@@ -441,7 +441,7 @@ $shellCases["flagged-editing"] = {
 
 function Get-Focused([string]$State) {
     $tree = (Invoke-Ctl $State @("tree")).result.tree
-    @($tree.workspaces | ? { $_.focused } | % { $_.name } | Sort-Object) -join ","
+    @($tree.workspaces | ? { $_.focused } | % { if ($_.root) { "top" } else { $_.name } } | Sort-Object) -join ","
 }
 
 $shellCases["focus-editing"] = {
@@ -450,7 +450,10 @@ $shellCases["focus-editing"] = {
     $state = $Shell.State
     $window = Get-ShellWindow $Shell
     if (-not $window) { return @("no visible agterm-shell window") }
-    $ids = @()
+    # a new workspace takes the selection, so the top-level session comes first
+    $reply = Invoke-Ctl $state @("session", "new", "--name", "top", "--command", "cmd.exe /d /k")
+    if (-not $reply.ok) { return @("session new top failed: $($reply | ConvertTo-Json -Compress)") }
+    $ids = @($reply.result.id)
     foreach ($name in @("dev", "ops")) {
         $workspace = (Invoke-Ctl $state @("workspace", "new", $name)).result.id
         $reply = Invoke-Ctl $state @("session", "new", "--name", "$name-1", "--command", "cmd.exe /d /k", "--workspace", $workspace)
@@ -458,22 +461,29 @@ $shellCases["focus-editing"] = {
         $ids += $reply.result.id
     }
     Get-SessionNodes $state | ? { $ids -notcontains $_.id } | % { Invoke-Ctl $state @("session", "close", "--target", $_.id) | Out-Null }
-    if (-not (Wait-Until { @(Get-SessionNodes $state).Count -eq 2 } 10)) { return @("the window did not settle on two sessions") }
+    if (-not (Wait-Until { @(Get-SessionNodes $state).Count -eq 3 } 10)) { return @("the window did not settle on three sessions") }
     $failures = @()
 
     Note "Add to Focus on the dev row marks without filtering"
-    $menu = Open-RowMenu $Shell $window 0
+    $menu = Open-RowMenu $Shell $window 1
     if (-not $menu) { return @("the dev row opened no menu") }
     $titles = [AgtermWin32]::MenuTitles($menu) -join ","
     if (-not (Choose-MenuItem $Shell $menu "Add to Focus")) { return @("the dev row's menu has no Add to Focus: $titles") }
     if (-not (Wait-Until { (Get-Focused $state) -eq "dev" } 5)) { $failures += "Add to Focus left '$(Get-Focused $state)' focused, not dev" }
     if ((Invoke-Ctl $state @("tree")).result.tree.workspaceFilter) { $failures += "Add to Focus turned the filter on" }
-    $menu = Open-RowMenu $Shell $window 0
+    $menu = Open-RowMenu $Shell $window 1
     if ($menu) {
         if ([AgtermWin32]::MenuTitles($menu) -notcontains "Remove from Focus") { $failures += "a member row does not offer Remove from Focus" }
         Send-Escape $menu
         Wait-Until { [AgtermWin32]::Visible($Shell.Process.Id, "#32768").Count -eq 0 } 5 | Out-Null
     }
+
+    Note "a top-level session's row adds the top-level sessions"
+    $menu = Open-RowMenu $Shell $window 0
+    if (-not $menu) { return $failures + @("the top row opened no menu") }
+    $titles = [AgtermWin32]::MenuTitles($menu) -join ","
+    if (-not (Choose-MenuItem $Shell $menu "Add Top-Level Sessions to Focus")) { return $failures + @("the top row's menu has no Add Top-Level Sessions to Focus: $titles") }
+    if (-not (Wait-Until { (Get-Focused $state) -eq "dev,top" } 5)) { $failures += "adding the top-level sessions left '$(Get-Focused $state)' focused" }
 
     Note "Edit Focused Workspaces adds and removes and stays open"
     $script:InFront = Bring-Front $window
@@ -485,22 +495,22 @@ $shellCases["focus-editing"] = {
     for ($i = 0; $i -lt $ops; $i++) { Send-Key $editor.Edit 0x28 }
     Wait-Until { [AgtermInput]::Highlight($editor.List) -eq $ops } 2 | Out-Null
     Send-Key $editor.Edit 0x0D
-    if (-not (Wait-Until { (Get-Focused $state) -eq "dev,ops" } 5)) { $failures += "Enter on ops left '$(Get-Focused $state)' focused" }
+    if (-not (Wait-Until { (Get-Focused $state) -eq "dev,ops,top" } 5)) { $failures += "Enter on ops left '$(Get-Focused $state)' focused" }
     Start-Sleep -Milliseconds 500
     if (-not (Get-Palette $window)) { return $failures + @("a focus pick closed the editor") }
     if ([AgtermInput]::Highlight($editor.List) -ne $ops) { $failures += "the toggle moved the highlight to $([AgtermInput]::Highlight($editor.List))" }
     Save-Snapshot $Shell "focus-editor"
     Send-Key $editor.Edit 0x0D
-    if (-not (Wait-Until { (Get-Focused $state) -eq "dev" } 5)) { $failures += "a second Enter on ops left '$(Get-Focused $state)' focused" }
+    if (-not (Wait-Until { (Get-Focused $state) -eq "dev,top" } 5)) { $failures += "a second Enter on ops left '$(Get-Focused $state)' focused" }
     Send-Key $editor.Edit 0x1B
     Wait-Until { -not (Get-Palette $window) } 5 | Out-Null
 
     Note "the filter, then Clear Focus"
     Invoke-Ctl $state @("workspace", "filter", "on") | Out-Null
-    if (-not (Wait-Until { (Get-TreeCount $window) -eq 2 } 5)) { $failures += "the focus filter shows $(Get-TreeCount $window) rows, not dev and its session" }
+    if (-not (Wait-Until { (Get-TreeCount $window) -eq 3 } 5)) { $failures += "the focus filter shows $(Get-TreeCount $window) rows, not top, dev and its session" }
     Save-Snapshot $Shell "focus-filtered"
     if (-not (Run-Command $window "clear focus" "View › Clear Focus")) { return $failures + @("the command palette has no View › Clear Focus") }
     if (-not (Wait-Until { (Get-Focused $state) -eq "" } 5)) { $failures += "Clear Focus left '$(Get-Focused $state)' focused" }
-    if (-not (Wait-Until { (Get-TreeCount $window) -eq 4 } 5)) { $failures += "Clear Focus left $(Get-TreeCount $window) rows, not the whole tree" }
+    if (-not (Wait-Until { (Get-TreeCount $window) -eq 5 } 5)) { $failures += "Clear Focus left $(Get-TreeCount $window) rows, not the whole tree" }
     $failures
 }

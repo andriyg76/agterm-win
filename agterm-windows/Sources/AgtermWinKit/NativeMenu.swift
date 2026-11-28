@@ -179,6 +179,13 @@ public enum NativeMenu {
             Entry(title: command.title, shortcut: shortcuts[command] ?? command.shortcut, pick: .command(command), enabled: enabled,
                   children: [])
         }
+
+        /// titled is this entry under another title, for an item whose label names what it acts on.
+        func titled(_ title: String, enabled: Bool) -> Entry {
+            var entry = Entry(title: title, shortcut: shortcut, pick: pick, enabled: enabled, children: children)
+            entry.checked = checked
+            return entry
+        }
     }
 
     /// Shortcuts are the labels the keymap gives commands, "" for one it left unbound; a missing command shows its
@@ -334,14 +341,19 @@ public enum NativeMenu {
         let overlay = toggle(.toggleOverlay, checked: view.overlayShown, enabled: view.canToggleOverlay, shortcuts)
         let quick = toggle(.quickTerminal, checked: view.quickShown, enabled: true, shortcuts)
         let flag = toggle(.toggleFlag, checked: structure.flagged == true, enabled: structure.flagged != nil, shortcuts)
-        let focus = toggle(.focusWorkspace, checked: structure.focused, enabled: structure.workspace == true, shortcuts)
+        var focus = toggle(.focusWorkspace, checked: structure.focused, enabled: structure.workspace == true, shortcuts)
+        var addToFocus = Entry.command(.addToFocus, enabled: structure.workspace == true && !structure.focused, shortcuts)
+        if let member = structure.rootFocus {
+            (focus, addToFocus) = rootFocus(member: member, shortcuts)
+            addToFocus = addToFocus.titled("Add \(ControlWorkspaceNode.rootLabel) to Focus", enabled: !member)
+        }
         let sidebar = Entry(title: view.sidebarVisible ? "Hide Sidebar" : "Show Sidebar",
                             shortcut: shortcuts[.toggleSidebar] ?? Command.toggleSidebar.shortcut, pick: .command(.toggleSidebar), enabled: true,
                             children: [])
         return [sidebar, .separator]
             + fontSizing(shortcuts) + [.separator, .command(.selectTheme), .separator, flaggedView(structure, shortcuts), flag,
                 .command(.clearFlagged, enabled: structure.canClearFlagged, shortcuts), .command(.editFlaggedSessions, shortcuts),
-                .separator, focus, .command(.addToFocus, enabled: structure.workspace == true && !structure.focused, shortcuts),
+                .separator, focus, addToFocus,
                 workspaceFilter(structure, shortcuts), .command(.clearFocus, enabled: structure.canFilter, shortcuts),
                 .command(.editFocusedWorkspaces, shortcuts), .command(.expandWorkspaces, enabled: structure.workspaceRows, shortcuts),
                 .command(.collapseWorkspaces, enabled: structure.workspaceRows, shortcuts), workspaceFold(structure, shortcuts), .separator,
@@ -392,6 +404,8 @@ public enum NativeMenu {
         /// canClearFlagged is a flagged session to clear; workspaceSessions and allFlagged are the workspace row's sessions
         /// and whether each is flagged, for Flag All or Unflag All.
         public var canClearFlagged = false
+        /// rootFocus is whether the top-level sessions are in the focused set, for a top-level session; nil elsewhere.
+        public var rootFocus: Bool?
         public var workspaceSessions = false
         public var allFlagged = false
         /// tints are the row's tint, one per target, when it offers Tint; tintPlacement is the last Show On pick.
@@ -437,10 +451,24 @@ public enum NativeMenu {
             let targets = structure.moveTargets.enumerated().map { index, name in
                 Entry(title: name, shortcut: "", pick: .moveToWorkspace(index), enabled: true, children: [])
             }
+            if let member = structure.rootFocus {
+                // a top-level session's row is where the top-level sessions are focused, as on a Mac
+                let (focus, membership) = rootFocus(member: member, shortcuts)
+                menu += [focus, membership]
+            }
             menu += [flag] + tint(structure) + [.command(.newCompanion, shortcuts), .command(.convertCompanion, enabled: structure.canConvert, shortcuts),
                      Entry(title: "Move to", shortcut: "", pick: nil, enabled: !targets.isEmpty, children: targets)]
         }
         return menu + [.separator, flaggedView(structure, shortcuts), workspaceFilter(structure, shortcuts)]
+    }
+
+    /// rootFocus is Focus and Add or Remove from Focus for the top-level sessions.
+    private static func rootFocus(member: Bool, _ shortcuts: Shortcuts) -> (focus: Entry, membership: Entry) {
+        let label = ControlWorkspaceNode.rootLabel
+        var focus = Entry.command(.focusWorkspace, shortcuts).titled("Focus \(label)", enabled: true)
+        focus.checked = member
+        let membership = Entry.command(.addToFocus, shortcuts).titled(member ? "Remove \(label) from Focus" : "Add \(label) to Focus", enabled: true)
+        return (focus, membership)
     }
 
     private static func toggle(_ command: Command, checked: Bool, enabled: Bool, _ shortcuts: Shortcuts) -> Entry {
