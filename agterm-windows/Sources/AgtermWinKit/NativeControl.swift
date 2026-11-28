@@ -324,8 +324,7 @@ public enum NativeControl {
         }
     }
 
-    /// withPane resolves the session and `--pane`; a server session takes no pane, since its split and scratch are not
-    /// shown here.
+    /// withPane resolves the session and `--pane`.
     private static func withPane(_ request: ControlRequest, host: NativeControlHost,
                                  _ body: (UUID, NativePane?) async -> ControlResponse) async -> ControlResponse {
         var pane: NativePane?
@@ -333,10 +332,7 @@ public enum NativeControl {
             guard let parsed = NativePane(controlName: name) else { return failure("invalid pane: \(name) (left|right|scratch)") }
             pane = parsed
         }
-        return await withSession(request.target, host: host) { id in
-            if pane != nil, host.isServerSession(id) { return failure(NativeControl.serverPanesRefusal) }
-            return await body(id, pane)
-        }
+        return await withSession(request.target, host: host) { await body($0, pane) }
     }
 
     static func failure(_ message: String) -> ControlResponse { ControlResponse(ok: false, error: message) }

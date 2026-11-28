@@ -1,11 +1,10 @@
 import Foundation
 import agtermCore
 
-/// A local session's split and scratch, the quick terminal and the dashboard, in the Mac's wording and reply shapes.
-/// agterm-server sessions are refused by name until their panes are shown here.
+/// A session's split and scratch, the quick terminal and the dashboard, in the Mac's wording and reply shapes.
+/// An agterm-server session's split, swap and scratch are the server's, as a Mac's remote window sends them; focus and
+/// ratio are this viewer's own, kept on the mirror's row.
 extension NativeControl {
-    public static let serverPanesRefusal = "split panes and scratch of agterm-server sessions are not shown on Windows yet"
-
     static func panes(_ request: ControlRequest, host: NativeControlHost) async -> ControlResponse {
         let args = request.args
         let id: UUID
@@ -13,8 +12,13 @@ extension NativeControl {
         case .failure(let refusal): return failure(refusal.message)
         case .success(let resolved): id = resolved
         }
-        if host.isServerSession(id) { return failure(serverPanesRefusal) }
-        let store = host.localStore
+        let store: AppStore
+        if case .remote(_, let remote) = owner(ofSession: id, host: host) {
+            if RemoteOperation.structuralCommands.contains(request.cmd) { return await structure(request, host: host) }
+            store = remote
+        } else {
+            store = host.localStore
+        }
         guard let session = store.session(withID: id) else { return failure("no such session: \(id.uuidString)") }
         let done = ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
         switch request.cmd {

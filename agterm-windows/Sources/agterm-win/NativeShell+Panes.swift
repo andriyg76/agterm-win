@@ -13,7 +13,7 @@ extension NativeShell {
     func local(_ id: Foundation.UUID?) -> LocalSession? { locals.first { $0.id == id } }
 
     /// canSplit is whether `id` takes a split and a scratch: a local session; a server session's panes are not shown here.
-    func canSplit(_ id: Foundation.UUID) -> Bool { locals.contains { $0.id == id } }
+    func canSplit(_ id: Foundation.UUID) -> Bool { locals.contains { $0.id == id } || id == running && serverRowInView != nil }
 
     /// sessionArea is the terminal area beside the sidebar and between the title bar and the notice bar, which a
     /// session's panes share.
@@ -26,8 +26,11 @@ extension NativeShell {
 
     var viewState: NativeMenu.View {
         let session = local(selected)
-        return NativeMenu.View(canSplit: session != nil && dashboard == nil, hasSplit: session?.splitTerminal != nil,
-                               scratchShown: session?.scratchShown == true, quickShown: quickShown, canDashboard: !locals.isEmpty,
+        let served = serverRowInView != nil
+        return NativeMenu.View(canSplit: (session != nil || served) && dashboard == nil,
+                               hasSplit: session?.splitTerminal != nil || served && serverSplit != nil,
+                               scratchShown: session?.scratchShown == true || served && serverScratchShown, quickShown: quickShown,
+                               canDashboard: !locals.isEmpty,
                                dashboardOpen: dashboard != nil, canToggleOverlay: selectedOverlayHidden != nil,
                                overlayShown: selectedOverlayHidden == false, sidebarVisible: settings.sidebarVisible)
     }
@@ -46,7 +49,7 @@ extension NativeShell {
         switch button {
         case .sidebar: settings.sidebarVisible
         case .scratch: viewState.scratchShown
-        case .split: local(selected)?.split?.shown == true
+        case .split: local(selected)?.split?.shown == true || serverRowInView != nil && serverSplit?.shown == true
         case .overlays: selectedOverlayHidden == true
         case .dashboard: viewState.dashboardOpen
         case .quick: viewState.quickShown
@@ -86,22 +89,21 @@ extension NativeShell {
             placeDashboard(dashboard, in: area)
         } else {
             let localInView = local(selected) != nil
-            remoteTerminal.move(x: area.x, y: area.y, width: area.width, height: area.height)
-            show(remoteTerminal, !localInView)
+            placeServerPanes(in: area, inView: !localInView)
             for session in locals {
                 let inView = session.id == selected
                 let covered = session.scratchShown && session.scratch != nil
                 let layout = PaneLayout(area: area, split: session.splitTerminal == nil ? nil : session.split, divider: dividerThickness)
-                place(session.terminal, layout.primary, shown: inView && !covered)
-                if let split = session.splitTerminal { place(split, layout.split, shown: inView && !covered) }
-                if let scratch = session.scratch { place(scratch, area, shown: inView && covered) }
+                placePane(session.terminal, layout.primary, shown: inView && !covered)
+                if let split = session.splitTerminal { placePane(split, layout.split, shown: inView && !covered) }
+                if let scratch = session.scratch { placePane(scratch, area, shown: inView && covered) }
             }
         }
         placeOverlays()
         invalidateTitleBar()
     }
 
-    private func place(_ terminal: NativeTerminal, _ rect: Rect?, shown: Bool) {
+    func placePane(_ terminal: NativeTerminal, _ rect: Rect?, shown: Bool) {
         if let rect { terminal.move(x: rect.x, y: rect.y, width: rect.width, height: rect.height) }
         show(terminal, shown && rect != nil)
     }
@@ -114,7 +116,12 @@ extension NativeShell {
 
     /// splitKey is a split key or button: over a shown scratch it hides the scratch, else it toggles the split on `axis`.
     func splitKey(_ axis: SplitAxis?) {
-        guard let selected, let session = local(selected) else { return }
+        guard let selected else { return }
+        if let row = serverRowInView, selected == running {
+            sendServerPane(row.scratchActive ? .setScratch(selected, shown: false) : .setSplit(selected, shown: !row.isSplit, axis: axis?.rawValue))
+            return
+        }
+        guard let session = local(selected) else { return }
         if session.scratchShown {
             setScratch(selected, shown: false, command: nil)
             return
@@ -124,14 +131,21 @@ extension NativeShell {
     }
 
     func focusPaneKey(split: Bool) {
-        guard let selected, let session = local(selected), session.stored.hasSplit else { return }
-        session.stored.splitFocused = split
+        guard let selected, let row = local(selected)?.stored ?? serverRowInView, row.hasSplit else { return }
+        row.splitFocused = split
         panesChanged(selected)
     }
 
     /// panesChanged shows the session's panes as its store session has them, starting a split's shell it lacks.
     func panesChanged(_ id: Foundation.UUID) {
-        guard let session = local(id) else { return }
+        guard let session = local(id) else {
+            guard id == running else { return }
+            let hadFocus = hasFocus(id)
+            syncServerPanes()
+            rebuild()
+            if hadFocus || id == selected && GetFocus() != nil { focus() }
+            return
+        }
         let hadFocus = hasFocus(id)
         if session.stored.hasSplit, session.splitTerminal == nil { startSplitPane(id) } else { placeSessions() }
         rebuild()
@@ -160,6 +174,7 @@ extension NativeShell {
     }
 
     func closeSplit(_ id: Foundation.UUID) {
+        if id == running, serverRowInView?.hasSplit == true { return sendServerPane(.closeSplit(id)) }
         guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].splitTerminal != nil else { return }
         let hadFocus = hasFocus(id)
         localStore.closeSplit(id)
@@ -168,6 +183,7 @@ extension NativeShell {
     }
 
     func swapPanes(_ id: Foundation.UUID) {
+        if id == running, serverRowInView?.hasSplit == true { return sendServerPane(.swap(id)) }
         guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].splitTerminal != nil,
               localStore.swapPanes(id) == nil else { return }
         locals[index].activity.swapped()
@@ -229,7 +245,11 @@ extension NativeShell {
 
     /// selectedLayout is the selected session's panes while its split is shown and nothing covers them.
     private var selectedLayout: (id: Foundation.UUID, split: NativeSplit, layout: PaneLayout)? {
-        guard dashboard == nil, let session = local(selected), session.splitTerminal != nil, let split = session.split, split.shown,
+        guard dashboard == nil, let selected else { return nil }
+        if serverRowInView != nil, let split = serverSplit, split.shown, !serverScratchShown, visibleTerminal === serverOnScreen {
+            return (selected, split, PaneLayout(area: sessionArea, split: split, divider: dividerThickness))
+        }
+        guard let session = local(selected), session.splitTerminal != nil, let split = session.split, split.shown,
               !session.scratchShown, session.overlay.map({ $0.state.hidden }) != false else { return nil }
         return (session.id, split, PaneLayout(area: sessionArea, split: split, divider: dividerThickness))
     }
@@ -251,7 +271,7 @@ extension NativeShell {
         }
         guard let shown = selectedLayout, shown.layout.onDivider(x: x, y: y, slop: scaled(2)) else { return false }
         if double {
-            localStore.applySplitRatio(NativeSplit.defaultRatio, forSession: shown.id)
+            paneRow(shown.id)?.store.applySplitRatio(NativeSplit.defaultRatio, forSession: shown.id)
             panesChanged(shown.id)
         } else {
             dragging = (shown.id, sessionArea)
@@ -265,10 +285,10 @@ extension NativeShell {
             sidebarResizeDrag(x: point(lParam).x)
             return true
         }
-        guard let dragging, let session = local(dragging.id), session.stored.hasSplit else { return false }
+        guard let dragging, let row = paneRow(dragging.id)?.row, row.hasSplit else { return false }
         let (x, y) = point(lParam)
         // saved once, when the drag ends
-        session.stored.splitRatio = PaneLayout.ratio(at: x, y, area: dragging.area, axis: session.stored.splitAxis, divider: dividerThickness)
+        row.splitRatio = PaneLayout.ratio(at: x, y, area: dragging.area, axis: row.splitAxis, divider: dividerThickness)
         placeSessions()
         return true
     }
@@ -284,7 +304,7 @@ extension NativeShell {
         guard let ended = dragging else { return false }
         dragging = nil
         ReleaseCapture()
-        if let ratio = local(ended.id)?.stored.splitRatio { localStore.applySplitRatio(ratio, forSession: ended.id) }
+        if let pane = paneRow(ended.id), let ratio = pane.row.splitRatio { pane.store.applySplitRatio(ratio, forSession: ended.id) }
         return true
     }
 
@@ -321,6 +341,7 @@ extension NativeShell {
     /// setScratch shows or hides the session's scratch, starting its shell in the session's folder, or `command` beside the
     /// session as an overlay's runs, when it has none; a `command` replaces a running one.
     func setScratch(_ id: Foundation.UUID, shown: Bool, command: String?) {
+        if id == running, serverRowInView != nil { return sendServerPane(.setScratch(id, shown: shown, command: command)) }
         guard let session = local(id) else { return }
         let hadFocus = hasFocus(id)
         let stored = session.stored
@@ -423,7 +444,7 @@ extension NativeShell {
         let cells = NativeDashboard.cells(in: area, count: dashboard.members.count, gap: scaled(6), caption: scaled(22))
         for (index, member) in dashboard.members.enumerated() where cells.indices.contains(index) {
             guard let terminal = memberTerminal(member) else { continue }
-            place(terminal, cells[index].terminal, shown: true)
+            placePane(terminal, cells[index].terminal, shown: true)
             guard captions.indices.contains(index), let session = local(member.session) else { continue }
             let strip = cells[index].caption
             let text = " " + NativeDashboard.caption(name: session.name, member: member, split: session.splitTerminal == nil ? nil : session.split?.axis)

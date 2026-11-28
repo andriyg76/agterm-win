@@ -34,6 +34,8 @@ final class RemoteWindow: RemoteCatalogEffects {
     var onReplicaPage: (@MainActor (UUID, PresentationPage) -> String?)?
     var onReplicaPageClose: (@MainActor (UUID, PresentationPageChange) -> Void)?
     var onReplicaPageCommand: (@MainActor (UUID, PresentationPageCommand) -> Void)?
+    /// onPaneNeedsAttach runs with a pane identity and its row when the row's pane must attach again.
+    var onPaneNeedsAttach: (UUID, UUID) -> Void = { _, _ in }
     /// onPresentationStopped runs when a session's `zmx present` stream is torn down.
     var onPresentationStopped: (UUID) -> Void = { _ in }
     // a presentation stream per server session, as a Mac's remote window keeps them
@@ -208,6 +210,7 @@ final class RemoteWindow: RemoteCatalogEffects {
     }
     func catalogPaneNeedsAttach(_ identity: UUID, session: UUID) {
         log("pane \(identity) of \(session) needs an attach")
+        onPaneNeedsAttach(identity, session)
     }
     func catalogBound(_ catalogID: UUID) -> Bool {
         log("bound to catalog \(catalogID)")
