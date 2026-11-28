@@ -102,8 +102,7 @@ final class RemoteWindow: RemoteCatalogEffects {
 
     func catalogRowRemoved(_ id: UUID) {
         stopPresentation(id)
-        // The mirror calls this before removing the row; release its retained terminal after reconciliation.
-        DispatchQueue.main.async { [weak self] in self?.changed() }
+        changed()
     }
 
     func catalogRowEnded(_ id: UUID) {

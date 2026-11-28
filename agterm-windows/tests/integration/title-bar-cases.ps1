@@ -18,7 +18,6 @@ public static class AgtermWin32 {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr window, StringBuilder name, int capacity);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowTextW(IntPtr window, StringBuilder text, int capacity);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
-    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr window);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
