@@ -114,7 +114,7 @@ private final class FakeHost: NativeControlHost {
     }
     func setStatus(_ id: UUID, _ update: ControlSessionStatusUpdate) -> Bool {
         var applied = false
-        editLocal(id) { applied = $0.activity.apply(update, hasSplit: $0.split != nil) }
+        editLocal(id) { applied = $0.activity.apply(update, hasSplit: localStore.session(withID: id)?.hasSplit == true) }
         return applied
     }
     func setContext(_ id: UUID, _ context: String?) { editLocal(id) { $0.context = context } }
@@ -161,7 +161,7 @@ private final class FakeHost: NativeControlHost {
 
     func openPageOverlay(_ id: UUID, _ overlay: HtmlOverlay, sizePercent: Int?) {
         openedPages.append((id, overlay))
-        editLocal(id) { $0.htmlOverlay = overlay; $0.pageOverlaySizePercent = sizePercent }
+        _ = localStore.openHtmlOverlay(id, pane: nil, overlay: overlay, sizePercent: sizePercent)
     }
 
     func openOverlay(_ id: UUID, _ open: NativeOverlay.Open) {
@@ -171,43 +171,37 @@ private final class FakeHost: NativeControlHost {
             serverOverlayExitCodes.removeValue(forKey: id)
             return
         }
-        editLocal(id) {
-            $0.overlay = NativeOverlay(sizePercent: open.sizePercent, wait: open.wait)
-            $0.overlayExitCode = nil
-        }
+        localStore.openOverlay(id, command: open.command, cwd: open.cwd, wait: open.wait, sizePercent: open.sizePercent)
     }
 
     func closeOverlay(_ id: UUID) {
         if isServerSession(id) {
             serverOverlays.removeValue(forKey: id)
             serverOverlayExitCodes.removeValue(forKey: id)
-        } else { editLocal(id) { $0.overlay = nil } }
+        } else { localStore.closeOverlay(id) }
     }
 
     func resizeOverlay(_ id: UUID, sizePercent: Int?) {
         if var overlay = serverOverlays[id] { overlay.sizePercent = sizePercent; serverOverlays[id] = overlay }
-        else { editLocal(id) { $0.overlay?.sizePercent = sizePercent } }
+        else { localStore.resizeOverlay(id, sizePercent: sizePercent) }
     }
 
     func setOverlayHidden(_ id: UUID, _ hidden: Bool) {
         if var overlay = serverOverlays[id] { overlay.hidden = hidden; serverOverlays[id] = overlay }
-        else { editLocal(id) { $0.overlay?.hidden = hidden } }
+        else { localStore.setOverlaysHidden(id, pane: nil, hidden: hidden) }
     }
     func overlayScreen(of id: UUID) -> (lines: [String], rows: Int)? { overlayScreens[id] }
     func overlaySelection(of id: UUID) -> String? { overlaySelections[id] }
 
     /// exitOverlay is the overlay's program ending without `--wait`, which closes it.
-    func setSplit(_ id: UUID, _ split: NativeSplit) { editLocal(id) { $0.split = split } }
-    func closeSplit(_ id: UUID) { editLocal(id) { $0.split = nil } }
+    func panesChanged(_ id: UUID) {}
+    func closeSplit(_ id: UUID) { localStore.closeSplit(id) }
     var swaps = 0
     func swapPanes(_ id: UUID) { swaps += 1 }
     var scratchCommands: [String?] = []
     func setScratch(_ id: UUID, shown: Bool, command: String?) {
         scratchCommands.append(command)
-        editLocal(id) {
-            $0.scratch = shown
-            $0.scratchRunning = true
-        }
+        if shown != localStore.session(withID: id)?.scratchActive { localStore.toggleScratch(id) }
     }
     var quickShown = false
     var quickShows = 0
@@ -236,10 +230,8 @@ private final class FakeHost: NativeControlHost {
     func setSidebarWidth(points: Double) { sidebarWidthPoints = AppStore.clampSidebarWidth(points) }
 
     func exitOverlay(_ id: UUID, code: Int) {
-        editLocal(id) {
-            $0.overlay = nil
-            $0.overlayExitCode = code
-        }
+        localStore.recordOverlayExit(id, code: code)
+        localStore.closeOverlay(id)
     }
 
     func exitServerOverlay(_ id: UUID, code: Int) {
@@ -594,7 +586,7 @@ struct NativeControlTests {
         #expect(await overlay(.sessionOverlayResize, host, ControlArgs(full: true)).error == "no overlay")
         _ = await overlay(.sessionOverlayOpen, host, ControlArgs(command: "less x", sizePercent: 50))
         #expect(await overlay(.sessionOverlayResize, host, ControlArgs(full: true)).ok)
-        #expect(host.localSessions[0].overlay?.sizePercent == nil)
+        #expect(host.localStore.session(withID: a)?.overlaySizePercent == nil)
         #expect(await overlay(.sessionOverlayResize, host, ControlArgs(sizePercent: 70, full: true)).error
             == "session.overlay.resize: --full is mutually exclusive with --size-percent")
         #expect(await overlay(.sessionOverlayText, host).error == "overlay not realized")
@@ -604,7 +596,7 @@ struct NativeControlTests {
         #expect(await overlay(.sessionOverlayCopy, host).error == "no selection")
         host.overlaySelections[a] = "picked"
         #expect(await overlay(.sessionOverlayCopy, host).result?.text == "picked")
-        #expect(await overlay(.sessionOverlayClose, host).ok && host.localSessions[0].overlay == nil)
+        #expect(await overlay(.sessionOverlayClose, host).ok && host.localStore.session(withID: a)?.overlayActive == false)
     }
 
     @Test func hideShowAndToggleReportTheStateTheyLeft() async {
@@ -631,7 +623,7 @@ struct NativeControlTests {
         #expect(await overlay(.sessionOverlayText, host, ControlArgs(lines: 0)).error == "--lines must be positive")
         #expect(await overlay(.sessionOverlayResult, host, ControlArgs(page: UUID().uuidString)).error == OverlayHtmlError.unknownPage)
         #expect(await overlay(.sessionOverlayClose, host, ControlArgs(pane: "right")).error == NativeOverlay.paneRefusal)
-        #expect(await overlay(.sessionOverlayResize, host, ControlArgs(sizePercent: 40)).ok && host.localSessions[0].overlay?.sizePercent == 40)
+        #expect(await overlay(.sessionOverlayResize, host, ControlArgs(sizePercent: 40)).ok && host.localStore.session(withID: host.localSessions[0].id)?.overlaySizePercent == 40)
     }
 
     @Test func overlayCommandsOnAServerSessionNeedAConnection() async {
@@ -682,13 +674,13 @@ struct NativeControlTests {
         host.selectedSession = a
         #expect(await handle(ControlRequest(cmd: .sessionSplit, args: ControlArgs(axis: "horizontal")), host).ok)
         var node = NativeControl.tree(host).workspaces[0].sessions[0]
-        #expect(node.split && node.hasSplit == true && node.splitAxis == "horizontal" && node.splitFocused == true && node.splitRatio == 0.5)
+        #expect(node.split && node.hasSplit == true && node.splitAxis == "horizontal" && node.splitFocused == true && node.splitRatio == nil)
         #expect(await handle(ControlRequest(cmd: .sessionSplit, args: ControlArgs(mode: "off")), host).ok)
         node = NativeControl.tree(host).workspaces[0].sessions[0]
         #expect(!node.split && node.hasSplit == true)
         #expect(await handle(ControlRequest(cmd: .sessionSplit, args: ControlArgs(axis: "diagonal")), host).error == "invalid split axis: diagonal (vertical|horizontal)")
         #expect(await handle(ControlRequest(cmd: .sessionSplitClose), host).ok)
-        #expect(NativeControl.tree(host).workspaces[0].sessions[0].hasSplit == false)
+        #expect(NativeControl.tree(host).workspaces[0].sessions[0].hasSplit == nil)
         #expect(await handle(ControlRequest(cmd: .sessionSplitClose), host).ok)
     }
 
@@ -699,9 +691,9 @@ struct NativeControlTests {
         #expect(await handle(ControlRequest(cmd: .sessionSwap), host).error == "session has no split")
         _ = await handle(ControlRequest(cmd: .sessionSplit), host)
         #expect(await handle(ControlRequest(cmd: .sessionFocus, args: ControlArgs(pane: "left")), host).ok)
-        #expect(host.localSessions[0].split?.focused == false)
+        #expect(host.localStore.session(withID: host.localSessions[0].id)?.splitFocused == false)
         #expect(await handle(ControlRequest(cmd: .sessionFocus), host).ok)
-        #expect(host.localSessions[0].split?.focused == true)
+        #expect(host.localStore.session(withID: host.localSessions[0].id)?.splitFocused == true)
         #expect(await handle(ControlRequest(cmd: .sessionResize, args: ControlArgs(ratio: 0.99)), host).result?.ratio == 0.95)
         let grown = await handle(ControlRequest(cmd: .sessionResize, args: ControlArgs(ratioDelta: -0.2)), host).result?.ratio ?? 0
         #expect(abs(grown - 0.75) < 1e-9)

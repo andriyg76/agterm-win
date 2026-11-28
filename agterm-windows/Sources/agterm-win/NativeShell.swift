@@ -13,42 +13,73 @@ private let shellWindowID = LocalWindow.id
 /// on `remote.properties` remotes, whose sessions share one terminal that attaches whichever is selected.
 @MainActor
 final class NativeShell {
-    /// LocalSession is what runs in a session of `localStore`, under the store session's id.
-    struct LocalSession {
-        let id: Foundation.UUID
+    /// LocalSession is what runs in a session of `localStore`: the store session owns its panes, overlay and their
+    /// state, as on a Mac, and this adds the windows that draw them and what only agterm-win's runtime tracks.
+    @MainActor struct LocalSession {
+        let stored: Session
+        var id: Foundation.UUID { stored.id }
         /// fallback names the session until its program reports a title or a folder: its profile's name.
         var fallback: String
         var customName: String?
-        var programTitle: String?
-        /// directory is the folder the shell last reported, decoded.
-        var directory: String?
         let commandLine: String
-        /// terminal is the primary pane's; a swap exchanges it with the split's.
-        var terminal: NativeTerminal
         var exited = false
         /// attention is a bell since the session was last in view.
         var attention = false
         /// unseen counts notifications since the session was last in view.
         var unseen = 0
-        var overlay: Overlay?
-        var overlayExitCode: Int?
-        var pageOverlay: (page: HtmlOverlay, sizePercent: Int?, hidden: Bool, frame: PageOverlayFrame)?
-        /// split and its terminal are the second pane, both nil without one; a hidden split keeps its shell.
-        var split: NativeSplit?
-        var splitTerminal: NativeTerminal?
-        var splitTitle: String?
-        var splitDirectory: String?
-        /// backedByZmx and splitBackedByZmx are whether that pane attached to a Live sessions daemon at its start.
-        var backedByZmx = false
-        var splitBackedByZmx = false
-        /// scratch is the session's third shell, kept while hidden; it covers the panes while `scratchShown`.
-        var scratch: NativeTerminal?
-        var scratchShown = false
-        var scratchDirectory: String?
+        /// overlayFrame and pageFrame draw the store session's program or page overlay.
+        var overlayFrame: OverlayFrame?
+        var pageFrame: PageOverlayFrame?
         /// activity, context and info are what agents report over `session.status`, `.context` and `.info`.
         var activity = AgentActivity()
         var context: String?
         var info: SessionInfo?
+
+        var programTitle: String? {
+            get { stored.oscTitle }
+            nonmutating set { stored.oscTitle = newValue }
+        }
+        /// directory is the folder the shell last reported, decoded.
+        var directory: String? {
+            get { stored.currentCwd }
+            nonmutating set { stored.currentCwd = newValue }
+        }
+        var splitTitle: String? {
+            get { stored.splitTitle }
+            nonmutating set { stored.splitTitle = newValue }
+        }
+        var splitDirectory: String? {
+            get { stored.splitCwd }
+            nonmutating set { stored.splitCwd = newValue }
+        }
+        var scratchDirectory: String? {
+            get { stored.scratchCwd }
+            nonmutating set { stored.scratchCwd = newValue }
+        }
+        /// terminal is the primary pane's; a swap exchanges it with the split's.
+        var terminal: NativeTerminal { stored.surface as! NativeTerminal }
+        /// split and its terminal are the second pane, both nil without one; a hidden split keeps its shell.
+        var split: NativeSplit? {
+            guard stored.hasSplit else { return nil }
+            return NativeSplit(axis: stored.splitAxis, ratio: stored.splitRatio ?? NativeSplit.defaultRatio, shown: stored.isSplit,
+                               focused: stored.splitFocused)
+        }
+        var splitTerminal: NativeTerminal? { stored.splitSurface as? NativeTerminal }
+        /// scratch is the session's third shell, kept while hidden; it covers the panes while `scratchShown`.
+        var scratch: NativeTerminal? { stored.scratchSurface as? NativeTerminal }
+        var scratchShown: Bool { stored.scratchActive }
+        var allPanesBackedByZmx: Bool { terminal.backedByZmx && splitTerminal?.backedByZmx != false }
+        var overlay: Overlay? {
+            guard let overlayFrame, stored.programOverlayActive else { return nil }
+            var state = NativeOverlay(sizePercent: stored.overlaySizePercent, wait: stored.overlayWait)
+            state.hidden = stored.overlayHidden
+            return Overlay(state: state, frame: overlayFrame)
+        }
+        var overlayExitCode: Int? { stored.overlayExitCode }
+        var pageOverlay: (page: HtmlOverlay, sizePercent: Int?, hidden: Bool, frame: PageOverlayFrame)? {
+            guard let pageFrame, let page = stored.htmlOverlay else { return nil }
+            return (page, stored.overlaySizePercent, stored.overlayHidden, pageFrame)
+        }
 
         /// name follows the focused pane's title and folder, as a Mac's split session's does.
         var name: String {
@@ -641,7 +672,7 @@ final class NativeShell {
     /// confirmQuit asks before running local sessions end with the window.
     fileprivate func confirmQuit() -> Bool {
         // a session whose panes all run under Live sessions daemons keeps running
-        let ending = locals.filter { !$0.exited && !($0.backedByZmx && ($0.splitTerminal == nil || $0.splitBackedByZmx)) }
+        let ending = locals.filter { !$0.exited && !$0.allPanesBackedByZmx }
         guard let question = NativeMenu.quitQuestion(runningLocalSessions: ending.count) else { return true }
         return MessageBoxW(window, Array(question.utf16) + [0], Array("agterm".utf16) + [0],
                            UINT(MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)) == IDOK
@@ -657,7 +688,6 @@ final class NativeShell {
             settings.frame = .init(left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom)
             settings.maximized = placement.showCmd == UINT(SW_SHOWMAXIMIZED)
         }
-        locals.forEach(mirror)
         localStore.save()
         saveSettings()
     }
@@ -892,23 +922,21 @@ final class NativeShell {
     private func launch(_ session: LocalSession) {
         var isFolder: ObjCBool = false
         let last = session.directory.flatMap { FileManager.default.fileExists(atPath: $0, isDirectory: &isFolder) && isFolder.boolValue ? $0 : nil }
-        let backed = startPane(session.terminal, commandLine: session.commandLine,
-                               directory: last ?? ProcessInfo.processInfo.environment["USERPROFILE"],
-                               environment: sessionEnvironment(session.id), paneIdentity: localStore.session(withID: session.id)?.paneIdentity)
-        if let index = locals.firstIndex(where: { $0.id == session.id }) { locals[index].backedByZmx = backed }
+        startPane(session.terminal, commandLine: session.commandLine, directory: last ?? ProcessInfo.processInfo.environment["USERPROFILE"],
+                  environment: sessionEnvironment(session.id), paneIdentity: session.stored.paneIdentity)
     }
 
-    /// startPane starts a primary or split pane's program, under its Live sessions daemon when this launch is Live, and
-    /// answers whether it did.
+    /// startPane starts a primary or split pane's program, under its Live sessions daemon when this launch is Live.
     func startPane(_ terminal: NativeTerminal, commandLine: String, directory: String?, environment: [String: String],
-                   paneIdentity: Foundation.UUID?) -> Bool {
+                   paneIdentity: Foundation.UUID?) {
         let environment = ShellIntegration.environment(for: commandLine, merging: environment)
         if let paneIdentity, let wrapped = zmx.start(commandLine, paneIdentity: paneIdentity, environment: environment) {
+            terminal.backedByZmx = true
             terminal.start(wrapped.commandLine, directory: directory, environment: wrapped.environment)
-            return true
+            return
         }
+        terminal.backedByZmx = false
         terminal.start(ShellIntegration.commandLine(commandLine), directory: directory, environment: environment)
-        return false
     }
 
     /// runZmx runs zmx.exe hidden, ending it when it outlives `timeout`, as macOS `ZmxClient.run` does.
@@ -931,44 +959,21 @@ final class NativeShell {
     private func startLocal(_ stored: Session) {
         let commandLine = stored.initialCommand ?? quickProfileCommandLine ?? "cmd.exe"
         let fallback = LocalWindow.fallbackName(commandLine: commandLine, profiles: profiles, earlier: locals.map(\.fallback))
-        let cwd = stored.currentCwd ?? stored.initialCwd
-        let session = LocalSession(id: stored.id, fallback: fallback, customName: stored.customName, directory: cwd.isEmpty ? nil : cwd,
-                                   commandLine: commandLine, terminal: makeTerminal())
-        wirePane(session.terminal, of: session.id)
+        if stored.currentCwd == nil, !stored.initialCwd.isEmpty { stored.currentCwd = stored.initialCwd }
+        stored.initialCommand = commandLine
+        let terminal = makeTerminal()
+        stored.surface = terminal
+        let session = LocalSession(stored: stored, fallback: fallback, customName: stored.customName, commandLine: commandLine)
+        wirePane(terminal, of: session.id)
         locals.append(session)
         layout()
         log("native shell: new \(session.name) session [\(session.id)]")
         launch(session)
-        if stored.hasSplit {
-            restoreSplit(session.id, NativeSplit(axis: stored.splitAxis, ratio: stored.splitRatio ?? 0.5, shown: stored.isSplit,
-                                                 focused: stored.splitFocused), directory: stored.splitCwd)
-        }
+        if stored.hasSplit { startSplitPane(session.id) }
     }
 
     func syncEvents() {
-        events.sync(locals.map { local -> (id: Foundation.UUID, name: String, pane: NativeEvents.Pane) in
-            let inSplit = local.split?.focused == true && local.splitTerminal != nil
-            let focused: NativeTerminal = inSplit ? local.splitTerminal! : local.terminal
-            return (id: local.id, name: local.name, pane: NativeEvents.Pane(indicator: local.activity.indicator,
-                                                            splitShown: local.splitTerminal != nil && local.split?.shown == true,
-                                                            scratchShown: local.scratchShown && local.scratch != nil,
-                                                            focusedPane: inSplit ? .right : .left, focusedTerminal: ObjectIdentifier(focused)))
-        }, store: localStore)
-    }
-
-    /// mirror writes what a local session's panes report into its store session, which saves it.
-    func mirror(_ session: LocalSession) {
-        guard let stored = localStore.session(withID: session.id) else { return }
-        stored.currentCwd = session.directory
-        stored.oscTitle = session.programTitle
-        stored.initialCommand = session.commandLine
-        let split = session.splitTerminal == nil ? nil : session.split
-        stored.hasSplit = split != nil
-        stored.isSplit = split?.shown ?? false
-        stored.splitAxis = split?.axis ?? .leftRight
-        stored.splitRatio = split?.ratio
-        stored.splitFocused = split?.focused ?? false
-        stored.splitCwd = split == nil ? nil : session.splitDirectory
+        events.sync(locals.map { (id: $0.id, name: $0.name, indicator: $0.activity.indicator) }, store: localStore)
     }
 
     func localExited(_ id: Foundation.UUID) {
@@ -992,7 +997,6 @@ final class NativeShell {
         } else if terminal === locals[index].scratch {
             if let directory { locals[index].scratchDirectory = directory }
         }
-        mirror(locals[index])
         if locals[index].name != before { rebuild() }
     }
 
@@ -1341,8 +1345,8 @@ final class NativeShell {
     private func endLocal(_ id: Foundation.UUID) {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         let closing = locals.remove(at: index)
-        closing.overlay?.frame.destroy()
-        closing.pageOverlay?.frame.destroy()
+        closing.overlayFrame?.destroy()
+        closing.pageFrame?.destroy()
         closing.terminals.forEach { DestroyWindow($0.window) }
         recentSessions.removeAll { $0 == id }
         if dashboard?.members.contains(where: { $0.session == id }) == true { dashboardSessionsChanged() }
@@ -1603,8 +1607,8 @@ final class NativeShell {
     }
 
     private func overlayExited(_ id: Foundation.UUID, frame: OverlayFrame, code: Int) {
-        guard let index = locals.firstIndex(where: { $0.id == id }), let overlay = locals[index].overlay, overlay.frame === frame else { return }
-        locals[index].overlayExitCode = code
+        guard let overlay = local(id)?.overlay, overlay.frame === frame else { return }
+        localStore.recordOverlayExit(id, code: code)
         log("native shell: overlay of [\(id)] exited \(code)")
         if !overlay.state.wait { removeOverlay(id, frame: frame) }
     }
@@ -2057,9 +2061,10 @@ final class NativeShell {
 
     /// removeOverlay ends the overlay `frame` holds, if it is still the session's.
     private func removeOverlay(_ id: Foundation.UUID, frame: OverlayFrame) {
-        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay?.frame === frame else { return }
+        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlayFrame === frame else { return }
         let focused = hasFocus(id)
-        locals[index].overlay = nil
+        locals[index].overlayFrame = nil
+        localStore.closeOverlay(id)
         frame.destroy()
         placeOverlays()
         if focused { focus() }
@@ -2718,11 +2723,11 @@ final class NativeShell {
             if let indicator, indicator.status == .blocked {
                 switch indicator.statusPane {
                 case .right:
-                    if let session = local(id), session.splitTerminal != nil, var split = session.split {
-                        split.shown = true
-                        split.focused = true
+                    if let session = local(id), session.splitTerminal != nil {
                         if session.scratchShown { setScratch(id, shown: false, command: nil) }
-                        setSplit(id, split)
+                        localStore.setSplitVisibility(id, shown: true)
+                        session.stored.splitFocused = true
+                        panesChanged(id)
                     }
                 case .scratch: if local(id)?.scratch != nil { setScratch(id, shown: true, command: nil) }
                 case .left, nil:
@@ -3287,16 +3292,8 @@ extension NativeShell: NativeControlHost {
     var localSessions: [NativeControl.Local] {
         locals.map {
             var local = NativeControl.Local(id: $0.id, name: $0.name, commandLine: $0.commandLine, exited: $0.exited, attention: $0.attention,
-                                            unseen: $0.unseen, cwd: $0.directory ?? "", title: $0.programTitle, overlay: $0.overlay?.state,
-                                            overlayExitCode: $0.overlayExitCode, htmlOverlay: $0.pageOverlay?.page)
-            local.pageOverlayHidden = $0.pageOverlay?.hidden ?? false
-            local.pageOverlaySizePercent = $0.pageOverlay?.sizePercent
-            local.split = $0.splitTerminal == nil ? nil : $0.split
-            local.splitCwd = $0.splitDirectory
-            local.backedByZmx = $0.backedByZmx && ($0.splitTerminal == nil || $0.splitBackedByZmx)
-            local.scratch = $0.scratchShown && $0.scratch != nil
-            local.scratchRunning = $0.scratch != nil
-            local.scratchCwd = $0.scratchDirectory
+                                            unseen: $0.unseen, cwd: $0.directory ?? "", title: $0.programTitle)
+            local.backedByZmx = $0.allPanesBackedByZmx
             local.activity = $0.activity
             local.context = $0.context
             local.info = $0.info
@@ -3468,7 +3465,7 @@ extension NativeShell: NativeControlHost {
     func restartSession(_ id: Foundation.UUID) async -> ControlResponse {
         if let index = locals.firstIndex(where: { $0.id == id }) {
             // a running daemon would take the attach back to the same program
-            if locals[index].backedByZmx, !locals[index].exited, let identity = localStore.session(withID: id)?.paneIdentity {
+            if locals[index].terminal.backedByZmx, !locals[index].exited, let identity = localStore.session(withID: id)?.paneIdentity {
                 let name = ZmxSupport.localDaemonName(for: identity)
                 switch zmxClient.killConfirmed(name: name) {
                 case .killed: break
@@ -3580,8 +3577,8 @@ extension NativeShell: NativeControlHost {
             openServerCtlOverlay(id, open)
             return
         }
-        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
-        guard locals[index].pageOverlay == nil else { return }
+        guard let index = locals.firstIndex(where: { $0.id == id }),
+              localStore.openOverlay(id, command: open.command, cwd: open.cwd, wait: open.wait, sizePercent: open.sizePercent) else { return }
         if selected != id { select(id) }
         let focused = hasFocus(id)
         let frame = OverlayFrame(parent: window, points: settings.fontPoints, dpi: dpi)
@@ -3598,8 +3595,8 @@ extension NativeShell: NativeControlHost {
             }
         }
         terminal.background = open.background
-        locals[index].overlay = Overlay(state: NativeOverlay(sizePercent: open.sizePercent, wait: open.wait), frame: frame)
-        locals[index].overlayExitCode = nil
+        locals[index].overlayFrame = frame
+        locals[index].stored.overlaySurface = terminal
         // placed first, so the program starts at the panel's grid
         placeOverlays()
         let session = locals[index]
@@ -3611,7 +3608,7 @@ extension NativeShell: NativeControlHost {
     }
 
     private func refreshPageOverlayState(at index: Int) {
-        guard var slot = locals[index].pageOverlay else { return }
+        guard let slot = locals[index].pageOverlay else { return }
         var page = slot.page
         let state = slot.frame.loadState()
         page.loadState = state
@@ -3619,8 +3616,7 @@ extension NativeShell: NativeControlHost {
         if state == .loaded, let title = slot.frame.documentTitle() {
             page.current = HtmlPageInfo(page: title, title: title, canGoBack: false, canGoForward: false)
         }
-        slot.page = page
-        locals[index].pageOverlay = slot
+        locals[index].stored.htmlOverlay = page
     }
 
     private func refreshPageOverlayState(_ session: LocalSession) {
@@ -3629,30 +3625,31 @@ extension NativeShell: NativeControlHost {
     }
 
     func openPageOverlay(_ id: Foundation.UUID, _ overlay: HtmlOverlay, sizePercent: Int?) {
-        guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
-        guard locals[index].overlay == nil else { return }
+        var page = overlay
+        page.loadState = .loading
+        guard let index = locals.firstIndex(where: { $0.id == id }),
+              localStore.openHtmlOverlay(id, pane: nil, overlay: page, sizePercent: sizePercent) == nil else { return }
         if selected != id { select(id) }
         let frame = PageOverlayFrame(parent: window, dataFolder: stateDirectory.appendingPathComponent("WebView2")) { [weak self] in
             self?.closeOverlay(id)
         }
-        var page = overlay
-        page.loadState = .loading
         switch page.source {
         case .file(let path, _): frame.load(file: path)
         case .url(let address): frame.load(url: address)
         case .image(let path): frame.load(file: path)
         default: break
         }
-        locals[index].pageOverlay = (page: page, sizePercent: sizePercent, hidden: false, frame: frame)
+        locals[index].pageFrame = frame
         placeOverlays()
         rebuild()
         log("native shell: page overlay over \(locals[index].name) [\(id)]")
     }
 
     private func removePageOverlay(_ id: Foundation.UUID, frame: PageOverlayFrame) {
-        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay?.frame === frame else { return }
+        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageFrame === frame else { return }
         let focused = frame.hasFocus || hasFocus(id)
-        locals[index].pageOverlay = nil
+        locals[index].pageFrame = nil
+        localStore.closeOverlay(id)
         frame.destroy()
         placeOverlays()
         rebuild()
@@ -3707,15 +3704,10 @@ extension NativeShell: NativeControlHost {
             rebuild()
             return
         }
-        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay != nil {
-            locals[index].pageOverlay?.sizePercent = sizePercent
-            placeOverlays()
-            rebuild()
-            return
-        }
-        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay != nil else { return }
-        locals[index].overlay?.state.sizePercent = sizePercent
+        guard let session = local(id), session.overlay != nil || session.pageOverlay != nil else { return }
+        localStore.resizeOverlay(id, sizePercent: sizePercent)
         placeOverlays()
+        rebuild()
     }
 
     func setOverlayHidden(_ id: Foundation.UUID, _ hidden: Bool) {
@@ -3741,18 +3733,11 @@ extension NativeShell: NativeControlHost {
             if focused { focus() }
             return
         }
-        if let index = locals.firstIndex(where: { $0.id == id }), locals[index].pageOverlay != nil {
-            let focused = hasFocus(id)
-            locals[index].pageOverlay?.hidden = hidden
-            placeOverlays()
-            rebuild()
-            if focused { focus() }
-            return
-        }
-        guard let index = locals.firstIndex(where: { $0.id == id }), locals[index].overlay != nil else { return }
+        guard let session = local(id), session.overlay != nil || session.pageOverlay != nil else { return }
         let focused = hasFocus(id)
-        locals[index].overlay?.state.hidden = hidden
+        localStore.setOverlaysHidden(id, pane: nil, hidden: hidden)
         placeOverlays()
+        rebuild()
         if focused { focus() }
     }
 
