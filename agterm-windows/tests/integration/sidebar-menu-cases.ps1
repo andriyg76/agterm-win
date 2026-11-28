@@ -1,4 +1,4 @@
-# The sidebar rows' context menus, opened at a row as a right click opens them. Dot-sourced by shell-cases.ps1 after
+# The sidebar rows' context menus, opened at a row as a right click opens them, and what their items do. Dot-sourced by shell-cases.ps1 after
 # title-bar-cases.ps1, whose AgtermWin32 helpers it uses.
 
 # Open-RowMenu opens the context menu of the sidebar's `Row`-th row from the top and returns the menu window.
@@ -55,4 +55,53 @@ $shellCases["copy-name"] = {
     if (-not (Choose-MenuItem $Shell $menu "Copy Name")) { return $failures + "the workspace row's menu has no Copy Name" }
     if (-not (Wait-Until { (Read-Clipboard) -ceq "Release Notes" } 5)) { $failures += "the clipboard holds '$(Read-Clipboard)', not the workspace's name" }
     $failures
+}
+
+# Get-FolderWindows is every Explorer folder window on the desktop, whichever explorer.exe process draws it.
+function Get-FolderWindows { @(Get-Process explorer -ErrorAction SilentlyContinue | % { [AgtermWin32]::Visible($_.Id, "CabinetWClass") }) }
+
+# Wait-NewFolderWindow waits for a folder window that was not in `Before`, titled `Title`, and closes it.
+function Wait-NewFolderWindow($Before, [string]$Title) {
+    $opened = Wait-Until { Get-FolderWindows | ? { $Before -notcontains $_ -and [AgtermWin32]::TextOf($_) -like "$Title*" } | Select-Object -First 1 } 15
+    if ($opened) { [AgtermWin32]::PostMessageW($opened, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null }   # WM_CLOSE
+    [bool]$opened
+}
+
+# Reveal in Explorer opens the session's folder in its parent, from the row menu and session.reveal; a folder that
+# is gone is refused
+$shellCases["reveal-explorer"] = {
+    param($Shell)
+    $state = $Shell.State
+    $window = Get-ShellWindow $Shell
+    if (-not $window) { return @("no visible agterm-shell window") }
+    $parent = Join-Path $env:TEMP "agterm-reveal-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    $dir = Join-Path $parent "work"
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    try {
+        $id = New-PowerShellSession $state @("--cwd", $dir)
+        if (-not $id -or -not (Wait-Until { (Get-Node $state $id).cwd -eq $dir } 30)) { return @("the session never reported $dir") }
+        Get-SessionNodes $state | ? { $_.id -ne $id } | % { Invoke-Ctl $state @("session", "close", "--target", $_.id) | Out-Null }
+        if (-not (Wait-Until { @(Get-SessionNodes $state).Count -eq 1 } 10)) { return @("the other sessions did not close") }
+        $failures = @()
+        $leaf = Split-Path $parent -Leaf
+
+        Note "session.reveal"
+        $before = Get-FolderWindows
+        $reply = Invoke-Ctl $state @("session", "reveal", "--target", $id)
+        if (-not $reply.ok) { $failures += "session reveal refused an existing folder: $($reply.error)" }
+        elseif ($script:InFront -and -not (Wait-NewFolderWindow $before $leaf)) { $failures += "session reveal opened no Explorer window on $leaf" }
+
+        Note "row menu"
+        $before = Get-FolderWindows
+        $menu = Open-RowMenu $Shell $window 0
+        if (-not $menu) { return $failures + "a right click on the session row opened no menu" }
+        if (-not (Choose-MenuItem $Shell $menu "Reveal in Explorer")) { return $failures + "the session row's menu has no Reveal in Explorer" }
+        if ($script:InFront -and -not (Wait-NewFolderWindow $before $leaf)) { $failures += "Reveal in Explorer opened no Explorer window on $leaf" }
+
+        Note "a folder that is gone"
+        Remove-Item -Recurse -Force $parent
+        $reply = Invoke-Ctl $state @("session", "reveal", "--target", $id)
+        if ($reply.ok -or $reply.error -ne "session cwd is not an existing directory") { $failures += "session reveal on a removed folder answered $($reply | ConvertTo-Json -Compress)" }
+        $failures
+    } finally { Remove-Item -Recurse -Force $parent -ErrorAction SilentlyContinue }
 }
