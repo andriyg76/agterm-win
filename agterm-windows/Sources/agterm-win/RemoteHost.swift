@@ -69,6 +69,16 @@ struct RemoteHost {
                                  detail: active.isEmpty ? "service not active" : "systemctl: \(active)")
     }
 
+    /// userManager probes the distribution's systemd user manager: answering on its bus, running without one, or not up.
+    func userManager() -> UserManagerState {
+        let probe = runLine("systemctl --user show-environment >/dev/null 2>&1 && exit 0; pgrep -u \"$(id -u)\" -x systemd >/dev/null && exit 4; exit 1")
+        switch probe.status {
+        case 0: return .ready
+        case 4: return .busHidden
+        default: return .notRunning
+        }
+    }
+
     /// startService asks systemd to start the user agterm-server unit and returns whether it became active.
     func startService() -> (ok: Bool, message: String) {
         let start = runLine("systemctl --user start agterm-server 2>&1")

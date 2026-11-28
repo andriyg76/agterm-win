@@ -17,7 +17,44 @@ public enum WSLServerEnsureAction: Equatable, Sendable {
     case refuse(String)
 }
 
+/// UserManagerState is what a just-booted distribution's systemd user manager answers, which a start or install needs.
+public enum UserManagerState: Equatable, Sendable {
+    case ready
+    /// the manager runs but its bus is unreachable, as under WSLg's mount over /run/user/<uid>; waiting does not help
+    case busHidden
+    case notRunning
+}
+
 public enum WSLServerEnsure {
+    /// The first wsl.exe call boots a stopped distribution, and its systemd user manager comes up after it, so a start or
+    /// install that runs at once fails on the missing bus (#143). These bound the wait for it and the install's retries.
+    public static let userManagerWait: TimeInterval = 30
+    public static let busHiddenWait: TimeInterval = 5
+    public static let installAttempts = 3
+
+    /// waitsForUserManager is whether a probe `state`, `elapsed` seconds into the wait and `hiddenFor` seconds into a run
+    /// of `busHidden` answers, is worth another probe.
+    public static func waitsForUserManager(_ state: UserManagerState, elapsed: TimeInterval, hiddenFor: TimeInterval) -> Bool {
+        switch state {
+        case .ready: false
+        case .busHidden: hiddenFor < busHiddenWait && elapsed < userManagerWait
+        case .notRunning: elapsed < userManagerWait
+        }
+    }
+
+    public static func waitingText(label: String, seconds: Int) -> String {
+        "\(label): waiting for the systemd user manager… \(seconds) s"
+    }
+
+    public static func retryText(attempt: Int) -> String {
+        "agterm-server did not install; retrying (\(attempt)/\(installAttempts))…"
+    }
+
+    /// retriesInstall is whether an install that ended with `notice` gets another attempt: a failure offering the install
+    /// again does, success and exit 4 (the bus is hidden, which only a restart of the distribution fixes) do not.
+    public static func retriesInstall(_ notice: NoticeBar.Message?) -> Bool {
+        notice?.actions.contains(.install) == true
+    }
     /// plan chooses the next step from a probe and the agterm release this agterm-win build ships for.
     public static func plan(health: WSLServerHealth, expectedVersion: String) -> WSLServerEnsureAction {
         switch health {
