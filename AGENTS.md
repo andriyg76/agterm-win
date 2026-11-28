@@ -21,11 +21,13 @@ macOS (upstream) and Linux ([agterm-linux](https://github.com/melonamin/agterm-l
 
 # Manual Windows gate
 
-Hosted CI skips the WSL and Docker cases; `windows-gate.yml` runs them by hand on a self-hosted box (`docs/windows-gate-runner.md`).
+Hosted CI skips the WSL and Docker cases. The agent working on a change runs them itself on the Windows box with
+`agterm-windows/tests/integration/gate.ps1` (`docs/windows-gate.md`); there is no runner and no workflow for it.
 
 - A PR touching WSL, the agterm-server install or start (`WSLServerEnsure`, `RemoteHost`, `NativeShell`'s server path),
-  `remote.properties` remotes, Docker remotes, server panes, server overlays or presentation, or `tests/integration/{wsl,docker-remote,overlay}*`
-  gets a comment asking for a windows-gate run: the build to test (that PR's `windows.yml` run id), the `cases` wildcards, and
-  whether `server-gate` is needed. An issue fixed by such a change gets the same request before it is closed.
-- Ask once per PR, and again only after a later push changes those paths. Name the gate run's result in the PR when it is in.
-- The gate result does not replace hosted CI; a red `windows.yml` is fixed first, since its portable build is what the gate tests.
+  `remote.properties` remotes, Docker remotes, server panes, server overlays or presentation, or
+  `tests/integration/{wsl,docker-remote,overlay,gate}*` needs a gate run on that PR's green `windows.yml` build.
+  An issue fixed by such a change needs one before it is closed.
+- Run it on the box, then post `gate-summary.md` on the PR and tick its test-plan line. A failure is fixed like red CI.
+  When the box is not attached to the session, say so on the PR once and ask the user to attach it.
+- Run again after a later push changes those paths. The gate does not replace hosted CI: a red `windows.yml` is fixed first.

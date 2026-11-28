@@ -1,5 +1,5 @@
 # Optional integration gate for a real WSL distribution with agterm-server. GitHub-hosted CI does not run this; it uses the
-# agterm-test-absent cases in wsl-cases.ps1 instead; windows-gate.yml runs it on a self-hosted box.
+# agterm-test-absent cases in wsl-cases.ps1 instead; gate.ps1 runs it (docs/windows-gate.md).
 param(
     [Parameter(Mandatory)][string]$App,
     [Parameter(Mandatory)][string]$Results,

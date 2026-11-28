@@ -1,4 +1,4 @@
-# The windows-gate job's own WSL distribution, so the gate never starts, installs into or stops a distribution someone
+# The Windows gate's own WSL distribution (gate.ps1), so the gate never starts, installs into or stops a distribution someone
 # works in. Only names starting with agterm-gate- are made or removed.
 #   gate-wsl.ps1 -New <name> -App <staged app> -Cache <dir>   import Ubuntu LTS, boot systemd, install agterm-server
 #   gate-wsl.ps1 -Remove <name>                               unregister it and delete its disk

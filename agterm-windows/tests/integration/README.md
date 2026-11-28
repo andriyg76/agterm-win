@@ -109,8 +109,8 @@ container's loopback is not reachable from Windows: a defined remote gets no `-L
 removed whether the case passed or not. It needs Docker running Linux containers and skips without them, as on CI; run
 it alone with `-Case docker-remote`.
 
-On a machine with a working agterm-server in WSL, run the optional gate; the self-hosted `windows-gate.yml` job runs it,
-on a distribution of its own, with `AGTERM_WIN_GATE_WSL` naming it (`docs/windows-gate-runner.md`).
+On a machine with a working agterm-server in WSL, run the optional gate; `gate.ps1` runs it with every WSL and Docker
+case, on a distribution of its own, with `AGTERM_WIN_GATE_WSL` naming it (`docs/windows-gate.md`).
 `gate-wsl.ps1 -New agterm-gate-local -App <stage>` makes such a distribution by hand, and `-Remove agterm-gate-local` removes it:
 
 ```powershell
