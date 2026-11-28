@@ -84,7 +84,22 @@ struct NativeMenuTests {
                                                                                       .focusWorkspace, .toggleWorkspaceFilter, .previousWorkspace, .nextWorkspace,
                                                                                       .newCompanion, .convertCompanion, .selectTheme, .about, .toggleSidebar, .editProfiles,
                                                                                       .copyName, .revealSession, .expandWorkspaces, .collapseWorkspaces,
-                                                                                      .toggleWorkspaceCollapse])
+                                                                                      .toggleWorkspaceCollapse, .clearFlagged, .editFlaggedSessions,
+                                                                                      .flagAllSessions])
+    }
+
+    @Test func viewEditsAndClearsTheFlaggedSetAndAWorkspaceFlagsAll() {
+        var structure = NativeMenu.Structure(workspace: true)
+        let view = NativeMenu.view(NativeMenu.View(), structure: structure)
+        let flag = try! #require(view.firstIndex { $0.pick == .command(.toggleFlag) })
+        #expect(view[flag + 1].pick == .command(.clearFlagged) && !view[flag + 1].enabled)
+        #expect(view[flag + 2].title == "Edit Flagged Sessions…" && view[flag + 2].enabled)
+        let flagAll = { NativeMenu.structure(structure).first { $0.pick == .command(.flagAllSessions) } }
+        #expect(flagAll()?.title == "Flag All Sessions" && flagAll()?.enabled == false)
+        structure.workspaceSessions = true
+        structure.allFlagged = true
+        #expect(flagAll()?.title == "Unflag All Sessions" && flagAll()?.enabled == true)
+        #expect(!NativeMenu.structure(NativeMenu.Structure(workspace: false)).contains { $0.pick == .command(.flagAllSessions) })
     }
 
     @Test func revealSitsBeforeCloseOnTheRowAndInTheFileMenu() {

@@ -43,7 +43,24 @@ public enum SessionSidebar {
             (catalogTitle(session, unseen: unseen), session.ended, session.agentIndicator, StatusGlyph.infoText(session.effectiveInfo))
         }
         if store.sidebarMode == .flagged {
-            return store.orderedFlaggedSessions.map { row($0, name($0), children: []) }
+            switch store.flaggedLayout {
+            case .tree:
+                return store.displayWorkspaces.flatMap { workspace -> [Item] in
+                    let sessions = workspace.sessions.filter(\.flagged).map { row($0, name($0), children: []) }
+                    guard !sessions.isEmpty else { return [] }
+                    return workspace.isRoot ? sessions
+                        : [Item(id: workspace.id, title: workspace.name, isWorkspace: true, ended: false, children: sessions,
+                                expanded: workspace.isExpanded, tint: workspace.tint)]
+                }
+            case .flat, .plain:
+                return store.orderedFlaggedSessions.map { session in
+                    var label = name(session)
+                    if store.flaggedLayout == .flat, let workspace = store.workspace(forSession: session.id)?.name, !workspace.isEmpty {
+                        label.title += " : \(workspace)"
+                    }
+                    return row(session, label, children: [])
+                }
+            }
         }
         // the Mac fills a flagged row's icon; these rows have no icon, so the flag follows the name
         let marked: (Session) -> Label = { session in
