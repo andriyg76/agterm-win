@@ -5,6 +5,7 @@
 $dockerRemoteName = "agterm-docker"
 $dockerRemoteImage = "agterm-remote-test:gate"
 $dockerRemoteUid = 2000
+$dockerPrompt = 'agterm@agterm-remote:\S*\$'
 $dockerRemote = [pscustomobject]@{ Container = $null; Failure = $null }
 
 function Invoke-Docker([string[]]$Arguments, [hashtable]$Environment = @{}) {
@@ -114,7 +115,7 @@ function New-DockerSession([string]$State) {
     $node = Wait-Until { Get-Node $State $id } 30
     if (-not $node) { return [pscustomobject]@{ Failure = "session $id never showed in the tree" } }
     if ($node.remoteHost -ne $dockerRemoteName) { return [pscustomobject]@{ Failure = "session $id reads remoteHost '$($node.remoteHost)'" } }
-    if (-not (Wait-SessionText $State $id 'agterm@agterm-remote:\S*\$')) {
+    if (-not (Wait-SessionText $State $id $dockerPrompt)) {
         return [pscustomobject]@{ Failure = "no shell prompt in session $id`: $((Invoke-Ctl $State @("session", "text", "--target", $id)).result.text)" }
     }
     [pscustomobject]@{ Id = $id; Failure = $null }
@@ -238,7 +239,7 @@ $shellCases["server-panes"] = {
     if (-not $reply.ok) { return @("session split replied $($reply | ConvertTo-Json -Compress)") }
     if (-not (Wait-Until { $n = Get-Node $state $id; $n.split -and $n.hasSplit } 30)) { return @("the server row never reported its split") }
     if (-not (Wait-Until { @(Get-Panes $window).Count -eq 2 } 15)) { $failures += "$(@(Get-Panes $window).Count) terminal(s) are visible, not 2" }
-    if (-not (Wait-Until { (Get-PaneText $state $id "right") -match "\$ " } 30)) { return $failures + "the server split never showed a prompt" }
+    if (-not (Wait-Until { (Get-PaneText $state $id "right") -match $dockerPrompt } 30)) { return $failures + "the server split never showed a prompt" }
     Invoke-Ctl $state @("session", "type", "--target", $id, "--pane", "right", "echo server-split-ok`r") | Out-Null
     if (-not (Wait-Until { (Get-PaneText $state $id "right") -match "server-split-ok" } 15)) { $failures += "the server split did not run what was typed into it" }
     if ((Get-PaneText $state $id "left") -match "server-split-ok") { $failures += "typing into the server split reached the primary pane" }
@@ -260,7 +261,7 @@ $shellCases["server-panes"] = {
     $scratch = Invoke-Ctl $state @("session", "scratch", "on", "--target", $id)
     if (-not $scratch.ok) { $failures += "scratch replied $($scratch | ConvertTo-Json -Compress)" }
     if (-not (Wait-Until { (Get-Node $state $id).scratch } 30)) { $failures += "the server row never reported its scratch shown" }
-    if (-not (Wait-Until { @(Get-Panes $window).Count -eq 1 -and (Get-PaneText $state $id "scratch") -match "\$ " } 30)) {
+    if (-not (Wait-Until { @(Get-Panes $window).Count -eq 1 -and (Get-PaneText $state $id "scratch") -match $dockerPrompt } 30)) {
         $failures += "the scratch is not the one terminal in view with a prompt"
     } else {
         Invoke-Ctl $state @("session", "type", "--target", $id, "--pane", "scratch", "echo server-scratch-ok`r") | Out-Null
