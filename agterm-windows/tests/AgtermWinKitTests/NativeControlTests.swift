@@ -743,6 +743,7 @@ struct NativeControlTests {
         row.isSplit = true
         let remote = NativeControl.remoteWindowID("Ubuntu")
         host.remotes[remote] = served
+        host.serverWorkspaces = served.controlTree(paneForeground: { _ in nil }).workspaces
         let target = row.id.uuidString
         for cmd in [agtermCore.Command.sessionSplit, .sessionScratch, .sessionSwap, .sessionSplitClose] {
             #expect(await handle(ControlRequest(cmd: cmd, target: target), host).ok)
