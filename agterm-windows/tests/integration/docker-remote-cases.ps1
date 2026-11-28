@@ -20,7 +20,7 @@ function Invoke-Docker([string[]]$Arguments, [hashtable]$Environment = @{}) {
 function DockerRemoteSkipReason {
     if (-not (Get-Command docker.exe -ErrorAction SilentlyContinue)) { return "no docker.exe on PATH" }
     $os = Invoke-Docker @("version", "--format", "{{.Server.Os}}")
-    if ($os.Code -ne 0) { return "docker reaches no engine: $(@($os.Out -split "`n")[-1])" }
+    if ($os.Code -ne 0) { return "docker reaches no engine: $(@($os.Out -split "`n")[0])" }
     if ($os.Out -ne "linux") { return "docker runs $($os.Out) containers; the case needs Linux containers" }
     $null
 }
