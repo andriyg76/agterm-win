@@ -192,7 +192,7 @@ final class RemoteWindow: RemoteCatalogEffects {
             },
             warn: { log("presentation for \(id): \($0)") })
         let client = RemotePresentationClient(argv: argv, presentationVersion: binding.presentationVersion, transport: transport,
-                                              effects: effects, presents: true)
+                                              effects: effects, presents: true, kinds: WindowsPresentation.kinds)
         presenters[id] = client
         client.start()
         startTicking()

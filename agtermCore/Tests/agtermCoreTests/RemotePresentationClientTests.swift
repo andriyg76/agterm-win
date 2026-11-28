@@ -73,7 +73,8 @@ struct RemotePresentationClientTests {
     static let blocked = PresentationStatus(status: .blocked, blink: false, color: nil, shape: nil, pane: nil,
                                             changedAt: nil)
 
-    func makeClient(version: Int? = 1, observer: Bool = false, presents: Bool = true) -> RemotePresentationClient {
+    func makeClient(version: Int? = 1, observer: Bool = false, presents: Bool = true,
+                    kinds: [String] = PresentationHub.supportedKinds) -> RemotePresentationClient {
         let recorder = recorder
         let clock = clock
         let effects = RemotePresentationEffects(
@@ -117,7 +118,7 @@ struct RemotePresentationClientTests {
             warn: { recorder.warnings.append($0) })
         return RemotePresentationClient(argv: ["ssh", "buildbox", "present"], presentationVersion: version,
                                         transport: transport, effects: effects, now: { clock.now }, observer: observer,
-                                        presents: presents)
+                                        presents: presents, kinds: kinds)
     }
 
     func line(_ body: PresentationFrame.Body, gen: Int = 7, rev: Int) -> Data {
@@ -394,6 +395,16 @@ struct RemotePresentationClientTests {
         }
         #expect(hello.mode == .mirror && !sent.contains(.presenterAcquire))
         #expect(recorder.notifies.map(\.body) == ["done"] && recorder.modes == [.mirror])
+    }
+
+    @Test func theHelloListsOnlyTheKindsTheViewerHandles() {
+        let client = makeClient(kinds: ["status", PresentationHub.askFormKind])
+        client.start()
+        guard case .hello(let hello)? = transport.links[0].sent.map(\.body).first else {
+            Issue.record("no hello sent")
+            return
+        }
+        #expect(hello.kinds == ["status", PresentationHub.askFormKind] && hello.mode == .presenter)
     }
 
     @Test func aGrantMakesThisMacThePresenter() {
