@@ -1,11 +1,18 @@
 name: windows-release
 
-# Run by hand on windows-port: picks the next v<AGTERM_VERSION>.<n> from the existing tags, builds the x64 and arm64
+# Run by hand with a release kind (scripts/release-version.ps1 owns the rules): master starts the AGTERM_VERSION minor's
+# line on windows-port, incremental adds a patch there, hotfix adds one on version/v<major>.<minor>. Builds the x64 and arm64
 # installers and MSIX packages on GitHub-hosted runners (as SignPath Foundation requires of every job before a signing request), has SignPath sign it
 # once SIGNPATH_ORGANIZATION_ID is set, and publishes the release, which creates the tag on the built commit.
 # Without SignPath configured the release ships unsigned.
 on:
   workflow_dispatch:
+    inputs:
+      kind:
+        description: "master: new line for a new upstream minor (windows-port); incremental: next patch (windows-port); hotfix: next patch (version/v*)"
+        required: true
+        type: choice
+        options: [incremental, master, hotfix]
 
 concurrency:
   group: windows-release
@@ -20,11 +27,12 @@ env:
 
 jobs:
   version:
-    if: github.ref == 'refs/heads/windows-port'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       version: ${{ steps.next.outputs.version }}
+      base: ${{ steps.next.outputs.base }}
+      base-line: ${{ steps.next.outputs.base-line }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -32,14 +40,16 @@ jobs:
           fetch-depth: 0
       - id: next
         shell: pwsh
+        env:
+          KIND: ${{ inputs.kind }}
+          BRANCH: ${{ github.ref_name }}
         run: |
-          $agterm = Get-Content agterm-windows/AGTERM_VERSION -TotalCount 1
-          $prefix = "v$agterm."
-          $last = git tag --list "$prefix*" | % { $_.Substring($prefix.Length) } | ? { $_ -match '^\d+$' } | % { [int]$_ } |
-            Measure-Object -Maximum
-          $version = "$agterm.$(1 + [int]$last.Maximum)"
-          "version=$version" >> $env:GITHUB_OUTPUT
-          "releasing $version"
+          if ($env:GITHUB_REF -notlike 'refs/heads/*') { throw "run on a branch, not $env:GITHUB_REF" }
+          $next = ./agterm-windows/scripts/release-version.ps1 -Kind $env:KIND -Branch $env:BRANCH
+          "version=$($next.Version)" >> $env:GITHUB_OUTPUT
+          "base=$($next.Base)" >> $env:GITHUB_OUTPUT
+          "base-line=$($next.BaseLine)" >> $env:GITHUB_OUTPUT
+          "releasing $($next.Version) ($env:KIND after $($next.Base))"
 
   # each architecture builds natively, since Swift on Windows does not cross-compile the app here
   build:
@@ -217,6 +227,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
+          BASE: ${{ needs.version.outputs.base }}
+          BASE_LINE: ${{ needs.version.outputs.base-line }}
+          BRANCH: ${{ github.ref_name }}
+          KIND: ${{ inputs.kind }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
         run: |
@@ -232,7 +246,7 @@ jobs:
           }
           if ($assets.Count -ne 8) { throw "expected the x64 and arm64 installers and portable zips, got $($assets -join ', ')" }
           $notesPath = "$env:RUNNER_TEMP/release-notes.md"
-          ./agterm-windows/scripts/release-notes.ps1 -Version $env:VERSION -OutFile $notesPath
+          ./agterm-windows/scripts/release-notes.ps1 -Version $env:VERSION -BaseTag $env:BASE -BaseBranch $env:BRANCH -OutFile $notesPath
           Add-Content $notesPath @"
 
           ---
@@ -245,7 +259,20 @@ jobs:
           } else {
             Add-Content $notesPath "`nUnsigned: SmartScreen warns on first run."
           }
-          gh release create "v$env:VERSION" --target $env:GITHUB_SHA @assets --title "agterm-win $env:VERSION" --notes-file $notesPath
+          # a hotfix is an older line than windows-port's, so it must not take GitHub's Latest
+          $latest = if ($env:KIND -eq 'hotfix') { '--latest=false' } else { '--latest' }
+          gh release create "v$env:VERSION" --target $env:GITHUB_SHA @assets --title "agterm-win $env:VERSION (agterm $agterm)" `
+            --notes-file $notesPath $latest
+          if ($LASTEXITCODE) { throw 'gh release create failed' }
+          # master supersedes the previous line; its maintenance branch starts at that line's last release
+          if ($env:KIND -eq 'master') {
+            $branch = "version/v$env:BASE_LINE"
+            if (git ls-remote --heads origin $branch) { "$branch exists" } else {
+              gh api "repos/$env:GITHUB_REPOSITORY/git/refs" -f "ref=refs/heads/$branch" -f "sha=$(git rev-list -n 1 $env:BASE)"
+              if ($LASTEXITCODE) { throw "creating $branch failed" }
+              "created $branch at $env:BASE"
+            }
+          }
 
   winget:
     needs: [version, publish]

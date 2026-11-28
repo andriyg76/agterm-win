@@ -1,6 +1,6 @@
 # Builds, signs and packages an agterm-win release locally, and with -Publish uploads it to this fork's GitHub
-# releases. VERSION is AGTERM_VERSION plus a Windows build number (0.44.0 -> 0.44.0.1, 0.44.0.2, ...).
-#   scripts\release.ps1 -Version 0.44.0.1 [-Arch x64|arm64] [-Publish]
+# releases. VERSION is <AGTERM_VERSION's major.minor>.<patch>; release-version.ps1 -Kind picks the next one and owns the rules.
+#   scripts\release.ps1 -Version 0.44.2 [-Arch x64|arm64] [-Publish]
 # -Arch is what the binaries are built for; Swift builds natively, so it is the host's architecture.
 # Signing, one of:
 #   AGTERM_SIGN_THUMBPRINT                         a code-signing certificate in the user's store (Certum SimplySign etc.)
@@ -18,7 +18,8 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $agterm = Get-Content (Join-Path $root "AGTERM_VERSION") -TotalCount 1
-if ($Version -notmatch "^$([regex]::Escape($agterm))\.\d+$") { throw "VERSION must be $agterm.N, got $Version" }
+$releaseVersion = Join-Path $PSScriptRoot "release-version.ps1"
+if ($Publish) { & $releaseVersion -Version $Version } elseif ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION must be a.b.c, got $Version" }
 $out = Join-Path $root "build\release"
 $stage = Join-Path $out "stage"
 
@@ -98,7 +99,7 @@ if ($signArguments) {
         if ($LASTEXITCODE) { throw "signing $($file.Name) failed" }
     }
 }
-$defines = @("/DAppVersion=$Version", "/DArch=$Arch", "/DStage=$stage", "/DOutput=$out", "/DZmxRev=$zmxRev")
+$defines = @("/DAppVersion=$Version", "/DAgtermVersion=$agterm", "/DArch=$Arch", "/DStage=$stage", "/DOutput=$out", "/DZmxRev=$zmxRev")
 if ($signArguments) {
     $quoted = ($sign | ForEach-Object { if ($_ -match '\s') { "`$q$_`$q" } else { $_ } }) -join " "
     $defines += @("/DSign", "/Sagterm=`$q$signtool`$q $quoted `$f")
@@ -127,6 +128,7 @@ if (-not $LASTEXITCODE) {
 }
 $notesPath = Join-Path $out "release-notes.md"
 & (Join-Path $PSScriptRoot "release-notes.ps1") -Version $Version -OutFile $notesPath
+$branch = git -C $root rev-parse --abbrev-ref HEAD
 Add-Content $notesPath @"
 
 ---
@@ -134,5 +136,6 @@ Add-Content $notesPath @"
 Windows 10 1809 or later, x64 or arm64. Installs per user, no admin; the portable zip runs from any folder.
 "@
 if (-not $signArguments) { Add-Content $notesPath "`nUNSIGNED: SmartScreen warns on first run." }
-gh release create "v$Version" $setup "$setup.sha256" $zip "$zip.sha256" --repo $repo --title "agterm-win $Version" --notes-file $notesPath
+gh release create "v$Version" $setup "$setup.sha256" $zip "$zip.sha256" --repo $repo --title "agterm-win $Version (agterm $agterm)" `
+    --notes-file $notesPath $(if ($branch -like "version/*") { "--latest=false" } else { "--latest" })
 if ($LASTEXITCODE) { throw "gh release create failed" }

@@ -10,8 +10,7 @@ while every release stays locked to exactly one upstream agterm release.
   `0.44.x` is built on some agterm `0.44.y`; the two patch numbers are unrelated.
 - The next release is `0.44.2`: it continues from `v0.44.1.11` and sorts above it for winget, Chocolatey and Inno.
 - User-facing name: `agterm-win 0.44.2 (agterm 0.44.1)` in the release title, Inno `AppVerName` and About.
-- MSIX: `a.b.c` → `a.b.c.0` only if no `0.44.1xxx.0` MSIX reached users or the Store; otherwise a mapping that stays above
-  `0.44.1011.0` (open question).
+- MSIX: `a.b.c` → `a.b.c.0`; no MSIX was published under the old `0.44.1xxx.0` mapping.
 
 ## Release kind (workflow input `kind`)
 
@@ -29,7 +28,7 @@ a 4-part base tag counts as its first three parts (`v0.44.1.11` → `0.44.1`).
 - An upstream patch bump inside a line (`AGTERM_VERSION` 0.44.1 → 0.44.3) is an `incremental` release.
 - `master` also pushes `version/v<previous line>` at the previous line's last tag when that branch does not exist yet,
   so a hotfix for the superseded line always has its branch.
-- `hotfix` publishes with `gh release create --latest=false` and skips the Store; winget and Chocolatey accept it as an
+- `hotfix` publishes with `gh release create --latest=false` ; winget and Chocolatey accept it as an
   extra version, and upgrades still pick the highest.
 - Release notes cover the base tag to the released commit, which is right for all three kinds and across the switch
   from the 4-part tags.
@@ -39,7 +38,7 @@ a 4-part base tag counts as its first three parts (`v0.44.1.11` → `0.44.1`).
 - `.github/workflows/windows-release.yml`: `kind` choice input, branch/kind/pin guard, next version from the base tag,
   `version/v*` creation on `master`, `--latest=false` on `hotfix`; drop the `windows-port`-only `if`.
 - `scripts/release.ps1`, `stage.ps1`, `package-ci.ps1`: validate `^\d+\.\d+\.\d+$` with `major.minor` equal to `AGTERM_VERSION`'s.
-- `scripts/msix.ps1`: `a.b.c` package version (mapping per the open question).
+- `scripts/msix.ps1`: `a.b.c` package version .
 - `scripts/release-notes.ps1`: base tag via `git describe`.
 - `stage.ps1` `build-info.json` gains `agtermVersion`; `main.swift` About shows both; `agterm.iss` `AppVerName`.
 - `packaging/README.md`, `CLAUDE.md`/rules where the `v<AGTERM_VERSION>.<n>` scheme is stated.
@@ -47,8 +46,8 @@ a 4-part base tag counts as its first three parts (`v0.44.1.11` → `0.44.1`).
 
 ## Progress
 
-- [ ] scheme, branch rule and kinds agreed
-- [ ] workflow + scripts
-- [ ] About / installer naming
-- [ ] docs
+- [x] scheme, branch rule and kinds agreed
+- [x] workflow + scripts
+- [x] About / installer naming
+- [x] docs
 - [ ] first release `v0.44.2` from `windows-port` (`kind: incremental`)

@@ -1,10 +1,24 @@
 # agterm-win packaging
 
-Running `.github/workflows/windows-release.yml` on `windows-port` (Actions ▸ windows-release ▸ Run workflow, or
-`gh workflow run windows-release.yml --ref windows-port`) tags the next `v<AGTERM_VERSION>.<n>`, builds the x64 and
+Running `.github/workflows/windows-release.yml` (Actions ▸ windows-release ▸ Run workflow, or
+`gh workflow run windows-release.yml --ref windows-port -f kind=incremental`) tags the next version, builds the x64 and
 arm64 installers natively on `windows-2022` and `windows-11-arm` with `scripts\release.ps1`, has SignPath sign them once
 `SIGNPATH_ORGANIZATION_ID` is set (releases ship unsigned until then), and publishes the release. `scripts\release.ps1 -Version <version> [-Arch x64|arm64] [-Publish]` does the same locally for the
 host's architecture; its header lists the tools and the signing variables.
+
+**Versions** are `<major>.<minor>.<patch>`: `major.minor` is the pinned upstream's (`AGTERM_VERSION`), `patch` counts
+agterm-win releases on that line, so `0.44.2` is built on agterm `0.44.1` and the two patches are unrelated.
+The release title and About show both, as `agterm-win 0.44.2 (agterm 0.44.1)`. The workflow's `kind` picks the next one
+(`scripts\release-version.ps1` enforces it):
+
+| `kind` | Branch | Next | When |
+|---|---|---|---|
+| `incremental` | `windows-port` | `0.44.2` → `0.44.3` | any release on the same upstream minor, an upstream patch bump included |
+| `master` | `windows-port` | `0.45.0` | `AGTERM_VERSION` moved to a new upstream minor; also creates `version/v0.44` at the last `0.44` tag |
+| `hotfix` | `version/v0.44` | `0.44.7` → `0.44.8` | a fix for a line `windows-port` has left; published without GitHub's Latest |
+
+Any other branch or kind/branch pairing fails before the build, and `windows-port` refuses a line once its
+`version/v*` branch exists. MSIX takes the version with a `.0` fourth part, as the Store requires.
 
 - **GitHub**: `-Publish` uploads the installer, the portable zip and their `.sha256` files to this fork's release
   `v<version>`, creating it for the first architecture and adding to it for the second.
@@ -57,4 +71,4 @@ for the Store listing's privacy policy URL, is [PRIVACY.md](../PRIVACY.md).
 4. In this repository: secret `SIGNPATH_API_TOKEN`, variable `SIGNPATH_ORGANIZATION_ID`. MFA on GitHub and SignPath
    for every member.
 
-**Release notes (`scripts/release-notes.ps1`):** the publish step lists commits and merged PRs on `windows-port` since the previous `v<AGTERM_VERSION>.<n>` tag. Optional secret **`OPENAI_API_KEY`** and variable **`OPENAI_MODEL`** (default `GPT-6.1-terra`) ask the API to group features vs refactors; without the key, notes list PRs and commits directly.
+**Release notes (`scripts/release-notes.ps1`):** the publish step lists commits and merged PRs on the released branch since the previous release tag reachable from it. Optional secret **`OPENAI_API_KEY`** and variable **`OPENAI_MODEL`** (default `GPT-6.1-terra`) ask the API to group features vs refactors; without the key, notes list PRs and commits directly.

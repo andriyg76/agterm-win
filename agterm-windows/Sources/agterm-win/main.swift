@@ -53,12 +53,14 @@ private func bundled(_ name: String, source: String) -> URL {
 func appBuildInfo(serverVersion: String) -> AppBuildInfo {
     let metadata = executableFolder.appendingPathComponent("build-info.json")
     if let data = try? Data(contentsOf: metadata), let info = try? JSONDecoder().decode(AppBuildInfo.self, from: data) {
-        return info
+        return info.agtermVersion != nil ? info : AppBuildInfo(version: info.version, agtermVersion: serverVersion,
+                                                               buildDate: info.buildDate, branch: info.branch,
+                                                               pullRequest: info.pullRequest)
     }
     let executable = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
     let attributes = try? FileManager.default.attributesOfItem(atPath: executable.path)
     let date = (attributes?[.modificationDate] as? Date).map { ISO8601DateFormatter().string(from: $0) }
-    return AppBuildInfo(version: serverVersion, buildDate: date)
+    return AppBuildInfo(version: serverVersion, agtermVersion: serverVersion, buildDate: date)
 }
 
 /// localZmx is the zmx.exe stage.ps1 put in zmx\<rev>, the folder zmx\current names, else the source tree's.

@@ -1,6 +1,6 @@
 # Packs a stage.ps1 folder as the Microsoft Store's MSIX: packaging\msix\AppxManifest.xml, logos drawn from
 # Resources\agterm.png, and MakeAppx. The Store signs the package; the .msix itself is unsigned and does not install.
-#   scripts\msix.ps1 -Version 0.44.1.2 [-Arch x64|arm64] [-Stage build\release\stage] [-Output build\release] [-LayoutOnly]
+#   scripts\msix.ps1 -Version 0.44.2 [-Arch x64|arm64] [-Stage build\release\stage] [-Output build\release] [-LayoutOnly]
 #   [-Unvirtualized] uses packaging\msix\AppxManifest.unvirtualized.xml (local only; Store rejects unvirtualizedResources).
 # Partner Center takes one .msix per architecture in the same submission and serves each device its own.
 # -LayoutOnly stops at the folder, which Developer Mode registers with Add-AppxPackage -Register <folder>\AppxManifest.xml.
@@ -20,11 +20,9 @@ if (-not $Output) { $Output = Join-Path $root "build\release" }
 if (-not $Stage) { $Stage = Join-Path $Output "stage" }
 if (-not (Test-Path (Join-Path $Stage "agterm-win.exe"))) { throw "no agterm-win.exe in $Stage (scripts\stage.ps1)" }
 
-# the Store needs the fourth part 0, so agterm a.b.c and Windows build n become a.b.(1000c+n).0
-if ($Version -notmatch '^(\d+)\.(\d+)\.(\d+)\.(\d+)$' -or [int]$Matches[4] -ge 1000 -or [int]$Matches[3] -ge 65) {
-    throw "VERSION must be a.b.c.n with c < 65 and n < 1000, got $Version"
-}
-$packageVersion = "$($Matches[1]).$($Matches[2]).$(1000 * [int]$Matches[3] + [int]$Matches[4]).0"
+# the Store needs the fourth part 0
+if ($Version -notmatch '^(\d+)\.(\d+)\.(\d+)$' -or [int]$Matches[3] -gt 65535) { throw "VERSION must be a.b.c, got $Version" }
+$packageVersion = "$Version.0"
 $tokens = @{
     IdentityName         = if ($env:AGTERM_MSIX_NAME) { $env:AGTERM_MSIX_NAME } else { "andriyg76.agterm-win" }
     Publisher            = if ($env:AGTERM_MSIX_PUBLISHER) { $env:AGTERM_MSIX_PUBLISHER } else { "CN=andriyg76" }

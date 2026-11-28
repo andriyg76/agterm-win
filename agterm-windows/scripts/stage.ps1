@@ -11,8 +11,8 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $build = Join-Path $root ".build\$Configuration"
 $agterm = Get-Content (Join-Path $root "AGTERM_VERSION") -TotalCount 1
-if (-not $Version) { $Version = "$agterm.0" }
-if ($Version -notmatch "^$([regex]::Escape($agterm))\.\d+$") { throw "Version must be $agterm.N, got $Version" }
+if (-not $Version) { $Version = $agterm }
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Version must be a.b.c, got $Version" }
 foreach ($exe in "agterm-win.exe", "agtermctl.exe") {
     if (-not (Test-Path (Join-Path $build $exe))) { throw "build $Configuration first: no $build\$exe (swift build --product agtermctl builds the CLI)" }
 }
@@ -28,6 +28,7 @@ Copy-Item (Join-Path $build "agterm-win.exe"), (Join-Path $build "agtermctl.exe"
 Copy-Item (Join-Path $root "AGTERM_VERSION"), (Join-Path $root "vendor\server\agterm-server.sha256") $Output
 $identity = [ordered]@{
     version = $Version
+    agtermVersion = $agterm
     buildDate = (Get-Item (Join-Path $build "agterm-win.exe")).LastWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")
 }
 if ($env:GITHUB_ACTIONS -eq "true") {
