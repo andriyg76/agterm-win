@@ -2,8 +2,8 @@
 
 Running `.github/workflows/windows-release.yml` on `windows-port` (Actions ▸ windows-release ▸ Run workflow, or
 `gh workflow run windows-release.yml --ref windows-port`) tags the next `v<AGTERM_VERSION>.<n>`, builds the x64 and
-arm64 installers natively on `windows-2022` and `windows-11-arm` with `scripts\release.ps1`, has SignPath sign them, and
-publishes the release. `scripts\release.ps1 -Version <version> [-Arch x64|arm64] [-Publish]` does the same locally for the
+arm64 installers natively on `windows-2022` and `windows-11-arm` with `scripts\release.ps1`, has SignPath sign them once
+`SIGNPATH_ORGANIZATION_ID` is set (releases ship unsigned until then), and publishes the release. `scripts\release.ps1 -Version <version> [-Arch x64|arm64] [-Publish]` does the same locally for the
 host's architecture; its header lists the tools and the signing variables.
 
 - **GitHub**: `-Publish` uploads the installer, the portable zip and their `.sha256` files to this fork's release
