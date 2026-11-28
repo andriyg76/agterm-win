@@ -1,6 +1,6 @@
 # Builds, signs and packages an agterm-win release locally, and with -Publish uploads it to this fork's GitHub
 # releases. VERSION is <AGTERM_VERSION's major.minor>.<patch>; release-version.ps1 -Kind picks the next one and owns the rules.
-#   scripts\release.ps1 -Version 0.44.2 [-Arch x64|arm64] [-Publish]
+#   scripts\release.ps1 -Version 0.44.1012 [-Arch x64|arm64] [-Publish]
 # -Arch is what the binaries are built for; Swift builds natively, so it is the host's architecture.
 # Signing, one of:
 #   AGTERM_SIGN_THUMBPRINT                         a code-signing certificate in the user's store (Certum SimplySign etc.)

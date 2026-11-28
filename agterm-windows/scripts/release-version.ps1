@@ -1,7 +1,7 @@
 # agterm-win versions are major.minor.patch: major.minor is AGTERM_VERSION's (a line), patch counts agterm-win releases on it.
 # A release runs from windows-port (master, incremental) or version/v<major>.<minor> (hotfix).
 #   scripts\release-version.ps1 -Kind master|incremental|hotfix [-Branch <name>]   the next version and its base tag
-#   scripts\release-version.ps1 -Version 0.44.2 [-Branch <name>]                   throws unless the branch may release it
+#   scripts\release-version.ps1 -Version 0.44.1012 [-Branch <name>]                   throws unless the branch may release it
 param(
     [ValidateSet("master", "incremental", "hotfix")][string]$Kind,
     [string]$Version,

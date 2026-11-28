@@ -1,6 +1,6 @@
 # Builds GitHub release notes for agterm-win from commits and merged PRs since the previous release tag reachable from HEAD.
 # With OPENAI_API_KEY set, summarizes via the chat API; otherwise emits a structured list from gh/git.
-#   scripts\release-notes.ps1 -Version 0.44.2 [-BaseTag v0.44.1.11] [-BaseBranch windows-port] [-OutFile notes.md]
+#   scripts\release-notes.ps1 -Version 0.44.1012 [-BaseTag v0.44.1.11] [-BaseBranch windows-port] [-OutFile notes.md]
 param(
     [Parameter(Mandatory)][string]$Version,
     [string]$BaseTag = "",

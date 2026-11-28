@@ -1,6 +1,6 @@
 # Packs a stage.ps1 folder as the Microsoft Store's MSIX: packaging\msix\AppxManifest.xml, logos drawn from
 # Resources\agterm.png, and MakeAppx. The Store signs the package; the .msix itself is unsigned and does not install.
-#   scripts\msix.ps1 -Version 0.44.2 [-Arch x64|arm64] [-Stage build\release\stage] [-Output build\release] [-LayoutOnly]
+#   scripts\msix.ps1 -Version 0.44.1012 [-Arch x64|arm64] [-Stage build\release\stage] [-Output build\release] [-LayoutOnly]
 #   [-Unvirtualized] uses packaging\msix\AppxManifest.unvirtualized.xml (local only; Store rejects unvirtualizedResources).
 # Partner Center takes one .msix per architecture in the same submission and serves each device its own.
 # -LayoutOnly stops at the folder, which Developer Mode registers with Add-AppxPackage -Register <folder>\AppxManifest.xml.
