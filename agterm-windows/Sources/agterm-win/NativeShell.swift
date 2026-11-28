@@ -1612,10 +1612,30 @@ final class NativeShell {
     }
 
     /// structureMenu is the sidebar menu's workspace section for the clicked row.
-    private func structureMenu(session: Foundation.UUID?, destination: SidebarDestination) -> (entries: [NativeMenu.Entry], targets: [Workspace]) {
+    /// structureMenu also returns what its Move to and Move Under items name: workspaces, and a companion's new parents.
+    private func structureMenu(session: Foundation.UUID?, destination: SidebarDestination)
+        -> (entries: [NativeMenu.Entry], targets: [Workspace], parents: [Foundation.UUID]) {
         let store = storeOf(destination)
         var state = structureState(session: session, destination: destination)
-        let targets = session.flatMap { store.workspace(forSession: $0) }.map { home in store.workspaces.filter { $0.id != home.id } } ?? []
+        var targets = session.flatMap { store.workspace(forSession: $0) }.map { home in store.workspaces.filter { $0.id != home.id } } ?? []
+        var parents: [Foundation.UUID] = []
+        if let session, let parent = store.session(withID: session)?.parentID {
+            // a companion's Move to promotes it, its own workspace included, and Move Under gives it another parent, as on a Mac
+            targets = store.displayWorkspaces.filter { workspace in
+                if case .success = store.canPromoteCompanion(session, to: .workspace(workspace.id, slot: nil)) { return true }
+                return false
+            }
+            state.parents = store.displayWorkspaces.compactMap { workspace in
+                let candidates = workspace.sessions.filter { candidate in
+                    guard candidate.parentID == nil, candidate.id != parent else { return false }
+                    if case .success = store.canMoveCompanion(session, under: candidate.id) { return true }
+                    return false
+                }
+                guard !candidates.isEmpty else { return nil }
+                parents += candidates.map(\.id)
+                return NativeMenu.ParentGroup(workspace: workspace.isRoot ? "Top Level" : workspace.name, sessions: candidates.map(\.displayName))
+            }
+        }
         if session != nil { state.workspace = nil }
         state.moveTargets = targets.map { $0.isRoot ? "Top Level" : $0.name }
         if let session {
@@ -1624,7 +1644,7 @@ final class NativeShell {
             state.tints = [store.workspaces.first { $0.id == id }?.tint]
         }
         state.tintPlacement = tintPlacement
-        return (NativeMenu.structure(state, shortcuts: menuShortcuts), targets)
+        return (NativeMenu.structure(state, shortcuts: menuShortcuts), targets, parents)
     }
 
     /// activeStore is the tree of the window the selection is in, which a window-scoped command from a key acts on.
@@ -2662,7 +2682,7 @@ final class NativeShell {
         let entries = sidebarEntries(destination: destination, names: names, session: session)
         let section = structureMenu(session: session, destination: destination)
         let pick = showMenu(entries + [.separator] + section.entries, owner: window, at: point)
-        runSidebarPick(pick, destination: destination, names: names, session: session, targets: section.targets)
+        runSidebarPick(pick, destination: destination, names: names, session: session, targets: section.targets, parents: section.parents)
     }
 
     private func sidebarEntries(destination: SidebarDestination, names: [String], session: Foundation.UUID? = nil) -> [NativeMenu.Entry] {
@@ -2684,7 +2704,7 @@ final class NativeShell {
     }
 
     private func runSidebarPick(_ pick: NativeMenu.Pick?, destination: SidebarDestination, names: [String],
-                                session: Foundation.UUID? = nil, targets: [Workspace] = []) {
+                                session: Foundation.UUID? = nil, targets: [Workspace] = [], parents: [Foundation.UUID] = []) {
         focus()
         switch pick {
         case .sidebarSession?: launchInSidebar(destination)
@@ -2693,7 +2713,12 @@ final class NativeShell {
         case .moveToWorkspace(let index)? where targets.indices.contains(index):
             var args = ControlArgs()
             args.workspace = targets[index].id.uuidString
-            structure(.sessionMove, target: session, args)
+            let companion = session.flatMap { storeOf(destination).session(withID: $0)?.parentID } != nil
+            structure(companion ? .sessionCompanionPromote : .sessionMove, target: session, args)
+        case .moveUnder(let index)? where parents.indices.contains(index):
+            var args = ControlArgs()
+            args.parent = parents[index].uuidString
+            structure(.sessionCompanionMove, target: session, args)
         case .command(let command)? where command.isStructure: runStructure(command, session: session, destination: destination)
         case .command(.renameSession)?: startRename(session)
         case .command(.copyName)?:
