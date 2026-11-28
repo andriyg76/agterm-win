@@ -152,6 +152,10 @@ final class RemoteWindow: RemoteCatalogEffects {
                 self?.store.applyRemoteInfo(info, forSession: id)
                 self?.changed()
             },
+            mode: { [weak self] mode in
+                self?.store.setRemoteMode(mode, forSession: id)
+                self?.changed()
+            },
             askRequest: { [weak self] ask in
                 guard let self else { return false }
                 return self.onReplicaAsk?(id, ask) ?? false
