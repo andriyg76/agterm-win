@@ -318,7 +318,10 @@ public enum NativeMenu {
         let quick = toggle(.quickTerminal, checked: view.quickShown, enabled: true, shortcuts)
         let flag = toggle(.toggleFlag, checked: structure.flagged == true, enabled: structure.flagged != nil, shortcuts)
         let focus = toggle(.focusWorkspace, checked: structure.focused, enabled: structure.workspace == true, shortcuts)
-        return [toggle(.toggleSidebar, checked: view.sidebarVisible, enabled: true, shortcuts), .separator]
+        let sidebar = Entry(title: view.sidebarVisible ? "Hide Sidebar" : "Show Sidebar",
+                            shortcut: shortcuts[.toggleSidebar] ?? Command.toggleSidebar.shortcut, pick: .command(.toggleSidebar), enabled: true,
+                            children: [])
+        return [sidebar, .separator]
             + fontSizing(shortcuts) + [.separator, .command(.selectTheme), .separator, flaggedView(structure, shortcuts), flag,
                 .separator, focus, workspaceFilter(structure, shortcuts), .command(.expandWorkspaces, enabled: structure.workspaceRows, shortcuts),
                 .command(.collapseWorkspaces, enabled: structure.workspaceRows, shortcuts), workspaceFold(structure, shortcuts), .separator,

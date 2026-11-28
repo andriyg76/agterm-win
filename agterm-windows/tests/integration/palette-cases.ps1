@@ -30,6 +30,14 @@ public static class AgtermInput {
     // Child finds a child by class whether it is shown or not: the list shows only once its rows arrive.
     public static IntPtr Child(IntPtr parent, string className) { return FindWindowExW(parent, IntPtr.Zero, className, null); }
 
+    // FocusOf is the window with keyboard focus on `window`'s thread.
+    public static IntPtr FocusOf(IntPtr window) {
+        var info = new GuiThreadInfo();
+        info.Size = Marshal.SizeOf(info);
+        GetGUIThreadInfo(GetWindowThreadProcessId(window, IntPtr.Zero), ref info);
+        return info.Focus;
+    }
+
     // SendChord is Chord for a window Windows will not put in front: attached to its thread, the case holds Ctrl (and
     // Shift) in their shared key state and sends the key to the window with focus, whose own GetKeyState then reads
     // the chord, so the keymap is what turns it into a command.
