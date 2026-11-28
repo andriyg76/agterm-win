@@ -25,6 +25,7 @@ a 4-part base tag counts as its first three parts (`v0.44.1.11` → `0.44.1`).
 | `hotfix` | `version/v<major>.<minor>` | `major.minor.(patch+1)` | base tag and pin are in the branch's line |
 
 - Any other branch, or a kind on the wrong branch, fails in the `version` job; `release.ps1` applies the same check locally.
+- For now the minor moves only with upstream's minor; decoupling it later means relaxing only the `master` guard.
 - An upstream patch bump inside a line (`AGTERM_VERSION` 0.44.1 → 0.44.3) is an `incremental` release.
 - `master` also pushes `version/v<previous line>` at the previous line's last tag when that branch does not exist yet,
   so a hotfix for the superseded line always has its branch.
