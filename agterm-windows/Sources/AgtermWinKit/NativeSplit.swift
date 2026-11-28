@@ -28,23 +28,6 @@ public struct NativeSplit: Equatable, Sendable {
         return min(max(ratio, ratioRange.lowerBound), ratioRange.upperBound)
     }
 
-    /// next is the split after `session.split`'s `mode` or a split key, as AppStore.toggleSplit decides it: a toggle with
-    /// an axis shows the split on that axis unless it is already shown on it, which hides it; a new split focuses its own
-    /// pane. nil while there is no split and none is asked for.
-    public static func next(_ current: NativeSplit?, mode: ControlToggleMode, axis: SplitAxis?) -> NativeSplit? {
-        let isShown = current?.shown ?? false
-        let show: Bool
-        switch mode {
-        case .on: show = true
-        case .off: show = false
-        case .toggle: show = axis.map { !isShown || current?.axis != $0 } ?? !isShown
-        }
-        guard var split = current else { return show ? NativeSplit(axis: axis ?? .leftRight) : nil }
-        if show, let axis { split.axis = axis }
-        split.shown = show
-        return split
-    }
-
     /// axisName is `tree`'s `splitAxis`, the wire spelling.
     public var axisName: String { axis.rawValue }
 }

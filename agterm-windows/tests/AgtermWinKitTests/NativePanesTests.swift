@@ -4,19 +4,6 @@ import Testing
 import agtermCore
 
 struct NativeSplitTests {
-    @Test func aToggleSplitsThenHidesAndAnotherAxisTransposes() {
-        let new = NativeSplit.next(nil, mode: .toggle, axis: .leftRight)
-        #expect(new == NativeSplit(axis: .leftRight, shown: true, focused: true))
-        #expect(NativeSplit.next(new, mode: .toggle, axis: .leftRight)?.shown == false)
-        let transposed = NativeSplit.next(new, mode: .toggle, axis: .topBottom)
-        #expect(transposed?.axis == .topBottom && transposed?.shown == true)
-        #expect(NativeSplit.next(nil, mode: .off, axis: nil) == nil)
-        var hidden = new!
-        hidden.shown = false
-        hidden.focused = false
-        #expect(NativeSplit.next(hidden, mode: .on, axis: nil) == NativeSplit(axis: .leftRight, shown: true, focused: false))
-    }
-
     @Test func ratiosClampAsOnAMac() {
         #expect(NativeSplit.clamp(0) == 0.05 && NativeSplit.clamp(2) == 0.95 && NativeSplit.clamp(.nan) == 0.5)
     }
