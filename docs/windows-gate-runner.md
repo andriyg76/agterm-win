@@ -3,7 +3,18 @@
 `.github/workflows/windows-gate.yml` runs the WSL and Docker integration cases that `windows.yml` skips:
 GitHub's Windows VMs are already nested, so they offer neither WSL2 nor Linux containers.
 It is started by hand and tests a build that already exists; it builds nothing.
-The job runs on one self-hosted box labelled `agterm-gate`, with `AGTERM_WIN_GATE_WSL=1`, and fails when any case skips.
+The job runs on one self-hosted box labelled `agterm-gate` and fails when any case skips.
+
+## Its own distribution
+
+The gate never uses a distribution someone works in. Each run imports a fresh one named `agterm-gate-<run id>-<attempt>`
+from Ubuntu's WSL rootfs (`tests/integration/gate-wsl.ps1`), boots systemd with a lingering `agterm` user, installs
+agterm-server with the tested build's `agtermctl`, and passes the name to the cases as `AGTERM_WIN_GATE_WSL`.
+The distribution is unregistered at the end of the run, and any `agterm-gate-*` a killed run left behind is removed at
+the start of the next. The script refuses every other name. The rootfs is cached under `%LOCALAPPDATA%\agterm-gate`
+and downloaded again only when Ubuntu's `SHA256SUMS` changes.
+A build whose cases predate this is refused, since its `wsl-at-launch-unseeded` starts a server in the first listed
+distribution.
 
 ## Running it
 
@@ -28,8 +39,8 @@ A run artifact from a fork's PR runs that fork's code on the box: start it only 
 - Windows 11 x64 with virtualization on; a VM needs nested virtualization (Hyper-V `ExposeVirtualizationExtensions`).
 - PowerShell 7 (`pwsh`), Git for Windows and the GitHub CLI (`gh`), which downloads the build.
 - No toolchain: the build comes from a release or a `windows.yml` run, with its runtime DLLs.
-- WSL2 with an `Ubuntu` distribution whose `/etc/wsl.conf` has `[boot] systemd=true`, and agterm-server installed in it
-  (`agtermctl server install Ubuntu` from a staged build, or `--install-server` once).
+- WSL2. No distribution needs to be set up, and the box's own ones are left alone; the job needs network access to
+  `cloud-images.ubuntu.com` and to the agterm-server release download.
 - Docker Desktop on the WSL2 backend in Linux containers mode, started at sign-in.
 
 ## Runner
@@ -43,10 +54,11 @@ A run artifact from a fork's PR runs that fork's code on the box: start it only 
 
 ## What the job checks
 
-The first step fails fast when the runner is in session 0, when `wsl -l -q` lists no `Ubuntu`,
+The first step fails fast when the runner is in session 0, when `wsl --status` fails,
 when Docker does not answer with Linux containers,
 and when `gh` is missing.
-Then it runs `tests/integration/run.ps1` with the chosen cases and `tests/integration/wsl-server-gate.ps1`.
+Then it makes the run's distribution, runs `tests/integration/run.ps1` with the chosen cases and
+`tests/integration/wsl-server-gate.ps1` against it, and removes it.
 Results of both are uploaded as `gate-results`.
 
 ## When a run is needed

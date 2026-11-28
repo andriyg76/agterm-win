@@ -3,7 +3,7 @@
 param(
     [Parameter(Mandatory)][string]$App,
     [Parameter(Mandatory)][string]$Results,
-    [string]$Distribution = "Ubuntu",
+    [Parameter(Mandatory)][string]$Distribution,
     [ValidateRange(30, 600)][int]$CaseTimeoutSeconds = 180
 )
 $ErrorActionPreference = "Stop"
