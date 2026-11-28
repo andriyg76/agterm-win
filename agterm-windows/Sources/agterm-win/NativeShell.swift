@@ -574,7 +574,7 @@ final class NativeShell {
         for attempt in 1...WSLServerEnsure.installAttempts {
             let manager = awaitUserManager(host, label: label)
             notice = runServerInstall(host: host, label: label, preamble: attempt == 1 ? preamble : WSLServerEnsure.retryText(attempt: attempt))
-            guard WSLServerEnsure.retriesInstall(notice) else { break }
+            guard WSLServerEnsure.retriesInstall(notice, manager: manager) else { break }
             // the v0.44.1 install.sh checks a started server on the wrong socket and exits 1
             if case .ready = host.inspect().health {
                 log("server install on \(host.name): exited with a failure, but agterm-server answers")

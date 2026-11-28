@@ -48,11 +48,13 @@ struct WSLServerEnsureTests {
         #expect(WSLServerEnsure.waitsForUserManager(.busHidden, elapsed: 3, hiddenFor: 3))
         #expect(!WSLServerEnsure.waitsForUserManager(.busHidden, elapsed: 8, hiddenFor: 5))
         #expect(!WSLServerEnsure.waitsForUserManager(.ready, elapsed: 0, hiddenFor: 0))
+        #expect(!WSLServerEnsure.waitsForUserManager(.unreachable, elapsed: 0, hiddenFor: 0))
     }
 
     @Test func onlyAFailedInstallIsRetried() {
-        #expect(WSLServerEnsure.retriesInstall(WSLServerEnsure.installNotice(exitCode: 1, error: nil, label: "WSL Ubuntu", source: "Ubuntu")))
-        #expect(!WSLServerEnsure.retriesInstall(WSLServerEnsure.installNotice(exitCode: 4, error: nil, label: "WSL Ubuntu", source: "Ubuntu")))
-        #expect(!WSLServerEnsure.retriesInstall(WSLServerEnsure.installNotice(exitCode: 0, error: nil, label: "WSL Ubuntu", source: "Ubuntu")))
+        #expect(WSLServerEnsure.retriesInstall(WSLServerEnsure.installNotice(exitCode: 1, error: nil, label: "WSL Ubuntu", source: "Ubuntu"), manager: .ready))
+        #expect(!WSLServerEnsure.retriesInstall(WSLServerEnsure.installNotice(exitCode: 4, error: nil, label: "WSL Ubuntu", source: "Ubuntu"), manager: .ready))
+        #expect(!WSLServerEnsure.retriesInstall(WSLServerEnsure.installNotice(exitCode: 0, error: nil, label: "WSL Ubuntu", source: "Ubuntu"), manager: .ready))
+        #expect(!WSLServerEnsure.retriesInstall(WSLServerEnsure.installNotice(exitCode: 1, error: nil, label: "WSL Ubuntu", source: "Ubuntu"), manager: .unreachable))
     }
 }

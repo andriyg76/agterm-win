@@ -70,12 +70,15 @@ struct RemoteHost {
     }
 
     /// userManager probes the distribution's systemd user manager: answering on its bus, running without one, or not up.
+    /// The probe's own codes are 0, 4 and 3; anything else is wsl.exe failing to run the distribution (-1 when it is not
+    /// registered, 1 when WSL itself is missing).
     func userManager() -> UserManagerState {
-        let probe = runLine("systemctl --user show-environment >/dev/null 2>&1 && exit 0; pgrep -u \"$(id -u)\" -x systemd >/dev/null && exit 4; exit 1")
+        let probe = runLine("systemctl --user show-environment >/dev/null 2>&1 && exit 0; pgrep -u \"$(id -u)\" -x systemd >/dev/null && exit 4; exit 3")
         switch probe.status {
         case 0: return .ready
         case 4: return .busHidden
-        default: return .notRunning
+        case 3: return .notRunning
+        default: return .unreachable
         }
     }
 

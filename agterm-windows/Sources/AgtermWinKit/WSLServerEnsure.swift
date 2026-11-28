@@ -23,6 +23,8 @@ public enum UserManagerState: Equatable, Sendable {
     /// the manager runs but its bus is unreachable, as under WSLg's mount over /run/user/<uid>; waiting does not help
     case busHidden
     case notRunning
+    /// wsl.exe could not run the distribution at all; neither a wait nor another install reaches it
+    case unreachable
 }
 
 public enum WSLServerEnsure {
@@ -36,7 +38,7 @@ public enum WSLServerEnsure {
     /// of `busHidden` answers, is worth another probe.
     public static func waitsForUserManager(_ state: UserManagerState, elapsed: TimeInterval, hiddenFor: TimeInterval) -> Bool {
         switch state {
-        case .ready: false
+        case .ready, .unreachable: false
         case .busHidden: hiddenFor < busHiddenWait && elapsed < userManagerWait
         case .notRunning: elapsed < userManagerWait
         }
@@ -51,9 +53,10 @@ public enum WSLServerEnsure {
     }
 
     /// retriesInstall is whether an install that ended with `notice` gets another attempt: a failure offering the install
-    /// again does, success and exit 4 (the bus is hidden, which only a restart of the distribution fixes) do not.
-    public static func retriesInstall(_ notice: NoticeBar.Message?) -> Bool {
-        notice?.actions.contains(.install) == true
+    /// again does, success and exit 4 (the bus is hidden, which only a restart of the distribution fixes) do not, and
+    /// neither does any failure on a distribution wsl.exe cannot run.
+    public static func retriesInstall(_ notice: NoticeBar.Message?, manager: UserManagerState) -> Bool {
+        manager != .unreachable && notice?.actions.contains(.install) == true
     }
     /// plan chooses the next step from a probe and the agterm release this agterm-win build ships for.
     public static func plan(health: WSLServerHealth, expectedVersion: String) -> WSLServerEnsureAction {
