@@ -20,6 +20,9 @@ function Choose-MenuItem($Shell, [IntPtr]$Menu, [string]$Title) {
     $clicked
 }
 
+# Read-Clipboard is the clipboard's text, null while another process holds it open.
+function Read-Clipboard { try { Get-Clipboard -Raw -ErrorAction Stop } catch { $null } }
+
 # Copy Name puts a session's and a workspace's name on the clipboard, not the terminal's selection
 $shellCases["copy-name"] = {
     param($Shell)
@@ -43,13 +46,13 @@ $shellCases["copy-name"] = {
     if (-not $menu) { return @("a right click on the session row opened no menu") }
     if ([AgtermWin32]::MenuTitles($menu) -notcontains "Rename Session") { $failures += "row 0 is not the session: $([AgtermWin32]::MenuTitles($menu) -join ',')" }
     if (-not (Choose-MenuItem $Shell $menu "Copy Name")) { return $failures + "the session row's menu has no Copy Name" }
-    if (-not (Wait-Until { (Get-Clipboard -Raw) -ceq "Build Box" } 5)) { $failures += "the clipboard holds '$(Get-Clipboard -Raw)', not the session's name" }
+    if (-not (Wait-Until { (Read-Clipboard) -ceq "Build Box" } 5)) { $failures += "the clipboard holds '$(Read-Clipboard)', not the session's name" }
 
     Note "workspace row"
     $menu = Open-RowMenu $Shell $window 1
     if (-not $menu) { return $failures + "a right click on the workspace row opened no menu" }
     if ([AgtermWin32]::MenuTitles($menu) -notcontains "Rename Workspace") { $failures += "row 1 is not the workspace: $([AgtermWin32]::MenuTitles($menu) -join ',')" }
     if (-not (Choose-MenuItem $Shell $menu "Copy Name")) { return $failures + "the workspace row's menu has no Copy Name" }
-    if (-not (Wait-Until { (Get-Clipboard -Raw) -ceq "Release Notes" } 5)) { $failures += "the clipboard holds '$(Get-Clipboard -Raw)', not the workspace's name" }
+    if (-not (Wait-Until { (Read-Clipboard) -ceq "Release Notes" } 5)) { $failures += "the clipboard holds '$(Read-Clipboard)', not the workspace's name" }
     $failures
 }
