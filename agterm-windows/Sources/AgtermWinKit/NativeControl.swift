@@ -36,6 +36,8 @@ public protocol NativeControlHost: AnyObject {
     func closeSession(_ id: UUID) async -> ControlResponse
     func renameSession(_ id: UUID, to name: String) async -> ControlResponse
     func restartSession(_ id: UUID) async -> ControlResponse
+    /// revealSession shows a local session's focused-pane folder in Explorer; false when it has no existing one here.
+    func revealSession(_ id: UUID) -> Bool
     func selectSession(_ id: UUID)
     /// type sends `text` to the session's program in `pane`, the one on screen when nil; false when that pane has no
     /// terminal running here.
@@ -211,6 +213,11 @@ public enum NativeControl {
             return await withSession(request.target, host: host) { await host.renameSession($0, to: name) }
         case .sessionRestart:
             return await withSession(request.target, host: host) { await host.restartSession($0) }
+        case .sessionReveal:
+            return await withSession(request.target, host: host) { id in
+                host.revealSession(id) ? ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+                    : failure("session cwd is not an existing directory")
+            }
         case .sessionSelect:
             return await withSession(request.target, host: host) { id in
                 host.selectSession(id)

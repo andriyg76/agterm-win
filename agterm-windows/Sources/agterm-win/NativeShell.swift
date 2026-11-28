@@ -1341,6 +1341,23 @@ final class NativeShell {
     }
 
     /// canRestart is whether `id` is a session whose program ended: a local one, or a server one while it is connected.
+    /// revealDirectory is a local session's focused-pane folder while it exists here; a server's is on its own host, as on a Mac.
+    private func revealDirectory(_ id: Foundation.UUID?) -> String? {
+        guard let id, locals.contains(where: { $0.id == id }) else { return nil }
+        return DirectoryPanelDefaults.existingDirectoryURL(for: localStore.session(withID: id)?.focusedCwd)?.withUnsafeFileSystemRepresentation {
+            $0.map { String(cString: $0) }
+        }
+    }
+
+    /// revealSession opens Explorer on the folder's parent with the folder selected, as Reveal in Finder does.
+    func revealSession(_ id: Foundation.UUID) -> Bool {
+        guard let directory = revealDirectory(id) else { return false }
+        let path = directory.count > 3 && (directory.hasSuffix("\\") || directory.hasSuffix("/")) ? String(directory.dropLast()) : directory
+        let arguments = "/select,\"\(path.replacingOccurrences(of: "/", with: "\\"))\""
+        _ = ShellExecuteW(window, Array("open".utf16) + [0], Array("explorer.exe".utf16) + [0], Array(arguments.utf16) + [0], nil, SW_SHOWNORMAL)
+        return true
+    }
+
     private func canRestart(_ id: Foundation.UUID?) -> Bool {
         guard let id else { return false }
         if let local = locals.first(where: { $0.id == id }) { return local.exited }
@@ -1433,6 +1450,7 @@ final class NativeShell {
         case .newServerSession: newServerSession(on: currentServer)
         case .renameSession: startRename(selected)
         case .restartSession: restartFromUI(selected)
+        case .revealSession: if let selected { _ = revealSession(selected) }
         case .closeSession:
             if let since = closeSessionCoalesced, Date().timeIntervalSince(since) < 0.25 { break }
             if dismissOverlayForCloseSession() {
@@ -2536,7 +2554,8 @@ final class NativeShell {
         switch tab {
         case 0:
             return NativeMenu.file(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries, canCloseSession: canClose(selected),
-                                   canRenameSession: canRename(selected), canRestartSession: canRestart(selected), structure: activeStructure,
+                                   canRenameSession: canRename(selected), canRestartSession: canRestart(selected),
+                                   canRevealSession: revealDirectory(selected) != nil, structure: activeStructure,
                                    localDefaultShortcut: activeSidebarDestination.isLocal, shortcuts: shortcuts)
         case 1:
             return NativeMenu.edit(hasSelection: visibleTerminal.hasSelection, canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)))
@@ -2559,7 +2578,8 @@ final class NativeShell {
     private var windowEntries: [NativeMenu.Entry] {
         NativeMenu.window(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries,
                           canCloseSession: canClose(selected), sessionCount: tagged.count, canRenameSession: canRename(selected),
-                          canRestartSession: canRestart(selected), hasSelection: visibleTerminal.hasSelection,
+                          canRestartSession: canRestart(selected), canRevealSession: revealDirectory(selected) != nil,
+                          hasSelection: visibleTerminal.hasSelection,
                           canPaste: IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), view: viewState, structure: activeStructure,
                           localDefaultShortcut: activeSidebarDestination.isLocal, shortcuts: menuShortcuts)
     }
@@ -2592,7 +2612,7 @@ final class NativeShell {
         return NativeMenu.sidebar(profiles: profiles, defaultProfile: defaultProfile, servers: serverEntries(for: names),
                                          destination: destinationName, canLaunch: canLaunchInSidebar(destination),
                                          canRename: session.map { canRename($0) }, canRestart: canRestart(session),
-                                         canClose: canClose(session), shortcuts: menuShortcuts)
+                                         canClose: canClose(session), canReveal: revealDirectory(session) != nil, shortcuts: menuShortcuts)
     }
 
     private func runSidebarPick(_ pick: NativeMenu.Pick?, destination: SidebarDestination, names: [String],
@@ -2614,6 +2634,7 @@ final class NativeShell {
                 NativeTerminal.writeClipboard(Array(name.utf16) + [0], owner: window)
             }
         case .command(.restartSession)?: restartFromUI(session)
+        case .command(.revealSession)?: if let session { _ = revealSession(session) }
         case .command(.closeSession)?: closeFromUI(session)
         case .serverSession(let index)? where names.indices.contains(index):
             if let server = server(names[index]) { launchInSidebar(.server(server.group, workspace: nil)) }

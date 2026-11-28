@@ -106,6 +106,13 @@ private final class FakeHost: NativeControlHost {
     }
 
     func restartSession(_ id: UUID) async -> ControlResponse { ControlResponse(ok: true) }
+    var revealable: Set<UUID> = []
+    var revealed: [UUID] = []
+    func revealSession(_ id: UUID) -> Bool {
+        guard revealable.contains(id) else { return false }
+        revealed.append(id)
+        return true
+    }
     func selectSession(_ id: UUID) { selectedSession = id }
 
     var typedPanes: [NativePane?] = []
@@ -398,6 +405,16 @@ struct NativeControlTests {
         host.selectedSession = b
         let response = await handle(ControlRequest(cmd: .sessionType, args: ControlArgs(text: "dir\n")), host)
         #expect(response.ok && host.typed.map(\.1) == [b] && host.typed.map(\.0) == ["dir\n"])
+    }
+
+    @Test func revealShowsAnExistingFolderAndRefusesOneThatIsNotHere() async {
+        let host = FakeHost()
+        let here = host.add("here")
+        let gone = host.add("gone")
+        host.revealable = [here]
+        #expect(await handle(ControlRequest(cmd: .sessionReveal, target: here.uuidString), host).ok)
+        let refused = await handle(ControlRequest(cmd: .sessionReveal, target: gone.uuidString), host)
+        #expect(!refused.ok && refused.error == "session cwd is not an existing directory" && host.revealed == [here])
     }
 
     @Test func targetsResolveByUniquePrefixAndRefuseAnUnknownOne() async {
