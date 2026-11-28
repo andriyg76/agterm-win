@@ -82,7 +82,16 @@ struct NativeMenuTests {
                                                                                       .newWorkspace, .renameWorkspace, .deleteWorkspace, .toggleFlag, .toggleFlaggedView,
                                                                                       .focusWorkspace, .toggleWorkspaceFilter, .previousWorkspace, .nextWorkspace,
                                                                                       .newCompanion, .convertCompanion, .selectTheme, .about, .toggleSidebar, .editProfiles,
-                                                                                      .copyName])
+                                                                                      .copyName, .revealSession])
+    }
+
+    @Test func revealSitsBeforeCloseOnTheRowAndInTheFileMenu() {
+        let row = NativeMenu.sidebar(profiles: profiles, defaultProfile: 0, servers: [], destination: nil, canLaunch: true,
+                                     canRename: true, canRestart: false, canClose: true, canReveal: true)
+        #expect(Array(row.compactMap(\.pick).suffix(2)) == [.command(.revealSession), .command(.closeSession)])
+        #expect(row.first { $0.pick == .command(.revealSession) }?.enabled == true)
+        let file = NativeMenu.file(profiles: profiles, canCloseSession: true).compactMap { $0.pick == .command(.revealSession) ? $0 : nil }
+        #expect(file.count == 1 && file.first?.enabled == false)
     }
 
     @Test func copyNameFollowsRenameOnSessionAndWorkspaceRows() {

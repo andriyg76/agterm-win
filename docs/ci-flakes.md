@@ -418,6 +418,18 @@ above. That it follows the drag and paste tests releasing their named pasteboard
   tests do not cover what failed here: most stalls hit `session new` or `tree` before any close.
   The stall stays open in `docs/backlog/control-calls-stall-under-title-flood-on-ci.md`.
 
+## Windows app job: integration cases
+
+### `pick-ask` answers `cancelled` on arm64
+
+- **Symptom.** `FAIL pick-ask: Enter on three gave {"result":"cancelled"}`, one failure among 46 cases on the
+  `app (arm64)` runner.
+- **Cause.** Not found. It is consistent with the Enter reaching the picker after it lost focus, but that is
+  not demonstrated.
+- **Evidence.** Run 46165957171 (PR #163, which does not touch pickers) failed it once; the rerun of the same
+  commit passed, x64 passed, and three local runs on an x64 desktop passed.
+- **Fix.** None yet. Rerun the job; record a repeat here with its run id.
+
 ## Still open
 
 Causes not found, left as backlog items with their capture steps:

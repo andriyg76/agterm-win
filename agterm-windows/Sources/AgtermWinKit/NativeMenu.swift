@@ -8,7 +8,7 @@ public enum NativeMenu {
              editKeymap, reloadKeymap, settings, sessionPalette, commandPalette, toggleSplit, toggleHorizontalSplit, closeSplit, swapPanes,
              focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard, toggleOverlay, newWorkspace, renameWorkspace,
              deleteWorkspace, toggleFlag, toggleFlaggedView, focusWorkspace, toggleWorkspaceFilter, previousWorkspace, nextWorkspace,
-             newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar, editProfiles, copyName
+             newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar, editProfiles, copyName, revealSession
 
         public var title: String {
             switch self {
@@ -60,6 +60,7 @@ public enum NativeMenu {
             case .newCompanion: "New Companion"
             case .convertCompanion: "Convert to Companion"
             case .copyName: "Copy Name"
+            case .revealSession: "Reveal in Explorer"
             }
         }
 
@@ -198,7 +199,7 @@ public enum NativeMenu {
     }
 
     public static func sidebar(profiles: [LaunchProfile], defaultProfile: Int, servers: [Server], destination: String?,
-                               canLaunch: Bool, canRename: Bool?, canRestart: Bool, canClose: Bool,
+                               canLaunch: Bool, canRename: Bool?, canRestart: Bool, canClose: Bool, canReveal: Bool = false,
                                shortcuts: Shortcuts = [:]) -> [Entry] {
         let local = profiles.enumerated().map { index, profile in
             Entry(title: profile.name, shortcut: "", pick: .profile(index), enabled: true, children: [])
@@ -237,7 +238,8 @@ public enum NativeMenu {
         }
         if let canRename {
             menu += [.separator, .command(.renameSession, enabled: canRename, shortcuts), .command(.copyName, shortcuts),
-                     .command(.restartSession, enabled: canRestart, shortcuts), .command(.closeSession, enabled: canClose, shortcuts)]
+                     .command(.restartSession, enabled: canRestart, shortcuts), .command(.revealSession, enabled: canReveal, shortcuts),
+                     .command(.closeSession, enabled: canClose, shortcuts)]
         }
         return menu
     }
@@ -246,7 +248,8 @@ public enum NativeMenu {
     /// a session on each started server, enabled while it is connected, and Start agterm-server in, which lists every
     /// server, enabled until it is started; Default Profile picks that default.
     public static func sessions(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
-                                canRenameSession: Bool = false, canRestartSession: Bool = false, structure: Structure = Structure(),
+                                canRenameSession: Bool = false, canRestartSession: Bool = false, canRevealSession: Bool = false,
+                                structure: Structure = Structure(),
                                 localDefaultShortcut: Bool = true, shortcuts: Shortcuts = [:]) -> [Entry] {
         let newSessionShortcut = shortcuts[.newSession] ?? Command.newSession.shortcut
         var launches = profiles.enumerated().map { index, profile in
@@ -273,7 +276,7 @@ public enum NativeMenu {
                 .command(.renameSession, enabled: canRenameSession, shortcuts), .command(.restartSession, enabled: canRestartSession),
                 .command(.newCompanion, enabled: structure.flagged != nil, shortcuts),
                 .command(.convertCompanion, enabled: structure.canConvert, shortcuts),
-                .command(.closeSession, enabled: canCloseSession, shortcuts)]
+                .command(.revealSession, enabled: canRevealSession, shortcuts), .command(.closeSession, enabled: canCloseSession, shortcuts)]
     }
 
     /// View is what the View submenu reads from the window: what the selected session can do and what is shown.
@@ -320,16 +323,16 @@ public enum NativeMenu {
 
     /// File groups workspace and session actions, followed by configuration.
     public static func file(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
-                            canRenameSession: Bool = false, canRestartSession: Bool = false, structure: Structure = Structure(),
-                            localDefaultShortcut: Bool = true, shortcuts: Shortcuts = [:]) -> [Entry] {
+                            canRenameSession: Bool = false, canRestartSession: Bool = false, canRevealSession: Bool = false,
+                            structure: Structure = Structure(), localDefaultShortcut: Bool = true, shortcuts: Shortcuts = [:]) -> [Entry] {
         let named = structure.workspace == true
         let settings = Entry(title: "Settings", shortcut: "", pick: nil, enabled: true,
                              children: [.command(.settings), .command(.editKeymap), .command(.editProfiles), .command(.reloadKeymap)])
         return [.command(.newWorkspace, shortcuts), .command(.renameWorkspace, enabled: named, shortcuts),
                 .command(.deleteWorkspace, enabled: named, shortcuts), .separator]
             + sessions(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession,
-                       canRenameSession: canRenameSession, canRestartSession: canRestartSession, structure: structure,
-                       localDefaultShortcut: localDefaultShortcut, shortcuts: shortcuts)
+                       canRenameSession: canRenameSession, canRestartSession: canRestartSession, canRevealSession: canRevealSession,
+                       structure: structure, localDefaultShortcut: localDefaultShortcut, shortcuts: shortcuts)
             + [.separator, settings]
     }
 
@@ -407,12 +410,13 @@ public enum NativeMenu {
 
     /// The command palette lists the same actions as the menu bar, plus native Quit.
     public static func window(profiles: [LaunchProfile], defaultProfile: Int = 0, servers: [Server] = [], canCloseSession: Bool,
-                              sessionCount: Int, canRenameSession: Bool = false, canRestartSession: Bool = false, hasSelection: Bool,
+                              sessionCount: Int, canRenameSession: Bool = false, canRestartSession: Bool = false,
+                              canRevealSession: Bool = false, hasSelection: Bool,
                               canPaste: Bool, view: View = View(), structure: Structure = Structure(), localDefaultShortcut: Bool = true,
                               shortcuts: Shortcuts = [:]) -> [Entry] {
         file(profiles: profiles, defaultProfile: defaultProfile, servers: servers, canCloseSession: canCloseSession,
-             canRenameSession: canRenameSession, canRestartSession: canRestartSession, structure: structure,
-             localDefaultShortcut: localDefaultShortcut, shortcuts: shortcuts)
+             canRenameSession: canRenameSession, canRestartSession: canRestartSession, canRevealSession: canRevealSession,
+             structure: structure, localDefaultShortcut: localDefaultShortcut, shortcuts: shortcuts)
             + edit(hasSelection: hasSelection, canPaste: canPaste)
             + [Entry(title: "View", shortcut: "", pick: nil, enabled: true, children: Self.view(view, structure: structure, shortcuts: shortcuts))]
             + navigate(view, sessionCount: sessionCount, shortcuts: shortcuts) + help() + [.command(.quit)]
