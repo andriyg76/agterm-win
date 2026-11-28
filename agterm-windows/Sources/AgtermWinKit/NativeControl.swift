@@ -105,6 +105,14 @@ public protocol NativeControlHost: AnyObject {
     func setSidebarWidth(points: Double)
     func openDashboard(_ members: [DashboardMember], fontMode: DashboardFontMode)
     func closeDashboard()
+    /// pickController is the window modal slot, shared by picks and GUI asks.
+    var pickController: PickController { get }
+    /// interactionSession is the store session `id` names, a local one or a server catalog row, which holds its terminal ask.
+    func interactionSession(_ id: UUID) -> Session?
+    /// guiTargetShown is whether session `id` is on screen for a GUI ask: selected, with no dashboard over it.
+    func guiTargetShown(_ id: UUID) -> Bool
+    /// interactionsChanged shows the pick and asks as their slots now hold them, raising the window with `follow`.
+    func interactionsChanged(follow: Bool)
 }
 
 /// NativeControl answers the control requests the native window serves, in agtermCore's wire shapes so agtermctl's
@@ -183,6 +191,9 @@ public enum NativeControl {
             }
         case .version:
             return ControlResponse(ok: true, result: ControlResult(app: AppIdentity(version: version)))
+        case _ where NativeStructure.interactionCommands.contains(request.cmd):
+            return await ControlDispatcher(actions: NativeStructure(store: host.localStore, interactions: host)).dispatch(request)
+                ?? failure("\(request.cmd.rawValue) is not supported on Windows")
         case .eventsRead:
             // the dispatcher parses the cursor, kinds and limit and refuses them as on a Mac
             return await ControlDispatcher(actions: NativeStructure(store: host.localStore, events: host.events)).dispatch(request)
@@ -452,7 +463,8 @@ public enum NativeControl {
         return ControlTree(workspaces: workspaces, sidebarVisible: host.sidebarVisible, sidebarMode: shape.sidebarMode,
                            flaggedOrder: shape.flaggedOrder, sidebarWidth: host.sidebarWidthPoints, workspaceFilter: shape.workspaceFilter, quickVisible: host.quickShown,
                            dashboardMembers: dashboard?.members.map(\.controlRef), dashboardHighlighted: dashboard?.highlighted?.controlRef,
-                           dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) })
+                           dashboardFontSize: dashboard?.fontSize, dashboardFontMode: dashboard.map { NativeDashboard.fontModeName($0.fontMode) },
+                           pickPending: host.pickController.pending?.id, askPending: host.pickController.pendingAsk?.id)
     }
 
     /// sessionNode is a local session as it runs here, with the store's flag, tint and companion fields.
@@ -463,7 +475,7 @@ public enum NativeControl {
                            split: shape.split, hasSplit: shape.hasSplit, backedByZmx: local.backedByZmx,
                            splitAxis: shape.splitAxis, splitRatio: shape.splitRatio,
                            splitFocused: shape.splitFocused, overlay: shape.overlay, overlaySizePercent: shape.overlaySizePercent,
-                           scratch: shape.scratch, flagged: shape.flagged, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
+                           ask: shape.ask, pick: shape.pick, scratch: shape.scratch, flagged: shape.flagged, ended: local.exited ? true : nil, restoreCommand: local.commandLine,
                            status: shown ? indicator.status.rawValue : nil, statusPane: shown ? indicator.statusPane?.rawValue : nil,
                            statusBlink: shown && indicator.blink ? true : nil, statusColor: shown ? indicator.color : nil,
                            statusShape: shown ? indicator.shape?.rawValue : nil,

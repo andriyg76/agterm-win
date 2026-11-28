@@ -238,6 +238,15 @@ private final class FakeHost: NativeControlHost {
         serverOverlays.removeValue(forKey: id)
         serverOverlayExitCodes[id] = code
     }
+
+    let pickController = PickController()
+    var interactionChanges: [Bool] = []
+    func interactionSession(_ id: UUID) -> Session? { localStore.session(withID: id) }
+    func guiTargetShown(_ id: UUID) -> Bool { selectedSession == id && dashboard == nil }
+    func interactionsChanged(follow: Bool) {
+        SessionPickBook.shared.drain(pickController)
+        interactionChanges.append(follow)
+    }
 }
 
 @MainActor
@@ -854,5 +863,127 @@ struct NativeControlTests {
     @Test func zmxCommandsWithoutZmxSayItIsUnavailable() async {
         let response = await handle(ControlRequest(cmd: .zmxList), FakeHost())
         #expect(!response.ok && response.error == "zmx is unavailable in this instance")
+    }
+}
+
+/// pick.* and ask.* share the process-wide PickRegistry, SessionPickBook and AskRegistry, so they run one at a time.
+@MainActor
+@Suite(.serialized)
+struct NativeInteractionTests {
+    private func handle(_ request: ControlRequest, _ host: FakeHost) async -> ControlResponse {
+        PickRegistry.shared.register(LocalWindow.id, controller: host.pickController)
+        NativeStructure.wireOwners(host)
+        return await NativeControl.handle(request, host: host, version: "1.2.3")
+    }
+
+    private func pickArgs(_ ids: [String]) -> ControlArgs {
+        var args = ControlArgs()
+        args.items = ids.map { ControlPickItem(id: $0, label: $0.uppercased()) }
+        return args
+    }
+
+    private func askArgs(style: String? = nil) -> ControlArgs {
+        var args = ControlArgs(buttons: [ControlAskButton(id: "yes", label: "Yes"), ControlAskButton(id: "no", label: "No")], title: "Go?")
+        args.style = style
+        return args
+    }
+
+    @Test func aPickFillsTheWindowSlotUntilItIsAnswered() async throws {
+        let host = FakeHost()
+        let opened = await handle(ControlRequest(cmd: .pickOpen, args: pickArgs(["a", "b"])), host)
+        let id = try #require(opened.result?.id)
+        #expect(host.pickController.pending?.id == id)
+        #expect(host.interactionChanges == [false])
+        #expect(await handle(ControlRequest(cmd: .pickOpen, args: pickArgs(["c"])), host).error == "pick already pending")
+        #expect(await handle(ControlRequest(cmd: .pickResult, target: id), host).result?.pick?.result == .pending)
+
+        host.pickController.resolve(ControlPickResult(result: .picked, id: "b", label: "B", index: 1))
+        let result = try #require(await handle(ControlRequest(cmd: .pickResult, target: id), host).result?.pick)
+        #expect(result.result == .picked)
+        #expect(result.id == "b")
+        #expect(await handle(ControlRequest(cmd: .pickCancel, target: id), host).ok)
+    }
+
+    @Test func pickCancelEndsThePendingPick() async throws {
+        let host = FakeHost()
+        let id = try #require(await handle(ControlRequest(cmd: .pickOpen, args: pickArgs(["a"])), host).result?.id)
+        #expect(await handle(ControlRequest(cmd: .pickCancel, target: id), host).ok)
+        #expect(host.pickController.pending == nil)
+        #expect(await handle(ControlRequest(cmd: .pickResult, target: id), host).result?.pick?.result == .cancelled)
+        #expect(await handle(ControlRequest(cmd: .pickResult, target: "nope"), host).error == "unknown pick: nope")
+    }
+
+    @Test func aSessionPickTakesTheSlotAndEndsWithItsSession() async throws {
+        let host = FakeHost()
+        let session = host.add("api")
+        let id = try #require(await handle(ControlRequest(cmd: .pickOpen, target: session.uuidString, args: pickArgs(["a"])), host).result?.id)
+        #expect(host.pickController.pending?.id == id)
+        #expect(await handle(ControlRequest(cmd: .pickOpen, target: UUID().uuidString, args: pickArgs(["a"])), host).ok == false)
+        SessionPickBook.shared.sessionEnded(session)
+        host.pickController.cancel()
+        #expect(await handle(ControlRequest(cmd: .pickResult, target: id), host).result?.pick?.result == .cancelled)
+    }
+
+    @Test func aTerminalAskFillsItsSessionsSlotAndReportsTheAnswer() async throws {
+        let host = FakeHost()
+        let id = host.add("api")
+        host.selectedSession = id
+        let opened = await handle(ControlRequest(cmd: .askOpen, target: id.uuidString, args: askArgs()), host)
+        let ask = try #require(opened.result?.id)
+        let session = try #require(host.localStore.session(withID: id))
+        #expect(session.askPending?.id == ask)
+        #expect(host.pickController.pendingAsk == nil)
+        #expect(await handle(ControlRequest(cmd: .askOpen, target: id.uuidString, args: askArgs()), host).error == "ask already pending")
+        #expect(await handle(ControlRequest(cmd: .askResult, target: ask), host).result?.ask?.result == .pending)
+
+        _ = session.answerAsk(id: ask, buttonAt: 1)
+        let result = try #require(await handle(ControlRequest(cmd: .askResult, target: ask), host).result?.ask)
+        #expect(result.result == .answered)
+        #expect(result.id == "no")
+    }
+
+    @Test func aGuiAskNeedsItsSessionInViewAndGoesToTheWindowSlot() async throws {
+        let host = FakeHost()
+        let id = host.add("api")
+        let hidden = await handle(ControlRequest(cmd: .askOpen, target: id.uuidString, args: askArgs(style: "gui")), host)
+        #expect(hidden.error == "session not visible")
+
+        host.selectedSession = id
+        let ask = try #require(await handle(ControlRequest(cmd: .askOpen, target: id.uuidString, args: askArgs(style: "gui")), host).result?.id)
+        #expect(host.pickController.pendingAsk?.id == ask)
+        #expect(host.pickController.pendingAsk?.anchor?.sessionID == id)
+        #expect(await handle(ControlRequest(cmd: .pickOpen, args: pickArgs(["a"])), host).error == "ask already pending")
+        #expect(await handle(ControlRequest(cmd: .askCancel, target: ask), host).ok)
+        #expect(host.pickController.pendingAsk == nil)
+        #expect(await handle(ControlRequest(cmd: .askResult, target: ask), host).result?.ask?.result == .cancelled)
+    }
+
+    @Test func anUnanchoredGuiAskOpensWithNoSession() async throws {
+        let host = FakeHost()
+        let ask = try #require(await handle(ControlRequest(cmd: .askOpen, args: askArgs(style: "gui")), host).result?.id)
+        #expect(host.pickController.pendingAsk?.id == ask)
+        #expect(host.pickController.pendingAsk?.anchor == nil)
+        host.pickController.cancelAsk()
+    }
+
+    @Test func aNamedWindowOtherThanThisOneIsRefused() async {
+        let host = FakeHost()
+        var args = pickArgs(["a"])
+        args.window = "nowhere"
+        #expect(await handle(ControlRequest(cmd: .pickOpen, args: args), host).ok == false)
+        #expect(host.pickController.pending == nil)
+    }
+
+    @Test func theTreeReportsTheWindowSlotAndASessionsAsk() async throws {
+        let host = FakeHost()
+        let id = host.add("api")
+        host.selectedSession = id
+        let ask = try #require(await handle(ControlRequest(cmd: .askOpen, target: id.uuidString, args: askArgs()), host).result?.id)
+        let pick = try #require(await handle(ControlRequest(cmd: .pickOpen, args: pickArgs(["a"])), host).result?.id)
+        let tree = try #require(await handle(ControlRequest(cmd: .tree), host).result?.tree)
+        #expect(tree.pickPending == pick)
+        #expect(tree.workspaces.flatMap(\.sessions).first { $0.id == id.uuidString }?.ask?.id == ask)
+        host.pickController.cancel()
+        host.localStore.session(withID: id)?.cancelPendingAsk()
     }
 }

@@ -47,6 +47,16 @@ HANDLE nt_common_controls_context() {
     return context;
 }
 
+bool nt_common_controls_activate(uintptr_t *cookie) {
+    HANDLE context = nt_common_controls_context();
+    ULONG_PTR value = 0;
+    if (context == INVALID_HANDLE_VALUE || !ActivateActCtx(context, &value)) return false;
+    *cookie = value;
+    return true;
+}
+
+void nt_common_controls_deactivate(uintptr_t cookie) { DeactivateActCtx(0, cookie); }
+
 extern "C" int32_t nt_ask_choice(void *owner, const uint16_t *caption, const uint16_t *instruction, const uint16_t *content,
                                  const uint16_t *const *buttons, int32_t count) {
     auto text = [](const uint16_t *value) { return reinterpret_cast<const wchar_t *>(value); };

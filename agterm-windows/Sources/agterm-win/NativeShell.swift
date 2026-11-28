@@ -136,7 +136,7 @@ final class NativeShell {
 
     /// Server is an agterm-server started this launch, under its sidebar group.
     @MainActor
-    private final class Server {
+    final class Server {
         let remote: RemoteWindow
         let group = Foundation.UUID()
         /// bootstrapNotice is shown in the notice bar until the catalog connects or install refuses.
@@ -150,7 +150,7 @@ final class NativeShell {
 
     /// servers are the started agterm-servers, in the order they started; a remote's server is here only once started,
     /// so nothing runs its command before then.
-    private var servers: [Server] = []
+    private(set) var servers: [Server] = []
     /// remotes are the names `remote.properties` defines, each a remote that can hold a server, read again on each use.
     private var remotes: [String] { RemoteCommands.current.names }
     // remotes whose first start is asking, so a Start the question's message loop delivers waits for the answer
@@ -170,7 +170,7 @@ final class NativeShell {
     private var tooltip: UnsafeMutableRawPointer?
     var palette: UnsafeMutableRawPointer?
     // the open palette, what it lists, and the rows its query leaves, which Enter's index refers to
-    private var paletteMode: Palette.Mode?
+    private(set) var paletteMode: Palette.Mode?
     private var paletteRows: [Palette.Row] = []
     private var paletteShown: [Palette.Row] = []
     // the title bar's button under the mouse, and the one a press started on, which acts if the release is on it too
@@ -196,9 +196,15 @@ final class NativeShell {
         var hideTask: Task<Void, Never>?
     }
     private var serverHuds: [Foundation.UUID: ServerHud] = [:]
-    private let pickController = PickController()
-    /// pickPalette is set while the palette lists a replica pick; it shares the palette with the session and command lists.
-    private var pickPalette: PendingPick?
+    let pickController = PickController()
+    /// pickPalette is set while the palette lists a pick; it shares the palette with the session and command lists.
+    var pickPalette: PendingPick?
+    /// pickSeedQuery is the query the shown pick opened with while it is unedited: its `--select` seed holds until
+    /// then, since the field's own change notices arrive after the first list.
+    private var pickSeedQuery: String?
+    /// windowAskPanel draws the window modal slot's GUI ask, sessionAskPanel the selected session's own ask.
+    var windowAskPanel: AskPanel?
+    var sessionAskPanel: AskPanel?
     /// detectedProfiles is what this launch found; `profiles` is that with profiles.properties over it.
     private var detectedProfiles = LaunchProfiles.available(wslDistributions: [], powerShell7: NativeShell.powerShell7(),
                                                             gitBash: NativeShell.gitBash())
@@ -325,6 +331,7 @@ final class NativeShell {
         }
         remoteTerminal.onNaming = { [unowned self] in if let running { serverNaming(running, remoteTerminal) } }
         PickRegistry.shared.register(shellWindowID, controller: pickController)
+        NativeStructure.wireOwners(self)
         try? FileManager.default.createDirectory(atPath: ControlResolve.windowsSocketRoot, withIntermediateDirectories: true)
         control = ControlSocket.start(path: socketPath, host: self, version: version)
         if control != nil { events.launched() }
@@ -370,7 +377,7 @@ final class NativeShell {
     private func server(_ name: String) -> Server? { servers.first { $0.name == name } }
 
     /// server(of:) is the server holding session `id`.
-    private func server(of id: Foundation.UUID) -> Server? { servers.first { $0.remote.session(id) != nil } }
+    func server(of id: Foundation.UUID) -> Server? { servers.first { $0.remote.session(id) != nil } }
 
     private func serverSession(_ id: Foundation.UUID) -> Session? { servers.lazy.compactMap { $0.remote.session(id) }.first }
 
@@ -689,6 +696,9 @@ final class NativeShell {
     }
 
     fileprivate func closing() {
+        for session in localStore.workspaces.flatMap(\.sessions) + servers.flatMap({ $0.remote.store.workspaces.flatMap(\.sessions) }) {
+            session.cancelPendingAsk()
+        }
         PickRegistry.shared.unregister(shellWindowID)
         for id in serverHuds.keys { clearServerHud(id) }
         var placement = WINDOWPLACEMENT()
@@ -1355,6 +1365,7 @@ final class NativeShell {
     private func endLocal(_ id: Foundation.UUID) {
         guard let index = locals.firstIndex(where: { $0.id == id }) else { return }
         let closing = locals.remove(at: index)
+        endInteractions(of: closing.stored)
         closing.overlayFrame?.destroy()
         closing.pageFrame?.destroy()
         closing.terminals.forEach { DestroyWindow($0.window) }
@@ -1569,7 +1580,8 @@ final class NativeShell {
         }
         if let running, let overlay = serverOverlays[running], selected == running, !overlay.state.hidden { remoteEnabled = false }
         EnableWindow(remoteTerminal.window, remoteEnabled)
-        // the find bar and the palette stay above an overlay placed after them
+        // an ask draws above the overlays, and the find bar and the palette stay above both
+        syncAskPanels()
         for panel in [findBar, palette?.assumingMemoryBound(to: HWND__.self)] where panel.map({ IsWindowVisible($0) }) == true {
             SetWindowPos(panel, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
         }
@@ -1626,44 +1638,28 @@ final class NativeShell {
     // MARK: replica asks (catalog sessions)
 
     private func showReplicaAsk(on server: Server, sessionID: Foundation.UUID, ask: PresentationAsk) -> Bool {
-        guard ask.pane == nil, ask.style == .terminal, !ask.needsFormSupport else { return false }
-        guard ask.buttons.count >= 1, ask.buttons.count <= 8 else { return false }
+        guard ask.pane == nil else { return false }
         let answer: @MainActor (PresentationFrame.Body) -> Void = { [weak server] body in
             server?.remote.answerPresentation(sessionID, body)
         }
         guard server.remote.store.presentReplicaAsk(ask, forSession: sessionID, answer: answer) else { return false }
         if running != sessionID { select(sessionID) }
-        presentReplicaAskDialog(on: server, sessionID: sessionID)
+        syncInteractions()
         rebuild()
         log("native shell: replica ask on server session [\(sessionID)]: \(ask.id)")
         return true
     }
 
-    private func presentReplicaAskDialog(on server: Server, sessionID: Foundation.UUID) {
-        guard let session = server.remote.session(sessionID), let ask = session.askPending else { return }
-        let titles = ask.buttons.map { Array($0.label.utf16) + [0] }
-        let picked = Int(withWideStrings(titles) {
-            nt_ask_choice(UnsafeMutableRawPointer(window), Array("agterm".utf16) + [0], Array(ask.title.utf16) + [0],
-                          Array((ask.message ?? "").utf16) + [0], $0, Int32(titles.count))
-        })
-        if picked >= 0 {
-            _ = session.answerAsk(id: ask.id, buttonAt: picked)
-        } else {
-            _ = session.cancelAsk(id: ask.id)
-        }
-        SessionPickBook.shared.drain(pickController)
-        if let pending = pickController.pending { openPickPalette(pending) }
-        rebuild()
-    }
-
     private func dismissReplicaAsk(on server: Server, sessionID: Foundation.UUID, ref: PresentationAskRef) {
         server.remote.store.dismissReplicaAsk(ref, forSession: sessionID)
+        syncInteractions()
         rebuild()
     }
 
     private func dismissReplicaAsk(ifShownFor sessionID: Foundation.UUID) {
         guard let server = server(of: sessionID), let session = server.remote.session(sessionID), session.askReplica else { return }
         session.releaseAsk()
+        syncInteractions()
         rebuild()
     }
 
@@ -1677,10 +1673,7 @@ final class NativeShell {
         guard SessionPickBook.shared.openReplica(pick, session: sessionID, window: shellWindowID, controller: pickController,
                                                answer: answer) else { return false }
         if pick.follow == true { select(sessionID) }
-        if let pending = pickController.pending, pending.id == pick.id {
-            closePalette(refocus: false)
-            openPickPalette(pending)
-        }
+        syncInteractions()
         rebuild()
         log("native shell: replica pick on server session [\(sessionID)]: \(pick.id)")
         return true
@@ -1688,39 +1681,43 @@ final class NativeShell {
 
     private func dismissReplicaPick(on server: Server, sessionID: Foundation.UUID, ref: PresentationPickRef) {
         SessionPickBook.shared.dismissReplica(ref, session: sessionID)
-        if pickController.pending?.id == ref.id {
-            pickPalette = nil
-            closePalette(refocus: false)
-        }
+        syncInteractions()
         rebuild()
     }
 
-    private func pickRows(for pick: PendingPick) -> [Palette.Row] {
-        pick.items.map {
-            Palette.Row(title: $0.label, subtitle: $0.subtitle ?? "", detail: "",
-                        target: .pickChoice($0.id))
-        }
-    }
-
-    private func openPickPalette(_ pick: PendingPick) {
+    /// openPickPalette lists `pick` in the palette: `--prompt` as the field's hint, `--query` in it selected, so the first
+    /// keystroke replaces it, and the highlight on the `--select` item.
+    func openPickPalette(_ pick: PendingPick) {
         guard let palette else { return }
         pickPalette = pick
+        pickSeedQuery = pick.query ?? ""
         paletteMode = nil
-        paletteRows = pickRows(for: pick)
-        let cue = Array((pick.prompt ?? "Pick one").utf16) + [0]
+        let cue = Array((pick.prompt ?? "Select…").utf16) + [0]
         let (left, top, width) = paletteFrame
         nt_palette_open(palette, cue, left, top, width)
+        if let query = pick.query, !query.isEmpty { nt_palette_set_query(palette, Array(query.utf16) + [0]) }
         paletteQueryChanged()
     }
 
-    private func resolvePickChoice(_ itemID: String) {
+    /// dropPickPalette takes the palette down for a pick that ended elsewhere, without answering it.
+    func dropPickPalette() {
+        closePalette(refocus: !focusAsk())
+    }
+
+    /// resolvePick answers the palette's pick with the row run: an item, or the free text of a custom row.
+    private func resolvePick(_ target: Palette.Target) {
         guard let pick = pickController.pending else { return }
-        guard let index = pick.items.firstIndex(where: { $0.id == itemID }) else { return }
-        pickController.resolve(ControlPickResult(result: .picked, id: itemID, label: pick.items[index].label, index: index))
-        pickPalette = nil
+        switch target {
+        case .pickChoice(let id):
+            guard let index = pick.items.firstIndex(where: { $0.id == id }) else { return }
+            pickController.resolve(ControlPickResult(result: .picked, id: id, label: pick.items[index].label, index: index))
+        case .pickCustom(let query):
+            pickController.resolve(ControlPickResult(result: .custom, query: query))
+        default:
+            return
+        }
         closePalette(refocus: true)
-        SessionPickBook.shared.drain(pickController)
-        if let pending = pickController.pending { openPickPalette(pending) }
+        syncInteractions()
         rebuild()
     }
 
@@ -2403,7 +2400,10 @@ final class NativeShell {
     }
 
     /// focus gives the keyboard to what is in view: the dashboard's grid takes it in the window itself.
-    func focus() { SetFocus(dashboard != nil ? window : visibleTerminal.window) }
+    func focus() {
+        if focusAsk() { return }
+        SetFocus(dashboard != nil ? window : visibleTerminal.window)
+    }
 
     static func handleSidebarShortcut(_ message: MSG) -> Bool {
         guard message.message == UINT(WM_KEYDOWN) || message.message == UINT(WM_SYSKEYDOWN),
@@ -2650,9 +2650,16 @@ final class NativeShell {
         if pickPalette == nil, let mode = paletteMode { paletteRows = rows(for: mode) }
         var text = [UInt16](repeating: 0, count: 512)
         let length = nt_palette_query(palette, &text, Int32(text.count))
-        paletteShown = Palette.filter(paletteRows, query: String(decoding: text.prefix(Int(max(length, 0))), as: UTF16.self))
+        let query = String(decoding: text.prefix(Int(max(length, 0))), as: UTF16.self)
+        var selection: Int32 = 0
+        if let pick = pickPalette {
+            paletteShown = Palette.pickRows(pick, query: query)
+            if query == pickSeedQuery { selection = Int32(Palette.pickSeed(pick, rows: paletteShown)) } else { pickSeedQuery = nil }
+        } else {
+            paletteShown = Palette.filter(paletteRows, query: query)
+        }
         let lines = paletteShown.map { (Array($0.title.utf16) + [0], Array($0.subtitle.utf16) + [0], Array($0.detail.utf16) + [0], $0.enabled) }
-        withPaletteRows(lines) { nt_palette_set_rows(palette, $0, Int32(lines.count), 0) }
+        withPaletteRows(lines) { nt_palette_set_rows(palette, $0, Int32(lines.count), selection) }
     }
 
     /// withPaletteRows lends the shim pointers into `lines`, valid for the call only.
@@ -2679,8 +2686,7 @@ final class NativeShell {
         guard paletteShown.indices.contains(index) else { return }
         let row = paletteShown[index]
         if pickPalette != nil {
-            guard case .pickChoice(let id) = row.target else { return }
-            resolvePickChoice(id)
+            resolvePick(row.target)
             return
         }
         guard let mode = paletteMode else { return }
@@ -2711,22 +2717,23 @@ final class NativeShell {
             focus()
         case .pick(let pick):
             run(pick)
-        case .pickChoice:
+        case .pickChoice, .pickCustom:
             break
         }
     }
 
-    fileprivate func closePalette(refocus: Bool) {
+    func closePalette(refocus: Bool) {
         guard paletteMode != nil || pickPalette != nil else { return }
-        if let pick = pickPalette, pickController.pending?.id == pick.id {
-            pickController.cancel()
-            SessionPickBook.shared.drain(pickController)
-        }
+        let cancelled = pickPalette.map { pick in pickController.pending?.id == pick.id } == true
         pickPalette = nil
         paletteMode = nil
         paletteRows = []
         paletteShown = []
         if let palette { nt_palette_close(palette) }
+        if cancelled {
+            pickController.cancel()
+            syncInteractions()
+        }
         if refocus { focus() }
     }
 

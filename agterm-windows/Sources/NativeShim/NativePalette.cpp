@@ -270,6 +270,13 @@ extern "C" void nt_palette_open(void *panel, const uint16_t *cue, int32_t left, 
     SetFocus(palette->edit);
 }
 
+extern "C" void nt_palette_set_query(void *panel, const uint16_t *text) {
+    Palette *palette = of(static_cast<HWND>(panel));
+    if (!palette) return;
+    SetWindowTextW(palette->edit, reinterpret_cast<const wchar_t *>(text));
+    SendMessageW(palette->edit, EM_SETSEL, 0, -1);
+}
+
 extern "C" void nt_palette_place(void *panel, int32_t left, int32_t top, int32_t width) {
     Palette *palette = of(static_cast<HWND>(panel));
     if (!palette) return;

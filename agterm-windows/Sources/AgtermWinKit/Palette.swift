@@ -19,8 +19,10 @@ public enum Palette {
     public enum Target: Equatable, Sendable {
         case session(UUID)
         case pick(NativeMenu.Pick)
-        /// pickChoice is one row of a session-bound replica pick.
+        /// pickChoice is one item of a pick, by its id.
         case pickChoice(String)
+        /// pickCustom is a pick's free-text row, carrying the trimmed query it answers with.
+        case pickCustom(String)
     }
 
     public struct Row: Equatable, Sendable {
@@ -135,6 +137,25 @@ public enum Palette {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return rows }
         return fuzzyRank(query: trimmed, items: rows) { paletteSearchKeys(title: $0.title, subtitle: $0.subtitle, callerSupplied: false) }
+    }
+
+    /// pickRows is what a pick lists for `query`, upstream `Palette.updateFiltered`: its items matched on their labels
+    /// only, in caller order while the query is blank, and with `allowCustom` a `Use "…"` row when nothing matches.
+    public static func pickRows(_ pick: PendingPick, query: String) -> [Row] {
+        let rows = pick.items.map { Row(title: $0.label, subtitle: $0.subtitle ?? "", target: .pickChoice($0.id)) }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matched = trimmed.isEmpty ? rows
+            : fuzzyRank(query: trimmed, items: rows) { paletteSearchKeys(title: $0.title, subtitle: $0.subtitle, callerSupplied: true) }
+        if let label = pickCustomRowLabel(query: trimmed, filteredCount: matched.count, allowCustom: pick.allowCustom) {
+            return [Row(title: label, target: .pickCustom(trimmed))]
+        }
+        return matched
+    }
+
+    /// pickSeed is the row a pick opens highlighted on: its `--select` item while the first list shows it, else the first.
+    public static func pickSeed(_ pick: PendingPick, rows: [Row]) -> Int {
+        guard let selection = pick.selection else { return 0 }
+        return rows.firstIndex { $0.target == .pickChoice(selection) } ?? 0
     }
 
     /// step moves the highlight by `delta`, stopping at either end; nil when there is nothing to highlight.

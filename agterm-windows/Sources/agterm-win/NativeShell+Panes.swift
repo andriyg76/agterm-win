@@ -177,7 +177,10 @@ extension NativeShell {
 
     /// paneFocused follows a click into the other pane of a shown split.
     private func paneFocused(_ id: Foundation.UUID, _ terminal: NativeTerminal) {
-        guard let session = local(id), session.splitTerminal != nil else { return }
+        guard let session = local(id) else { return }
+        let covered: OverlayPane? = terminal === session.splitTerminal ? .right : terminal === session.terminal ? .left : nil
+        if session.stored.askCovers(covered ?? .left), covered != nil || session.stored.askPaneIdentity == nil { paneFocusedUnderAsk(id) }
+        guard session.splitTerminal != nil else { return }
         let inSplit = terminal === session.splitTerminal
         guard inSplit || terminal === session.terminal, inSplit != session.stored.splitFocused else { return }
         session.stored.splitFocused = inSplit
