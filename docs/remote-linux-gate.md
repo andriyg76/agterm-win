@@ -132,14 +132,14 @@ $env:AGTERM_WIN_GATE_WSL = 'Ubuntu'   # or another listed distribution with agte
 | step | asserted |
 |---|---|
 | connected | `window list` reports that remote window's `remote.state` as `connected` |
-| presenter | the new server session's `presenters.presenter == true` |
+| presenter | the new server session's `presentation` is `{state: connected, mode: presenter}` |
 | program overlay | `session.overlay.open` / `text` / `close`; `tree.overlay` toggles; the session row stays |
 
 # WSL presentation UI gate (agterm-win, stage E)
 
 Stages **E1–E3** (replica ask, pick, HUD) have no CI automation yet. With `AGTERM_WIN_GATE_WSL` set and a connected
 catalog, run a server session script that posts an ask, a `pick.open` bound to that session, or a `hud` while agterm-win
-is the presenter (`tree` → `presenters.presenter == true` for that row).
+is the presenter (`tree` → that row's `presentation` is `{state: connected, mode: presenter}`).
 
 | surface | manual check |
 |---|---|

@@ -734,15 +734,29 @@ struct NativeControlTests {
         #expect(await handle(ControlRequest(cmd: .sessionText, args: ControlArgs(pane: "middle")), host).error == "invalid pane: middle (left|right|scratch)")
     }
 
-    @Test func aServerSessionsPanesAreRefused() async {
+    @Test func aServerSessionsSplitAndScratchGoToItsServerWhileFocusAndRatioStayHere() async {
         let host = FakeHost()
-        let server = ControlSessionNode(id: UUID().uuidString, name: "zsh", cwd: "~", active: false, split: false, backedByZmx: true)
-        host.serverWorkspaces = [ControlWorkspaceNode(id: UUID().uuidString, name: "dev", active: false, sessions: [server])]
-        for cmd in [agtermCore.Command.sessionSplit, .sessionScratch, .sessionFocus, .sessionSwap] {
-            #expect(await handle(ControlRequest(cmd: cmd, target: server.id), host).error == NativeControl.serverPanesRefusal)
+        let served = scratchStore()
+        served.ensureRoot()
+        let row = try! #require(served.addSession(toWorkspace: served.rootWorkspace!.id, cwd: "", select: false))
+        row.hasSplit = true
+        row.isSplit = true
+        let remote = NativeControl.remoteWindowID("Ubuntu")
+        host.remotes[remote] = served
+        host.serverWorkspaces = served.controlTree(paneForeground: { _ in nil }).workspaces
+        let target = row.id.uuidString
+        for cmd in [agtermCore.Command.sessionSplit, .sessionScratch, .sessionSwap, .sessionSplitClose] {
+            #expect(await handle(ControlRequest(cmd: cmd, target: target), host).ok)
         }
-        #expect(await handle(ControlRequest(cmd: .sessionType, target: server.id, args: ControlArgs(text: "x", pane: "right")), host).error
-            == NativeControl.serverPanesRefusal)
+        #expect(host.performed.map(\.0) == [.setSplit(row.id, shown: false, axis: nil), .setScratch(row.id, shown: true), .swap(row.id),
+                                             .closeSplit(row.id)])
+        #expect(host.performed.allSatisfy { $0.1 == remote })
+        #expect(await handle(ControlRequest(cmd: .sessionFocus, target: target, args: ControlArgs(pane: "right")), host).ok)
+        #expect(row.splitFocused && host.performed.count == 4)
+        let resized = await handle(ControlRequest(cmd: .sessionResize, target: target, args: ControlArgs(ratio: 0.3)), host)
+        #expect(resized.result?.ratio == 0.3 && row.splitRatio == 0.3)
+        _ = await handle(ControlRequest(cmd: .sessionType, target: target, args: ControlArgs(text: "x", pane: "right")), host)
+        #expect(host.typedPanes == [.split])
     }
 
     @Test func quickShowsPinnedTypesAndReadsBack() async {

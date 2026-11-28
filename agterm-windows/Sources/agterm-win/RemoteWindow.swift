@@ -34,6 +34,8 @@ final class RemoteWindow: RemoteCatalogEffects {
     var onReplicaPage: (@MainActor (UUID, PresentationPage) -> String?)?
     var onReplicaPageClose: (@MainActor (UUID, PresentationPageChange) -> Void)?
     var onReplicaPageCommand: (@MainActor (UUID, PresentationPageCommand) -> Void)?
+    /// onPaneNeedsAttach runs with a pane identity and its row when the row's pane must attach again.
+    var onPaneNeedsAttach: (UUID, UUID) -> Void = { _, _ in }
     /// onPresentationStopped runs when a session's `zmx present` stream is torn down.
     var onPresentationStopped: (UUID) -> Void = { _ in }
     // a presentation stream per server session, as a Mac's remote window keeps them
@@ -136,13 +138,22 @@ final class RemoteWindow: RemoteCatalogEffects {
             },
             hud: { [weak self] hud in self?.onReplicaHud?(id, hud) },
             notify: { [weak self] in self?.onNotification(id, $0) },
-            connection: { log("presentation for \(id): \($0)") },
+            // the tree reads the stream's state back, and leaving connected withdraws what it put on screen
+            connection: { [weak self] connection in
+                log("presentation for \(id): \(connection)")
+                self?.store.setRemoteConnection(connection, forSession: id)
+                self?.changed()
+            },
             context: { [weak self] context in
                 self?.store.applyRemoteContext(context, forSession: id)
                 self?.changed()
             },
             info: { [weak self] info in
                 self?.store.applyRemoteInfo(info, forSession: id)
+                self?.changed()
+            },
+            mode: { [weak self] mode in
+                self?.store.setRemoteMode(mode, forSession: id)
                 self?.changed()
             },
             askRequest: { [weak self] ask in
@@ -208,6 +219,7 @@ final class RemoteWindow: RemoteCatalogEffects {
     }
     func catalogPaneNeedsAttach(_ identity: UUID, session: UUID) {
         log("pane \(identity) of \(session) needs an attach")
+        onPaneNeedsAttach(identity, session)
     }
     func catalogBound(_ catalogID: UUID) -> Bool {
         log("bound to catalog \(catalogID)")

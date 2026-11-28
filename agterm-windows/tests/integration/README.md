@@ -82,6 +82,7 @@ passed and are recorded in `cases.json` under `skipped`.
 | `overlay-server-disconnected` | WSL smoke, overlay on unknown id | always |
 | `overlay-server-program` | WSL catalog program overlay | skip unless `AGTERM_WIN_GATE_WSL` |
 | `overlay-server-html` | WSL catalog `--html` | skip unless `AGTERM_WIN_GATE_WSL` |
+| `server-panes` | agterm-server split, scratch, ratio and focus, on the `docker-remote` container | skip without Docker running Linux containers |
 
 Sandbox needs the `Containers-DisposableClientVM` feature, a restart, and one manual start from Start to finish
 installing its client. Each case leaves `screen.txt`, its state directory (`agterm-win.log`, `crash.log`) and

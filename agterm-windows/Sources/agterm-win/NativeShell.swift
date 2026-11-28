@@ -212,9 +212,14 @@ final class NativeShell {
                                                     gitBash: NativeShell.gitBash())
     var selected: Foundation.UUID?
     private var pendingCreatedSession: (server: Foundation.UUID, session: Foundation.UUID)?
-    private var running: Foundation.UUID?
+    /// running is the server session the remote terminals show.
+    var running: Foundation.UUID?
     // what the remote terminal was last given, so a session that ends or comes back is shown again
     private var runningLaunch: SessionSidebar.Launch?
+    /// remoteSplitTerminal and remoteScratchTerminal are the running session's split and scratch.
+    var remoteSplitTerminal: NativeTerminal!
+    var remoteScratchTerminal: NativeTerminal!
+    var serverPanes = ServerPanes()
     private enum SidebarDestination: Equatable {
         case local(workspace: Foundation.UUID?)
         case server(Foundation.UUID, workspace: Foundation.UUID?)
@@ -317,19 +322,9 @@ final class NativeShell {
         makeSidebarFooter()
         makeNoticeBar()
         findBar = nt_find_bar_create(UnsafeMutableRawPointer(window), dpi)?.assumingMemoryBound(to: HWND__.self)
-        remoteTerminal = makeTerminal()
-        // OSC 9/777 of the server session this terminal attaches; the server sends only `notify` through its stream
-        remoteTerminal.onNotification = { [unowned self] title, body in
-            if let running { deliver(running, title: title, body: body, source: .terminal) }
-        }
-        // it attaches the session's main pane; the store forwards the clear to the server, as a Mac's bridged row does
-        remoteTerminal.onKeystroke = { [unowned self] keystroke in
-            guard let running, let store = server(of: running)?.remote.store, let session = store.session(withID: running) else { return }
-            let before = session.agentIndicator
-            store.clearStatus(by: keystroke, pane: .left, reset: .firstKey, forSession: running)
-            if session.agentIndicator != before { rebuild() }
-        }
-        remoteTerminal.onNaming = { [unowned self] in if let running { serverNaming(running, remoteTerminal) } }
+        remoteTerminal = makeServerTerminal(.left)
+        remoteSplitTerminal = makeServerTerminal(.right)
+        remoteScratchTerminal = makeServerTerminal(nil)
         PickRegistry.shared.register(shellWindowID, controller: pickController)
         NativeStructure.wireOwners(self)
         try? FileManager.default.createDirectory(atPath: ControlResolve.windowsSocketRoot, withIntermediateDirectories: true)
@@ -422,6 +417,7 @@ final class NativeShell {
         started.remote.onReplicaOverlayResize = { [weak self] id, change in
             self?.resizeServerReplicaOverlay(id, change: change)
         }
+        started.remote.onPaneNeedsAttach = { [weak self] identity, id in self?.serverPaneNeedsAttach(identity, session: id) }
         started.remote.onPresentationStopped = { [weak self] id in
             self?.clearServerReplicaOverlay(id, notifyOrigin: false)
             self?.clearServerPageOverlay(id, notifyOrigin: false)
@@ -1211,7 +1207,7 @@ final class NativeShell {
     }
 
     /// perform sends `operation` to the server holding session `id`.
-    private func perform(_ operation: RemoteOperation, on id: Foundation.UUID) async -> ControlResponse {
+    func perform(_ operation: RemoteOperation, on id: Foundation.UUID) async -> ControlResponse {
         guard let server = server(of: id) else { return ControlResponse(ok: false, error: "no session \(id.uuidString) on a server") }
         let response = await server.remote.perform(operation)
         log("native shell: \(operation) on \(server.label): \(response.ok ? "ok" : response.error ?? "failed")")
@@ -1425,7 +1421,7 @@ final class NativeShell {
         case .closeSplit: if let selected { closeSplit(selected) }
         case .swapPanes: if let selected { swapPanes(selected) }
         case .focusLeftPane, .focusRightPane: focusPaneKey(split: command == .focusRightPane)
-        case .toggleScratch: if let selected, canSplit(selected) { setScratch(selected, shown: !(local(selected)?.scratchShown ?? false), command: nil) }
+        case .toggleScratch: if let selected, canSplit(selected) { setScratch(selected, shown: !viewState.scratchShown, command: nil) }
         case .toggleOverlay:
             if let selected, let hidden = selectedOverlayHidden { setOverlayHidden(selected, !hidden) }
         case .quickTerminal: toggleQuick()
@@ -1579,7 +1575,7 @@ final class NativeShell {
             ShowWindow(hud.panel, shown ? SW_SHOW : SW_HIDE)
         }
         if let running, let overlay = serverOverlays[running], selected == running, !overlay.state.hidden { remoteEnabled = false }
-        EnableWindow(remoteTerminal.window, remoteEnabled)
+        for terminal in [remoteTerminal, remoteSplitTerminal, remoteScratchTerminal] { EnableWindow(terminal!.window, remoteEnabled) }
         // an ask draws above the overlays, and the find bar and the palette stay above both
         syncAskPanels()
         for panel in [findBar, palette?.assumingMemoryBound(to: HWND__.self)] where panel.map({ IsWindowVisible($0) }) == true {
@@ -1593,6 +1589,9 @@ final class NativeShell {
         guard let focused = GetFocus() else { return false }
         if let overlay = serverOverlays[id] {
             if [overlay.terminal.window, overlay.frame.window].contains(focused) { return true }
+        }
+        if id == running, local(id) == nil {
+            return [remoteTerminal, remoteSplitTerminal, remoteScratchTerminal].contains { $0.window == focused }
         }
         guard let session = locals.first(where: { $0.id == id }) else { return false }
         return (session.terminals.map(\.window) + [session.overlay?.terminal.window, session.overlay?.frame.window]).contains(focused)
@@ -2081,7 +2080,7 @@ final class NativeShell {
 
     func scaled(_ value: Int32) -> Int32 { MulDiv(value, Int32(dpi), 96) }
 
-    var terminalsShown: [NativeTerminal] { [remoteTerminal] + locals.flatMap(\.terminals) }
+    var terminalsShown: [NativeTerminal] { [remoteTerminal, remoteSplitTerminal, remoteScratchTerminal] + locals.flatMap(\.terminals) }
 
     /// allTerminals adds the overlays', server overlays', and the quick terminal's, which draw and size as the sessions' do.
     private var allTerminals: [NativeTerminal] {
@@ -2089,7 +2088,7 @@ final class NativeShell {
     }
 
     /// selectedTerminal is the selected session's pane in view, under any overlay.
-    private var selectedTerminal: NativeTerminal { locals.first { $0.id == selected }?.onScreen ?? remoteTerminal }
+    private var selectedTerminal: NativeTerminal { locals.first { $0.id == selected }?.onScreen ?? serverOnScreen }
 
     /// visibleTerminal is what the keyboard and the terminal commands reach: a shown overlay, else the session.
     var visibleTerminal: NativeTerminal {
@@ -2195,6 +2194,7 @@ final class NativeShell {
         }
         rebuild()
         layout()
+        syncServerPanes()
         let workspaces = servers.flatMap { $0.remote.store.workspaces }
         if selectCreatedSession() { return }
         guard !locals.contains(where: { $0.id == selected }) else { return }
@@ -2346,15 +2346,20 @@ final class NativeShell {
         placeSessions()
         let owner = locals.contains(where: { $0.id == id }) ? nil : server(of: id)
         for other in servers where other !== owner { other.remote.store.selectedSessionID = nil }
-        guard let owner, let session = owner.remote.session(id) else { return }
-        let launch = SessionSidebar.launch(for: session, hostLabel: owner.label)
-        guard id != running || launch != runningLaunch else { return }
-        running = id
-        runningLaunch = launch
+        guard let owner, owner.remote.session(id) != nil else { return }
         owner.remote.store.selectedSessionID = id
+        running = id
+        syncServerPanes()
+    }
+
+    /// attachServerPrimary starts what the in-view server row's main pane attaches, when that changed since it last did.
+    func attachServerPrimary(_ session: Session, hostLabel: String, again: Bool = false) {
+        let launch = SessionSidebar.launch(for: session, hostLabel: hostLabel)
+        guard again || launch != runningLaunch else { return }
+        runningLaunch = launch
         switch launch {
         case .command(let command):
-            log("native shell: showing \(session.displayName) [\(id)]")
+            log("native shell: showing \(session.displayName) [\(session.id)]")
             remoteTerminal.start(command)
         case .notice(let text):
             remoteTerminal.show(notice: text)
@@ -2363,10 +2368,10 @@ final class NativeShell {
 
     /// serverNaming records the title a server session's program reported on its replica; the server does not render
     /// the pane, so only the viewer sees it. A ConPTY executable-path title reads as none.
-    private func serverNaming(_ id: Foundation.UUID, _ terminal: NativeTerminal) {
+    func serverNaming(_ id: Foundation.UUID, _ terminal: NativeTerminal, pane: CommandContext.Pane) {
         guard let session = server(of: id)?.remote.store.session(withID: id) else { return }
         let before = session.displayName
-        session.recordReportedTitle(SessionNaming.programTitle(terminal.title) ?? "", pane: .left)
+        session.recordReportedTitle(SessionNaming.programTitle(terminal.title) ?? "", pane: pane)
         if session.displayName != before { rebuild() }
     }
 
@@ -2755,7 +2760,7 @@ final class NativeShell {
     }
 
     /// titleChanged shows the selected session's name and agent context in the title bar and on the taskbar.
-    private func titleChanged() {
+    func titleChanged() {
         let context = selected.flatMap { id in locals.first { $0.id == id }.map(\.context) ?? serverSession(id)?.effectiveContext }
         let title = TitleBar.caption(name: selected.flatMap(name(of:)), context: context)
         guard let window, title != shownTitle else { return }
@@ -3463,11 +3468,12 @@ extension NativeShell: NativeControlHost {
 
     func selectSession(_ id: Foundation.UUID) { select(id) }
 
-    /// terminal is the terminal showing `id`: its own for a local session, the shared one while it shows a server one.
+    /// terminal is the terminal showing `id`'s pane: a local session's own, or the running ones for the server session they show.
     private func terminal(of id: Foundation.UUID, pane: NativePane?) -> NativeTerminal? {
         if let session = locals.first(where: { $0.id == id }) { return pane.map { session.pane($0) } ?? session.onScreen }
-        guard pane == nil || pane == .primary else { return nil }
-        return running == id ? remoteTerminal : nil
+        guard running == id else { return nil }
+        if let pane { return serverPane(pane) }
+        return serverOnScreen
     }
 
     func type(_ text: String, into id: Foundation.UUID, pane: NativePane?) -> Bool { terminal(of: id, pane: pane)?.type(text) ?? false }
