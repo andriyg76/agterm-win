@@ -202,13 +202,14 @@ extension RemoteCommands {
     }
 
     /// useConfigured points `current` at the config directory a CLI shares with its app: Settings' choice, else
-    /// `<AGTERM_STATE_DIR>/config`, else `~/.config/agterm`; agterm-win keeps it in its state directory.
+    /// `<AGTERM_STATE_DIR>/config`, else `~/.config/agterm`. agterm-win has no such setting and exports its state
+    /// directory to its sessions, so only a non-default one isolates the config there.
     public static func useConfigured(environment: [String: String] = ProcessInfo.processInfo.environment) {
         let stateDir = environment["AGTERM_STATE_DIR"].flatMap { $0.isEmpty ? nil : $0 }
         let home = FileManager.default.homeDirectoryForCurrentUser
         #if os(Windows)
-        let state = stateDir ?? ControlResolve.defaultStateDirectory(environment: environment)
-        use(configDirectory: ConfigPaths.configDirectory(setting: nil, stateDir: state, home: home))
+        let isolated = ControlResolve.isCustomStateDirectory(environment: environment) ? stateDir : nil
+        use(configDirectory: ConfigPaths.configDirectory(setting: nil, stateDir: isolated, home: home))
         #else
         let settings = SettingsStore(directory: stateDir.map { URL(fileURLWithPath: $0) } ?? PersistenceStore.defaultDirectory).load()
         use(configDirectory: ConfigPaths.configDirectory(setting: settings.configDirectory, stateDir: stateDir, home: home))

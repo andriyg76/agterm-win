@@ -3,6 +3,18 @@ import Testing
 @testable import agtermCore
 
 struct ZmxSupportTests {
+    @Test func opaqueIDsAreBase58OfSHA256() {
+        func hex(_ bytes: [UInt8]) -> String { bytes.map { String(format: "%02x", $0) }.joined() }
+        #expect(hex(ZmxSupport.sha256([])) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        #expect(hex(ZmxSupport.sha256(Array("abc".utf8))) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        #expect(hex(ZmxSupport.sha256(Array(repeating: UInt8(ascii: "a"), count: 1000))) ==
+                "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3")
+        #expect(ZmxSupport.base58(Array("Hello World!".utf8)) == "2NEpo7TZRRrLZSi2U")
+        #expect(ZmxSupport.base58([0, 0, 1]) == "112")
+        let id = ZmxSupport.opaqueID("pane", length: 16)
+        #expect(id.utf8.count == 16 && ZmxSupport.isLocalID(id) && id == ZmxSupport.opaqueID("pane", length: 16))
+    }
+
     @Test func helperWrapsStructuredReplayWithoutChangingTheScript() {
         let name = "agterm-pane"
         let configuration = ZmxSupport.Configuration(executablePath: "/bundle's files/zmx", environment: [

@@ -5,21 +5,26 @@ Where agterm-win keeps its files, the common problems, and what to include in a 
 
 ## Where things live
 
-agterm-win keeps everything in its state folder, `%LOCALAPPDATA%\agterm-win`.
-The Microsoft Store package writes to a redirected copy instead:
-`%LOCALAPPDATA%\Packages\AndriyGushuley.agterm_<id>\LocalCache\Local\agterm-win`.
-`AGTERM_WIN_STATE_DIR` moves the state folder, for example to run an isolated second instance.
+Every install type, the Microsoft Store app included, uses the same two folders:
 
-- **Log**: `agterm-win.log`. A notice bar with an error offers **Open Log**.
-- **Crash log**: `crash.log`.
-- **Settings**: `native.json`.
-- **Keymap**: `config\keymap.conf`. **File ▸ Settings ▸ Edit Keymap…** opens it.
-- **Launch profiles**: `config\profiles.properties`. **File ▸ Settings ▸ Edit Launch Profiles…** opens it, and Reload Keymap applies it.
-- **WSL and remote hosts**: `config\remote.properties`.
-- **Themes**: `config\themes`.
+- **State**, `%USERPROFILE%\.local\state\agterm-win`: the log (`agterm-win.log`; a notice bar with an error offers
+  **Open Log**), `crash.log`, settings (`native.json`), the control socket `agterm-<hash>.sock`, where the hash comes
+  from the state folder's path, and Live sessions' zmx sockets and logs in `z\<id>`.
+- **Config**, `%USERPROFILE%\.config\agterm`, upstream agterm's config folder:
+  - **Keymap**: `keymap.conf`. **File ▸ Settings ▸ Edit Keymap…** opens it.
+  - **Launch profiles**: `profiles.properties`. **File ▸ Settings ▸ Edit Launch Profiles…** opens it, and Reload Keymap applies it.
+  - **WSL and remote hosts**: `remote.properties`.
+  - **Themes**: `themes`.
+  - **Agent status scripts**: `agent-status`.
 
-Sockets live outside AppData, in `%USERPROFILE%\.local\state\agterm-win`, so the Store app and an `agtermctl` from any install meet on the same path.
-The control socket there is `agterm-<hash>.sock`, where the hash comes from the state folder's path.
+`AGTERM_WIN_STATE_DIR` moves the state folder, for example to run an isolated second instance, and that instance keeps
+its config in the state folder's `config`.
+
+agterm-win 0.44.1.11 and earlier kept everything in `%LOCALAPPDATA%\agterm-win` (the Store app in
+`%LOCALAPPDATA%\Packages\AndriyGushuley.agterm_<id>\LocalCache\Local\agterm-win`). The first start of a later version
+moves state there into the new state folder while that holds no `native.json` or `windows` folder, and config while the
+config folder holds none of the old files; otherwise it leaves the old folder alone. Live sessions an older version
+started end at that start, and their `zmx` folder is removed.
 
 ## agtermctl cannot connect
 

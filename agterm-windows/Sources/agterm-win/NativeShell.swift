@@ -272,6 +272,7 @@ final class NativeShell {
                                       paneFinalizer: { identities in MainActor.assumeIsolated { _ = client.kill(paneIdentities: identities) } })
         localStore = loaded.store
         client.reap(knownPaneIdentities: loaded.paneIdentities, decision: zmx.decision)
+        client.endLegacyDaemons(in: ZmxSupport.legacyWindowsSocketDirectory(forStateDirectory: legacyStateDirectory.path))
         if !settings.localSessions.isEmpty || settings.selectedLocal != nil {
             settings.localSessions = []
             settings.selectedLocal = nil

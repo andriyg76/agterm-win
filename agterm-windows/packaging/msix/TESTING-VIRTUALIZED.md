@@ -38,7 +38,7 @@ Start **agterm** from the Start menu, or `start-agterm-msix.bat` from the layout
 
 ## What to check
 
-1. Where agterm state lives: redirected `%LOCALAPPDATA%` under `Packages\<family>\…`, not `%LOCALAPPDATA%\agterm-win`.
+1. Where agterm state lives: `%USERPROFILE%\.local\state\agterm-win` and config in `%USERPROFILE%\.config\agterm`, outside the package's redirected `%LOCALAPPDATA%`, the same as an unpackaged install.
 2. WSL: list distributions, start server, catalog sessions, reconnect after app restart.
 3. Local PowerShell/cmd session; user tools in the terminal still use the user's normal profile paths.
 4. `agtermctl tree` from the MSIX execution alias (same package context as agterm).
