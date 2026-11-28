@@ -109,7 +109,7 @@ public enum BoundedFile {
         guard fd >= 0 else { return .failure(.unreadable) }
         defer { close(fd) }
         var info = stat()
-        guard fstat(fd, &info) == 0, Int32(info.st_mode) & S_IFMT == S_IFREG, !isPlaceholder(info) else {
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, !isPlaceholder(info) else {
             return .failure(.unreadable)
         }
         if let maxBytes, info.st_size > maxBytes { return .failure(.tooLarge) }
