@@ -8,7 +8,7 @@ public enum NativeMenu {
              editKeymap, reloadKeymap, settings, sessionPalette, commandPalette, toggleSplit, toggleHorizontalSplit, closeSplit, swapPanes,
              focusLeftPane, focusRightPane, toggleScratch, quickTerminal, dashboard, toggleOverlay, newWorkspace, renameWorkspace,
              deleteWorkspace, toggleFlag, toggleFlaggedView, focusWorkspace, toggleWorkspaceFilter, previousWorkspace, nextWorkspace,
-             newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar, editProfiles
+             newCompanion, convertCompanion, attentionPalette, selectTheme, about, toggleSidebar, editProfiles, copyName
 
         public var title: String {
             switch self {
@@ -59,6 +59,7 @@ public enum NativeMenu {
             case .nextWorkspace: "Next Workspace"
             case .newCompanion: "New Companion"
             case .convertCompanion: "Convert to Companion"
+            case .copyName: "Copy Name"
             }
         }
 
@@ -235,7 +236,7 @@ public enum NativeMenu {
             menu.append(Entry(title: "New Session Elsewhere", shortcut: "", pick: nil, enabled: true, children: elsewhere))
         }
         if let canRename {
-            menu += [.separator, .command(.renameSession, enabled: canRename, shortcuts),
+            menu += [.separator, .command(.renameSession, enabled: canRename, shortcuts), .command(.copyName, shortcuts),
                      .command(.restartSession, enabled: canRestart, shortcuts), .command(.closeSession, enabled: canClose, shortcuts)]
         }
         return menu
@@ -373,7 +374,8 @@ public enum NativeMenu {
         if let named = structure.workspace {
             var focus = Entry.command(.focusWorkspace, enabled: named, shortcuts)
             focus.checked = structure.focused
-            menu += [.command(.renameWorkspace, enabled: named, shortcuts), .command(.deleteWorkspace, enabled: named, shortcuts), focus]
+            menu += [.command(.renameWorkspace, enabled: named, shortcuts), .command(.copyName, enabled: named, shortcuts),
+                     .command(.deleteWorkspace, enabled: named, shortcuts), focus]
         }
         if let flagged = structure.flagged {
             var flag = Entry.command(.toggleFlag, shortcuts)
