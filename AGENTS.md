@@ -18,3 +18,14 @@ macOS (upstream) and Linux ([agterm-linux](https://github.com/melonamin/agterm-l
 - Local and server sessions go through the same adapter. A change that wires only one of the two paths is incomplete.
 - An adapter upstream does not ship yet is a fork delta: keep it under `agtermCore/Sources/agtermCore/HostAdapters/`, one concern per file, so an upstream PR can move it together with the macOS adoption.
 - Name the adapter used, or the one added, in the PR's `Summary`.
+
+# Manual Windows gate
+
+Hosted CI skips the WSL and Docker cases; `windows-gate.yml` runs them by hand on a self-hosted box (`docs/windows-gate-runner.md`).
+
+- A PR touching WSL, the agterm-server install or start (`WSLServerEnsure`, `RemoteHost`, `NativeShell`'s server path),
+  `remote.properties` remotes, Docker remotes, server overlays or presentation, or `tests/integration/{wsl,docker-remote,overlay}*`
+  gets a comment asking for a windows-gate run: the build to test (that PR's `windows.yml` run id), the `cases` wildcards, and
+  whether `server-gate` is needed. An issue fixed by such a change gets the same request before it is closed.
+- Ask once per PR, and again only after a later push changes those paths. Name the gate run's result in the PR when it is in.
+- The gate result does not replace hosted CI; a red `windows.yml` is fixed first, since its portable build is what the gate tests.
