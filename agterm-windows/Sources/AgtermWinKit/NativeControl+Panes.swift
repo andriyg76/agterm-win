@@ -13,8 +13,15 @@ extension NativeControl {
         case .success(let resolved): id = resolved
         }
         let store: AppStore
-        if case .remote(_, let remote) = owner(ofSession: id, host: host) {
-            if RemoteOperation.structuralCommands.contains(request.cmd) { return await structure(request, host: host) }
+        if case .remote(let window, let remote) = owner(ofSession: id, host: host) {
+            if RemoteOperation.structuralCommands.contains(request.cmd) {
+                var request = request
+                request.target = id.uuidString
+                switch RemoteOperation.parse(request, in: remote) {
+                case .refused(let response): return response
+                case .operation(let operation, let select): return await host.performRemote(operation, window: window, select: select)
+                }
+            }
             store = remote
         } else {
             store = host.localStore
