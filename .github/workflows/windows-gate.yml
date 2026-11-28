@@ -1,43 +1,42 @@
 name: windows-gate
 
-# The WSL and Docker cases on a self-hosted Windows box (docs/windows-gate-runner.md): GitHub's Windows VMs have no
-# nested virtualization, so neither WSL2 nor Linux containers run there, and windows.yml skips these cases.
+# The WSL and Docker integration cases windows.yml skips, run by hand on a self-hosted Windows box
+# (docs/windows-gate-runner.md) against a build that already exists: GitHub's Windows VMs have no nested
+# virtualization, so neither WSL2 nor Linux containers run there.
 on:
-  push:
-    branches: [windows-port]
-  pull_request:
-    branches: [windows-port]
-    paths: ["agterm-windows/**", "agtermCore/**", ".github/workflows/windows-gate.yml"]
   workflow_dispatch:
+    inputs:
+      build:
+        description: "A release tag (v0.44.1.11) or a windows.yml run id or URL; its x64 portable build is tested"
+        required: true
+      cases:
+        description: "run.ps1 -Case wildcards, comma-separated"
+        default: "*"
+      server-gate:
+        description: "Also run wsl-server-gate.ps1"
+        type: boolean
+        default: true
 
 concurrency:
-  group: windows-gate-${{ github.ref }}
-  cancel-in-progress: true
+  group: windows-gate
 
-env:
-  SWIFT_VERSION: swift-6.4.3-release
-  SWIFT_BUILD: 6.4.3-RELEASE
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   gate:
-    # the box runs whatever the checked-out tree holds, so a fork's PR never reaches it; without the variable no box is
-    # registered and the job skips instead of queueing forever
-    if: >-
-      vars.AGTERM_WIN_GATE_RUNNER == 'true' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, windows, x64, agterm-gate]
-    timeout-minutes: 90
+    timeout-minutes: 60
     defaults:
       run:
         shell: pwsh
-        working-directory: agterm-windows
     env:
+      GH_TOKEN: ${{ github.token }}
       AGTERM_WIN_GATE_WSL: "1"
-      AGTERM_WEBVIEW2_ARCH: x64
       GATE_DISTRIBUTION: Ubuntu
     steps:
       - name: Box preconditions
-        working-directory: .
         run: |
           $failures = @()
           $session = (Get-Process -Id $PID).SessionId
@@ -46,31 +45,61 @@ jobs:
           if ($list -notmatch "(?m)^\s*$env:GATE_DISTRIBUTION\s*$") { $failures += "no WSL distribution $env:GATE_DISTRIBUTION" }
           $os = (& docker.exe version --format '{{.Server.Os}}' 2>&1 | Out-String).Trim()
           if ($os -ne "linux") { $failures += "docker answers '$os', not linux containers" }
+          if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { $failures += "no gh on PATH" }
           if ($failures) { $failures | % { Write-Host "::error::$_" }; exit 1 }
           Write-Host "session $session, $env:GATE_DISTRIBUTION present, docker runs $os containers"
-      - uses: actions/checkout@v7
-      - uses: compnerd/gha-setup-swift@v0.5.1
-        with:
-          swift-version: ${{ env.SWIFT_VERSION }}
-          swift-build: ${{ env.SWIFT_BUILD }}
-          build_arch: amd64
-      - run: ./scripts/fetch-server.ps1; ./scripts/fetch-ghostty-vt.ps1 -Arch x64; ./scripts/fetch-webview2.ps1 -Arch x64; ./scripts/fetch-zmx.ps1 -Arch x64
-      - run: swift build --build-tests
-      - run: swift build --product agtermctl
-      - run: swift test --skip-build
-      - run: ./scripts/stage.ps1 -Output "$env:RUNNER_TEMP\agterm-win"
-      - name: Integration
+      - id: build
+        name: Resolve the build
+        env:
+          BUILD: ${{ inputs.build }}
         run: |
-          ./tests/integration/run.ps1 -App "$env:RUNNER_TEMP\agterm-win" -Results "$env:RUNNER_TEMP\results"
+          $ErrorActionPreference = "Stop"
+          $app = Join-Path $env:RUNNER_TEMP "agterm-win"
+          $download = Join-Path $env:RUNNER_TEMP "download"
+          Remove-Item -Recurse -Force $app, $download -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory $download | Out-Null
+          $build = $env:BUILD.Trim()
+          if ($build -match '^(\d+)$' -or $build -match 'actions/runs/(\d+)') {
+            $run = $Matches[1]
+            $info = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$run" | ConvertFrom-Json
+            if ($info.path -ne ".github/workflows/windows.yml") { throw "run $run is $($info.path), not windows.yml" }
+            $sha = $info.head_sha
+            gh run download $run -R $env:GITHUB_REPOSITORY -n ci-portable-x64 -D $download
+            $label = "windows.yml run $run ($($info.head_branch) $($sha.Substring(0, 7)))"
+          } else {
+            $sha = (gh api "repos/$env:GITHUB_REPOSITORY/commits/$build" | ConvertFrom-Json).sha
+            gh release download $build -R $env:GITHUB_REPOSITORY -p "*-x64-portable.zip" -D $download
+            $label = "release $build ($($sha.Substring(0, 7)))"
+          }
+          if ($LASTEXITCODE) { throw "download of $build failed" }
+          $zip = @(Get-ChildItem $download -Recurse -Filter "*-x64-portable.zip")
+          if ($zip.Count -ne 1) { throw "expected one x64 portable zip, found $($zip.Count)" }
+          Expand-Archive $zip[0].FullName $app
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+          "app=$app" >> $env:GITHUB_OUTPUT
+          "## $label" >> $env:GITHUB_STEP_SUMMARY
+          Write-Host "testing $label from $($zip[0].Name)"
+      # the cases the build was made with, not today's branch
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.build.outputs.sha }}
+      - name: Integration
+        working-directory: agterm-windows
+        env:
+          CASES: ${{ inputs.cases }}
+        run: |
+          $patterns = @($env:CASES -split ',' | % { $_.Trim() } | ? { $_ })
+          ./tests/integration/run.ps1 -App "${{ steps.build.outputs.app }}" -Results "$env:RUNNER_TEMP\results" -Case $patterns
           $code = $LASTEXITCODE
-          # run.ps1 counts a skip as a pass; on this box nothing may skip, since the box exists for those cases
+          # run.ps1 counts a skip as a pass; this box exists for the cases hosted CI skips
           $skipped = @(Get-Content "$env:RUNNER_TEMP\results\cases.json" -Raw | ConvertFrom-Json | ? { $_.skipped })
           foreach ($case in $skipped) { Write-Host "::error::$($case.name) skipped: $($case.skipped)" }
           if ($skipped) { exit 1 }
           exit $code
       - name: WSL server gate
-        if: success() || failure()
-        run: ./tests/integration/wsl-server-gate.ps1 -App "$env:RUNNER_TEMP\agterm-win" -Results "$env:RUNNER_TEMP\wsl-gate" -Distribution $env:GATE_DISTRIBUTION
+        if: inputs.server-gate && (success() || failure())
+        working-directory: agterm-windows
+        run: ./tests/integration/wsl-server-gate.ps1 -App "${{ steps.build.outputs.app }}" -Results "$env:RUNNER_TEMP\wsl-gate" -Distribution $env:GATE_DISTRIBUTION
       - if: always()
         uses: actions/upload-artifact@v7
         with:
