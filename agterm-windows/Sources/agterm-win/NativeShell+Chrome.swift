@@ -37,10 +37,13 @@ extension NativeShell {
 
     var sidebarVisible: Bool { settings.sidebarVisible }
 
+    /// setSidebarVisible shows or hides the tree; a hidden tree keeps no keyboard focus, which goes to the terminal.
     func setSidebarVisible(_ visible: Bool) {
+        let focused = !visible && tree.map { GetFocus() == HWND(bitPattern: UInt(bitPattern: $0)) } == true
         settings.sidebarVisible = visible
         saveSettings()
         layout()
+        if focused { focus() }
     }
 
     func setSidebarWidth(points: Double) {

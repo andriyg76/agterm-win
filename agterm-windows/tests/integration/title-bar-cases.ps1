@@ -331,6 +331,18 @@ $shellCases["title-bar"] = {
     }
     if ((Invoke-Ctl $state @("tree")).result.tree.sidebarWidth -ne $sidebarPts) { $failures += "hiding the sidebar changed its saved width" }
 
+    Note "hiding the focused sidebar gives the terminal the keys"
+    $tree = [AgtermWin32]::VisibleChildren($window, "SysTreeView32") | Select-Object -First 1
+    [AgtermInput]::FocusOn($tree)
+    if (-not (Wait-Until { [AgtermInput]::FocusOf($window) -eq $tree } 5)) { $failures += "the sidebar tree never took focus" }
+    else {
+        Invoke-Ctl $state @("sidebar", "hide") | Out-Null
+        if (-not (Wait-Until { $f = [AgtermInput]::FocusOf($window); $f -ne [IntPtr]::Zero -and $f -ne $tree } 5)) {
+            $failures += "the hidden sidebar kept the keyboard focus"
+        }
+        Invoke-Ctl $state @("sidebar", "show") | Out-Null
+    }
+
     Note "footer hover changes its background and clears on leave"
     $buttonRect = New-Object AgtermWin32+Rect
     [AgtermWin32]::GetWindowRect($footer, [ref]$buttonRect) | Out-Null
