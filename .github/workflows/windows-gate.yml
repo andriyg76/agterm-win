@@ -1,0 +1,82 @@
+name: windows-gate
+
+# The WSL and Docker cases on a self-hosted Windows box (docs/windows-gate-runner.md): GitHub's Windows VMs have no
+# nested virtualization, so neither WSL2 nor Linux containers run there, and windows.yml skips these cases.
+on:
+  push:
+    branches: [windows-port]
+  pull_request:
+    branches: [windows-port]
+    paths: ["agterm-windows/**", "agtermCore/**", ".github/workflows/windows-gate.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SWIFT_VERSION: swift-6.4.3-release
+  SWIFT_BUILD: 6.4.3-RELEASE
+
+jobs:
+  gate:
+    # the box runs whatever the checked-out tree holds, so a fork's PR never reaches it; without the variable no box is
+    # registered and the job skips instead of queueing forever
+    if: >-
+      vars.AGTERM_WIN_GATE_RUNNER == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, windows, x64, agterm-gate]
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: agterm-windows
+    env:
+      AGTERM_WIN_GATE_WSL: "1"
+      AGTERM_WEBVIEW2_ARCH: x64
+      GATE_DISTRIBUTION: Ubuntu
+    steps:
+      - name: Box preconditions
+        working-directory: .
+        run: |
+          $failures = @()
+          $session = (Get-Process -Id $PID).SessionId
+          if ($session -eq 0) { $failures += "the runner is in session 0 (a service); the cases need the interactive desktop" }
+          $list = (& wsl.exe -l -q 2>&1 | Out-String) -replace "`0", ""
+          if ($list -notmatch "(?m)^\s*$env:GATE_DISTRIBUTION\s*$") { $failures += "no WSL distribution $env:GATE_DISTRIBUTION" }
+          $os = (& docker.exe version --format '{{.Server.Os}}' 2>&1 | Out-String).Trim()
+          if ($os -ne "linux") { $failures += "docker answers '$os', not linux containers" }
+          if ($failures) { $failures | % { Write-Host "::error::$_" }; exit 1 }
+          Write-Host "session $session, $env:GATE_DISTRIBUTION present, docker runs $os containers"
+      - uses: actions/checkout@v7
+      - uses: compnerd/gha-setup-swift@v0.5.1
+        with:
+          swift-version: ${{ env.SWIFT_VERSION }}
+          swift-build: ${{ env.SWIFT_BUILD }}
+          build_arch: amd64
+      - run: ./scripts/fetch-server.ps1; ./scripts/fetch-ghostty-vt.ps1 -Arch x64; ./scripts/fetch-webview2.ps1 -Arch x64; ./scripts/fetch-zmx.ps1 -Arch x64
+      - run: swift build --build-tests
+      - run: swift build --product agtermctl
+      - run: swift test --skip-build
+      - run: ./scripts/stage.ps1 -Output "$env:RUNNER_TEMP\agterm-win"
+      - name: Integration
+        run: |
+          ./tests/integration/run.ps1 -App "$env:RUNNER_TEMP\agterm-win" -Results "$env:RUNNER_TEMP\results"
+          $code = $LASTEXITCODE
+          # run.ps1 counts a skip as a pass; on this box nothing may skip, since the box exists for those cases
+          $skipped = @(Get-Content "$env:RUNNER_TEMP\results\cases.json" -Raw | ConvertFrom-Json | ? { $_.skipped })
+          foreach ($case in $skipped) { Write-Host "::error::$($case.name) skipped: $($case.skipped)" }
+          if ($skipped) { exit 1 }
+          exit $code
+      - name: WSL server gate
+        if: success() || failure()
+        run: ./tests/integration/wsl-server-gate.ps1 -App "$env:RUNNER_TEMP\agterm-win" -Results "$env:RUNNER_TEMP\wsl-gate" -Distribution $env:GATE_DISTRIBUTION
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-results
+          path: |
+            ${{ runner.temp }}/results
+            ${{ runner.temp }}/wsl-gate
+            !${{ runner.temp }}/**/*.sock
+          if-no-files-found: ignore
