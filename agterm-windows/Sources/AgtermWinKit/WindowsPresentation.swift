@@ -2,6 +2,7 @@ import agtermCore
 
 /// WindowsPresentation is what agterm-win's hello lists to an agterm-server: the kinds it handles. The origin refuses
 /// or keeps the rest. Every kind core supports is in `handled` or `unhandled`, so a new upstream kind needs a decision.
+@MainActor
 public enum WindowsPresentation {
     public static let handled: Set<String> = Set(PresentationHub.pageKinds + PresentationHub.pickKinds + [
         "status", "hud", "notify", "context", "info",

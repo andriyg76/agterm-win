@@ -2,6 +2,7 @@ import AgtermWinKit
 import Testing
 import agtermCore
 
+@MainActor
 struct WindowsPresentationTests {
     @Test func everyCoreKindIsDecidedOnce() {
         #expect(WindowsPresentation.handled.union(WindowsPresentation.unhandled) == Set(PresentationHub.supportedKinds))
