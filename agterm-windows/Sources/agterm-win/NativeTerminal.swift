@@ -455,7 +455,13 @@ final class NativeTerminal {
         var text = [UInt16](repeating: 0, count: Int(length) + 1)
         nt_selection_text(terminal, &text, length)
         nt_select_clear(terminal)
-        guard length > 0, OpenClipboard(window) else { return }
+        guard length > 0 else { return }
+        Self.writeClipboard(text, owner: window)
+    }
+
+    /// writeClipboard puts NUL-terminated UTF-16 `text` on the clipboard as its only content.
+    static func writeClipboard(_ text: [UInt16], owner: HWND?) {
+        guard OpenClipboard(owner) else { return }
         defer { CloseClipboard() }
         EmptyClipboard()
         guard let memory = GlobalAlloc(UINT(GMEM_MOVEABLE), SIZE_T(text.count * 2)), let pointer = GlobalLock(memory) else { return }

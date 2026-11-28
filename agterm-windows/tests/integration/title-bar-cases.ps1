@@ -101,6 +101,17 @@ public static class AgtermWin32 {
         for (int i = 0; i < count; i++) ids.Add(GetMenuItemID(menu, i));
         return ids.ToArray();
     }
+
+    // MenuPosition is the position of the item titled `title`, counting separators as MenuItemBounds does; -1 if none.
+    public static int MenuPosition(IntPtr menuWindow, string title) {
+        IntPtr menu = SendMessageW(menuWindow, 0x01E1, IntPtr.Zero, IntPtr.Zero);
+        int count = GetMenuItemCount(menu);
+        for (uint i = 0; i < count; i++) {
+            var text = new StringBuilder(256);
+            if (GetMenuStringW(menu, i, text, text.Capacity, 0x400) > 0 && text.ToString().Split('\t')[0] == title) return (int)i;
+        }
+        return -1;
+    }
 }
 '@
 

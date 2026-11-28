@@ -2608,6 +2608,11 @@ final class NativeShell {
             structure(.sessionMove, target: session, args)
         case .command(let command)? where command.isStructure: runStructure(command, session: session, destination: destination)
         case .command(.renameSession)?: startRename(session)
+        case .command(.copyName)?:
+            // a row gone since the right-click, or a blank name, leaves the clipboard as it was, as on a Mac
+            if let id = session ?? structureWorkspace(destination), let name = name(of: id), !name.isEmpty {
+                NativeTerminal.writeClipboard(Array(name.utf16) + [0], owner: window)
+            }
         case .command(.restartSession)?: restartFromUI(session)
         case .command(.closeSession)?: closeFromUI(session)
         case .serverSession(let index)? where names.indices.contains(index):

@@ -81,7 +81,20 @@ struct NativeMenuTests {
                                                                                       .toggleHorizontalSplit, .closeSplit, .swapPanes, .toggleScratch,
                                                                                       .newWorkspace, .renameWorkspace, .deleteWorkspace, .toggleFlag, .toggleFlaggedView,
                                                                                       .focusWorkspace, .toggleWorkspaceFilter, .previousWorkspace, .nextWorkspace,
-                                                                                      .newCompanion, .convertCompanion, .selectTheme, .about, .toggleSidebar, .editProfiles])
+                                                                                      .newCompanion, .convertCompanion, .selectTheme, .about, .toggleSidebar, .editProfiles,
+                                                                                      .copyName])
+    }
+
+    @Test func copyNameFollowsRenameOnSessionAndWorkspaceRows() {
+        let session = NativeMenu.sidebar(profiles: profiles, defaultProfile: 0, servers: [], destination: nil,
+                                         canLaunch: true, canRename: true, canRestart: true, canClose: true).compactMap(\.pick)
+        let rename = try! #require(session.firstIndex(of: .command(.renameSession)))
+        #expect(session[rename + 1] == .command(.copyName))
+        let named = NativeMenu.structure(NativeMenu.Structure(workspace: true))
+        let index = try! #require(named.firstIndex { $0.pick == .command(.renameWorkspace) })
+        #expect(named[index + 1].pick == .command(.copyName) && named[index + 1].enabled)
+        #expect(NativeMenu.structure(NativeMenu.Structure(workspace: false)).first { $0.pick == .command(.copyName) }?.enabled == false)
+        #expect(!NativeMenu.structure(NativeMenu.Structure(flagged: false)).contains { $0.pick == .command(.copyName) })
     }
 
     @Test func viewOwnsDisplayActionsAndNavigateOwnsSessionAndPaneMovement() {
