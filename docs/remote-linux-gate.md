@@ -122,10 +122,13 @@ CI integration case `overlay-server-disconnected` always runs the disconnected s
 without `AGTERM_WIN_GATE_WSL`. For the full ctl overlay gate on a catalog row, set `AGTERM_WIN_GATE_WSL` to a
 distribution that starts agterm-server and connects (the case seeds it in `remote.properties` as
 `wsl.exe -d <name> -e`), then run
-`agterm-windows/tests/integration/run.ps1` on a staged build:
+`agterm-windows/tests/integration/run.ps1` on a staged build, or start `windows-gate.yml`, which does this on a fresh
+distribution of its own (`docs/windows-gate-runner.md`):
 
 ```powershell
-$env:AGTERM_WIN_GATE_WSL = 'Ubuntu'   # or another listed distribution with agterm-server installed
+# a distribution of the gate's own (gate-wsl.ps1 -New agterm-gate-local -App <stage>), never one you work in: the run
+# presents its server, and a second viewer of that server is granted mirror only
+$env:AGTERM_WIN_GATE_WSL = 'agterm-gate-local'
 .\tests\integration\run.ps1 -App (Resolve-Path .\scripts\..\installer\Output\agterm-win) -Results $env:TEMP\agw-int
 ```
 

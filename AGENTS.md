@@ -24,7 +24,7 @@ macOS (upstream) and Linux ([agterm-linux](https://github.com/melonamin/agterm-l
 Hosted CI skips the WSL and Docker cases; `windows-gate.yml` runs them by hand on a self-hosted box (`docs/windows-gate-runner.md`).
 
 - A PR touching WSL, the agterm-server install or start (`WSLServerEnsure`, `RemoteHost`, `NativeShell`'s server path),
-  `remote.properties` remotes, Docker remotes, server overlays or presentation, or `tests/integration/{wsl,docker-remote,overlay}*`
+  `remote.properties` remotes, Docker remotes, server panes, server overlays or presentation, or `tests/integration/{wsl,docker-remote,overlay}*`
   gets a comment asking for a windows-gate run: the build to test (that PR's `windows.yml` run id), the `cases` wildcards, and
   whether `server-gate` is needed. An issue fixed by such a change gets the same request before it is closed.
 - Ask once per PR, and again only after a later push changes those paths. Name the gate run's result in the PR when it is in.

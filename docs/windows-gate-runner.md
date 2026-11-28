@@ -22,7 +22,7 @@ Actions ▸ windows-gate ▸ Run workflow, or `gh workflow run windows-gate.yml 
 
 - `build`: a release tag (`v0.44.1.11`), whose `*-x64-portable.zip` asset is tested, or a `windows.yml` run id or URL,
   whose `ci-portable-x64` artifact is tested. A PR's own `windows.yml` run tests that PR.
-- `cases`: `run.ps1 -Case` wildcards, comma-separated, `*` by default; for example `wsl-*,docker-remote`.
+- `cases`: `run.ps1 -Case` wildcards, comma-separated, `*` by default; for example `wsl-*,docker-remote,server-panes`.
 - `server-gate`: also run `wsl-server-gate.ps1`, on by default.
 
 The test scripts are checked out at the build's own commit, so they match the build. The run's summary names the build.
@@ -64,4 +64,4 @@ Results of both are uploaded as `gate-results`.
 ## When a run is needed
 
 A PR or issue whose change reaches WSL, the agterm-server install or start, `remote.properties` remotes, Docker remotes,
-or server overlays and presentation needs a windows-gate run before merge or close; `AGENTS.md` says who asks for it.
+server panes, or server overlays and presentation needs a windows-gate run before merge or close; `AGENTS.md` says who asks for it.
