@@ -1,9 +1,9 @@
-# Optional integration gate for a real WSL distribution with agterm-server. CI does not run this; it uses the
-# agterm-test-absent cases in wsl-cases.ps1 instead.
+# Optional integration gate for a real WSL distribution with agterm-server. GitHub-hosted CI does not run this; it uses the
+# agterm-test-absent cases in wsl-cases.ps1 instead; gate.ps1 runs it (docs/windows-gate.md).
 param(
     [Parameter(Mandatory)][string]$App,
     [Parameter(Mandatory)][string]$Results,
-    [string]$Distribution = "Ubuntu",
+    [Parameter(Mandatory)][string]$Distribution,
     [ValidateRange(30, 600)][int]$CaseTimeoutSeconds = 180
 )
 $ErrorActionPreference = "Stop"

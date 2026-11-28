@@ -146,8 +146,9 @@ function Get-ListedDistribution {
 }
 
 # a first launch with a start-at-launch choice and no remote.properties writes the file before the start resolves the
-# name; on a machine with a distribution the start then finds it defined
-$atLaunchUnseeded = Get-ListedDistribution
+# name; on a machine with a distribution the start then finds it defined. The gate names its own distribution, so the
+# case never starts a server in one someone works in
+$atLaunchUnseeded = if ($env:AGTERM_WIN_GATE_WSL) { $env:AGTERM_WIN_GATE_WSL } else { Get-ListedDistribution }
 if (-not $atLaunchUnseeded) { $atLaunchUnseeded = $absent }
 $shellPreparations["wsl-at-launch-unseeded"] = {
     param($state) Set-Content (Join-Path $state "native.json") "{`"serverLaunch`": {`"$atLaunchUnseeded`": `"atLaunch`"}}"

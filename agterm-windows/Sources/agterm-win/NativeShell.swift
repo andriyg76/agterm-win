@@ -517,7 +517,7 @@ final class NativeShell {
                 return
             }
             if forceInstall {
-                finish(Self.runServerInstall(host: host, label: label))
+                finish(Self.installWithRetries(host: host, label: label))
                 return
             }
             let inspection = host.inspect()
@@ -528,21 +528,64 @@ final class NativeShell {
             case .connect:
                 finish(nil)
             case .startServiceThenConnect:
+                Self.awaitUserManager(host, label: label)
                 Self.dispatchNotice(host.name, "\(label): starting agterm-server…", .progress)
                 let start = host.startService()
                 if start.ok {
                     finish(nil)
                 } else {
                     log("remote start service failed: \(start.message)")
-                    finish(Self.runServerInstall(host: host, label: label,
-                                                 preamble: "Service did not start (\(start.message)). Installing…"))
+                    finish(Self.installWithRetries(host: host, label: label,
+                                                   preamble: "Service did not start (\(start.message)). Installing…"))
                 }
             case .install(let reason):
-                finish(Self.runServerInstall(host: host, label: label, preamble: reason))
+                finish(Self.installWithRetries(host: host, label: label, preamble: reason))
             case .refuse(let reason):
                 finish(NoticeBar.Message(source: host.name, text: "\(label): \(reason)", severity: .error, actions: [.retry, .openLog]))
             }
         }
+    }
+
+    /// awaitUserManager waits for a just-booted distribution's systemd user manager, showing the wait, and gives up quietly
+    /// when it stays down or hides its bus: the start or install after it then reports that.
+    @discardableResult
+    nonisolated private static func awaitUserManager(_ host: RemoteHost, label: String) -> UserManagerState {
+        let started = Date()
+        var hiddenSince: Date?
+        while true {
+            let state = host.userManager()
+            let now = Date()
+            if state == .busHidden { hiddenSince = hiddenSince ?? now } else { hiddenSince = nil }
+            let elapsed = now.timeIntervalSince(started)
+            guard WSLServerEnsure.waitsForUserManager(state, elapsed: elapsed, hiddenFor: hiddenSince.map { now.timeIntervalSince($0) } ?? 0) else {
+                log("remote \(host.name): systemd user manager \(state) after \(Int(elapsed)) s")
+                return state
+            }
+            dispatchNotice(host.name, WSLServerEnsure.waitingText(label: label, seconds: Int(elapsed)), .progress)
+            Thread.sleep(forTimeInterval: 1)
+        }
+    }
+
+    /// installWithRetries runs the install after the user manager answers, and again while it fails in a way another
+    /// attempt can fix, up to `WSLServerEnsure.installAttempts`. A hidden bus is not one: an install.sh predating exit 4
+    /// fails there with 1, so the failure is reported as exit 4, whose notice offers Restart WSL.
+    nonisolated private static func installWithRetries(host: RemoteHost, label: String, preamble: String? = nil) -> NoticeBar.Message? {
+        var notice: NoticeBar.Message?
+        for attempt in 1...WSLServerEnsure.installAttempts {
+            let manager = awaitUserManager(host, label: label)
+            notice = runServerInstall(host: host, label: label, preamble: attempt == 1 ? preamble : WSLServerEnsure.retryText(attempt: attempt))
+            guard WSLServerEnsure.retriesInstall(notice, manager: manager) else { break }
+            // the v0.44.1 install.sh checks a started server on the wrong socket and exits 1
+            if case .ready = host.inspect().health {
+                log("server install on \(host.name): exited with a failure, but agterm-server answers")
+                return nil
+            }
+            if manager == .busHidden {
+                return WSLServerEnsure.installNotice(exitCode: 4, error: nil, label: label, source: host.name)
+            }
+            log("server install on \(host.name): attempt \(attempt) failed")
+        }
+        return notice
     }
 
     /// runServerInstall runs `agtermctl server install <name>`, the one install, showing each line it prints in the notice
