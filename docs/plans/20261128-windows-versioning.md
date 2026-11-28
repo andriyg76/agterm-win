@@ -8,14 +8,15 @@ while every release stays locked to exactly one upstream agterm release.
 - `agterm-windows/AGTERM_VERSION` stays the upstream pin (`0.44.1`): agterm-server download, checksums, `--install-server`.
 - agterm-win is `major.minor.patch`: `major.minor` is the pinned upstream's (a line), `patch` is agterm-win's own counter.
   `0.44.x` is built on some agterm `0.44.y`; the two patch numbers are unrelated.
-- The next release is `0.44.2`: it continues from `v0.44.1.11` and sorts above it for winget, Chocolatey and Inno.
-- User-facing name: `agterm-win 0.44.2 (agterm 0.44.1)` in the release title, Inno `AppVerName` and About.
-- MSIX: `a.b.c` → `a.b.c.0`; no MSIX was published under the old `0.44.1xxx.0` mapping.
+- The next release is `0.44.1012`: a 4-part tag counts as its MSIX version (`v0.44.1.11` → `0.44.1011`), which is in the Store,
+  so no channel sees a downgrade. Lines from `0.45` start at `.0`.
+- User-facing name: `agterm-win 0.44.1012 (agterm 0.44.1)` in the release title, Inno `AppVerName` and About.
+- MSIX: `a.b.c` → `a.b.c.0`.
 
 ## Release kind (workflow input `kind`)
 
 The base is the newest release tag reachable from the dispatched commit (`git describe --tags --abbrev=0 --match 'v*'`);
-a 4-part base tag counts as its first three parts (`v0.44.1.11` → `0.44.1`).
+a 4-part base tag counts as its MSIX version (`v0.44.1.11` → `0.44.1011`).
 
 | `kind` | Branch | Next version | Guard |
 |---|---|---|---|
@@ -50,4 +51,4 @@ a 4-part base tag counts as its first three parts (`v0.44.1.11` → `0.44.1`).
 - [x] workflow + scripts
 - [x] About / installer naming
 - [x] docs
-- [ ] first release `v0.44.2` from `windows-port` (`kind: incremental`)
+- [ ] first release `v0.44.1012` from `windows-port` (`kind: incremental`)

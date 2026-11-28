@@ -7,15 +7,16 @@ arm64 installers natively on `windows-2022` and `windows-11-arm` with `scripts\r
 host's architecture; its header lists the tools and the signing variables.
 
 **Versions** are `<major>.<minor>.<patch>`: `major.minor` is the pinned upstream's (`AGTERM_VERSION`), `patch` counts
-agterm-win releases on that line, so `0.44.2` is built on agterm `0.44.1` and the two patches are unrelated.
-The release title and About show both, as `agterm-win 0.44.2 (agterm 0.44.1)`. The workflow's `kind` picks the next one
+agterm-win releases on that line, so `0.44.1012` is built on agterm `0.44.1` and the two patches are unrelated.
+The 0.44 line continues from the Store's `0.44.1011.0` (the last 4-part tag, `v0.44.1.11`); later lines start at `.0`.
+The release title and About show both, as `agterm-win 0.44.1012 (agterm 0.44.1)`. The workflow's `kind` picks the next one
 (`scripts\release-version.ps1` enforces it):
 
 | `kind` | Branch | Next | When |
 |---|---|---|---|
-| `incremental` | `windows-port` | `0.44.2` → `0.44.3` | any release on the same upstream minor, an upstream patch bump included |
+| `incremental` | `windows-port` | `0.44.1012` → `0.44.1013` | any release on the same upstream minor, an upstream patch bump included |
 | `master` | `windows-port` | `0.45.0` | `AGTERM_VERSION` moved to a new upstream minor; also creates `version/v0.44` at the last `0.44` tag |
-| `hotfix` | `version/v0.44` | `0.44.7` → `0.44.8` | a fix for a line `windows-port` has left; published without GitHub's Latest |
+| `hotfix` | `version/v0.44` | `0.44.1020` → `0.44.1021` | a fix for a line `windows-port` has left; published without GitHub's Latest |
 
 Any other branch or kind/branch pairing fails before the build, and `windows-port` refuses a line once its
 `version/v*` branch exists. MSIX takes the version with a `.0` fourth part, as the Store requires.

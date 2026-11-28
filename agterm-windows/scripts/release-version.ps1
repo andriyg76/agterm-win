@@ -31,10 +31,12 @@ if ($Version) {
 if ($Kind -eq "hotfix" -and -not $maintenance) { throw "hotfix runs from version/v<major>.<minor>, not $Branch" }
 if ($Kind -ne "hotfix" -and $maintenance) { throw "$Kind runs from windows-port, not $Branch; $Branch takes hotfix" }
 
-# a 4-part tag from before this scheme (v0.44.1.11) counts as its first three parts
+# a 4-part tag from before this scheme (v0.44.1.11) counts as the MSIX version it shipped as (0.44.1011),
+# so the Store's package version never goes back
 $base = git -C $root describe --tags --abbrev=0 --match "v[0-9]*" HEAD 2>$null
-if ($base -notmatch '^v(\d+\.\d+)\.(\d+)(\.\d+)?$') { throw "no release tag reachable from HEAD (got '$base')" }
-$baseLine, $basePatch = $Matches[1], [int]$Matches[2]
+if ($base -notmatch '^v(\d+\.\d+)\.(\d+)(?:\.(\d+))?$') { throw "no release tag reachable from HEAD (got '$base')" }
+$baseLine = $Matches[1]
+$basePatch = if ($Matches[3]) { 1000 * [int]$Matches[2] + [int]$Matches[3] } else { [int]$Matches[2] }
 
 $next = switch ($Kind) {
     "master" {

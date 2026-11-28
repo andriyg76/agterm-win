@@ -1,7 +1,7 @@
 # Microsoft Store listing (en-US)
 
-Paste into Partner Center ▸ Store listings ▸ English. This listing covers agterm-win 0.44.2 (MSIX version
-0.44.2.0) and later.
+Paste into Partner Center ▸ Store listings ▸ English. This listing covers agterm-win 0.44.1012 (MSIX version
+0.44.1012.0) and later.
 
 The Store title and the package's `DisplayName` are still the reserved name `agterm`. To show `agterm-win`, reserve
 that name under Product management ▸ Product identity first, then change `DisplayName` in both
