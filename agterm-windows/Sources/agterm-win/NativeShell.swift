@@ -1444,7 +1444,7 @@ final class NativeShell {
 
     func windowCommand(_ command: NativeMenu.Command) {
         log("native shell: \(command)")
-        if command == .attentionPalette || command == .editFlaggedSessions, pickPalette != nil { return }
+        if [.attentionPalette, .editFlaggedSessions, .editFocusedWorkspaces].contains(command), pickPalette != nil { return }
         if dashboard != nil, ![.dashboard, .quickTerminal, .settings, .selectTheme, .about, .quit, .editKeymap, .editProfiles, .reloadKeymap, .commandPalette, .toggleSidebar,
               .toggleFullscreen].contains(command) {
             closeDashboard()
@@ -1475,6 +1475,7 @@ final class NativeShell {
         case .sessionPalette: openPalette(.sessions)
         case .commandPalette: openPalette(.commands)
         case .editFlaggedSessions: openPalette(.flagEditor)
+        case .editFocusedWorkspaces: openPalette(.focusEditor)
         case .attentionPalette:
             if paletteMode == .attention { closePalette(refocus: true) } else { openPalette(.attention) }
         case .quit: if confirmQuit() { DestroyWindow(window) }
@@ -1536,8 +1537,8 @@ final class NativeShell {
             }
             structure(.workspaceDelete, target: workspace)
         case .focusWorkspace:
-            guard let workspace else { return }
-            structure(.workspaceFocus, target: workspace)
+            guard let target = focusTarget(workspace, session: session, destination: destination) else { return }
+            structure(.workspaceFocus, target: target)
         case .toggleWorkspaceFilter: structure(.workspaceFilter, target: nil, args)
         case .expandWorkspaces: structure(.sidebarExpand, target: nil, args)
         case .collapseWorkspaces: structure(.sidebarCollapse, target: nil, args)
@@ -1554,6 +1555,11 @@ final class NativeShell {
                               UINT(MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)) == IDOK else { return }
             args.mode = "clear"
             structure(.sessionFlag, target: nil, args)
+        case .addToFocus:
+            guard let target = focusTarget(workspace, session: session, destination: destination) else { return }
+            setFocus(target, member: !storeOf(destination).focusedWorkspaceIDs.contains(target))
+        case .clearFocus:
+            storeOf(destination).focusedWorkspaceIDs.forEach { setFocus($0, member: false) }
         case .flagAllSessions:
             guard let workspace, namedWorkspace(workspace) != nil else { return }
             args.mode = storeOf(destination).workspaceAllFlagged(workspace) ? "off" : "on"
@@ -1582,6 +1588,9 @@ final class NativeShell {
         let stored = session.flatMap(store.session(withID:))
         var state = NativeMenu.Structure(workspace: workspace != nil, focused: workspace.map(store.focusedWorkspaceIDs.contains) ?? false,
                                          flagged: stored?.flagged, flaggedView: store.sidebarMode == .flagged, filtered: store.focusEnabled)
+        if workspace == nil, stored != nil, let root = store.rootWorkspace?.id {
+            state.rootFocus = store.focusedWorkspaceIDs.contains(root)
+        }
         if let stored {
             state.canConvert = stored.parentID == nil && store.workspace(forSession: stored.id).map { $0.sessions.first?.id != stored.id } == true
         }
@@ -2374,6 +2383,18 @@ final class NativeShell {
 
     /// structure runs a sidebar, menu or key action through the control API's structure path, so each one does
     /// exactly what its `agtermctl` command does, in the window that holds its target.
+    /// focusTarget is what the focus items act on: the row's workspace, or the top-level sessions for a top-level session.
+    private func focusTarget(_ workspace: Foundation.UUID?, session: Foundation.UUID?, destination: SidebarDestination) -> Foundation.UUID? {
+        workspace ?? (session == nil ? nil : storeOf(destination).rootWorkspace?.id)
+    }
+
+    /// setFocus adds a workspace to its tree's focused set or removes it, leaving the others and the filter alone.
+    private func setFocus(_ workspace: Foundation.UUID, member: Bool, done: (() -> Void)? = nil) {
+        var args = ControlArgs()
+        args.mode = member ? ControlWorkspaceFocusMode.add.rawValue : ControlWorkspaceFocusMode.off.rawValue
+        structure(.workspaceFocus, target: workspace, args) { _ in done?() }
+    }
+
     func structure(_ cmd: agtermCore.Command, target: Foundation.UUID?, _ args: ControlArgs = ControlArgs(),
                    done: ((Foundation.UUID?) -> Void)? = nil) {
         let request = ControlRequest(cmd: cmd, target: target?.uuidString, args: args)
@@ -2764,6 +2785,8 @@ final class NativeShell {
         case .flagEditor:
             return Palette.flagRows([(nil, localStore, !localStore.marksBlocked)]
                 + servers.map { ($0.label, $0.remote.store, $0.remote.connected && !$0.remote.store.marksBlocked) })
+        case .focusEditor:
+            return Palette.focusRows([(nil, localStore, true)] + servers.map { ($0.label, $0.remote.store, $0.remote.connected) })
         case .commands:
             return Palette.commandRows(windowEntries + NativeMenu.sessionTints(enabled: selected != nil && !activeStore.marksBlocked))
         case .attention:
@@ -2854,9 +2877,16 @@ final class NativeShell {
             }
             return
         }
+        if case .focus(let id) = row.target {
+            let member = ([localStore] + servers.map(\.remote.store)).contains { $0.focusedWorkspaceIDs.contains(id) }
+            setFocus(id, member: !member) { [weak self] in
+                if self?.paletteMode == .focusEditor { self?.paletteQueryChanged(keeping: index) }
+            }
+            return
+        }
         closePalette(refocus: false)
         switch row.target {
-        case .flag: break
+        case .flag, .focus: break
         case .session(let id):
             let indicator = mode == .attention ? local(id)?.activity.indicator : nil
             select(id)

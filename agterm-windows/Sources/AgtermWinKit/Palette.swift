@@ -5,7 +5,7 @@ import agtermCore
 /// the ☰ menu's commands. Rows match their title and subtitle; an empty query keeps the source order.
 public enum Palette {
     public enum Mode: Equatable, Sendable {
-        case sessions, commands, attention, flagEditor
+        case sessions, commands, attention, flagEditor, focusEditor
 
         public var cue: String {
             switch self {
@@ -13,6 +13,7 @@ public enum Palette {
             case .commands: "Run a command"
             case .attention: "Go to attention"
             case .flagEditor: "Flag or unflag sessions"
+            case .focusEditor: "Focus or unfocus workspaces"
             }
         }
     }
@@ -21,6 +22,8 @@ public enum Palette {
         case session(UUID)
         /// flag toggles a session's flag in Edit Flagged Sessions, which stays open.
         case flag(UUID)
+        /// focus adds a workspace to the focused set or removes it, in Edit Focused Workspaces, which stays open.
+        case focus(UUID)
         case pick(NativeMenu.Pick)
         /// pickChoice is one item of a pick, by its id.
         case pickChoice(String)
@@ -142,6 +145,20 @@ public enum Palette {
 
     /// commandRows is the ☰ menu flattened A→Z: a submenu's entries titled `submenu › entry`, disabled entries kept
     /// so a search still finds them, and the command palette's own entry left out.
+    /// focusRows are Edit Focused Workspaces' rows, the Mac's focus editor: every workspace in sidebar order with its
+    /// session count, ✓ while a member of the focused set.
+    @MainActor
+    public static func focusRows(_ groups: [FlagGroup]) -> [Row] {
+        groups.flatMap { group in
+            group.store.displayWorkspaces.map { workspace in
+                let count = workspace.sessions.count
+                let subtitle = [group.label, count == 1 ? "1 session" : "\(count) sessions"].compactMap { $0 }.joined(separator: " · ")
+                return Row(title: workspace.label, subtitle: subtitle, detail: group.store.focusedWorkspaceIDs.contains(workspace.id) ? "\u{2713}" : "",
+                           enabled: group.editable, target: .focus(workspace.id))
+            }
+        }
+    }
+
     public static func commandRows(_ entries: [NativeMenu.Entry]) -> [Row] {
         func flatten(_ entries: [NativeMenu.Entry], under parent: String?) -> [Row] {
             entries.flatMap { entry -> [Row] in

@@ -164,8 +164,8 @@ extern "C" void nt_sidebar_button_paint(intptr_t notification, uint32_t dpi, uin
     const bool pressed = (item.itemState & ODS_SELECTED) != 0;
     DWORD_PTR hovered = 0;
     GetWindowSubclass(item.hwndItem, sidebarButtonProc, 1, &hovered);
-    const auto color = !disabled && (pressed || hovered) ? nt_chrome_sb_highlight()
-                                                       : checked ? nt_chrome_sb_selected() : nt_chrome_sb_bg();
+    // a checked button keeps its glyph readable: the accent fill once hid a glyph drawn in the same light text color
+    const auto color = (!disabled && (pressed || hovered)) || checked ? nt_chrome_sb_highlight() : nt_chrome_sb_bg();
     HBRUSH brush = CreateSolidBrush(color);
     FillRect(item.hDC, &item.rcItem, brush);
     DeleteObject(brush);
@@ -174,7 +174,7 @@ extern "C" void nt_sidebar_button_paint(intptr_t notification, uint32_t dpi, uin
     int saved = SaveDC(item.hDC);
     SelectObject(item.hDC, fonts.icons);
     SetBkMode(item.hDC, TRANSPARENT);
-    SetTextColor(item.hDC, disabled ? nt_chrome_sb_dim() : nt_chrome_sb_text());
+    SetTextColor(item.hDC, disabled ? nt_chrome_sb_dim() : checked ? nt_chrome_sb_selected() : nt_chrome_sb_text());
     RECT rect = item.rcItem;
     const wchar_t character = static_cast<wchar_t>(glyph);
     DrawTextW(item.hDC, &character, 1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);

@@ -85,7 +85,36 @@ struct NativeMenuTests {
                                                                                       .newCompanion, .convertCompanion, .selectTheme, .about, .toggleSidebar, .editProfiles,
                                                                                       .copyName, .revealSession, .expandWorkspaces, .collapseWorkspaces,
                                                                                       .toggleWorkspaceCollapse, .clearFlagged, .editFlaggedSessions,
-                                                                                      .flagAllSessions])
+                                                                                      .flagAllSessions, .addToFocus, .clearFocus, .editFocusedWorkspaces])
+    }
+
+    @Test func viewAndTheWorkspaceRowEditTheFocusedSet() {
+        var structure = NativeMenu.Structure(workspace: true)
+        structure.canFilter = false
+        let pick = { (entries: [NativeMenu.Entry], command: NativeMenu.Command) in entries.first { $0.pick == .command(command) } }
+        var view = NativeMenu.view(NativeMenu.View(), structure: structure)
+        #expect(pick(view, .addToFocus)?.enabled == true && pick(view, .clearFocus)?.enabled == false)
+        #expect(pick(view, .editFocusedWorkspaces)?.title == "Edit Focused Workspaces…")
+        #expect(pick(NativeMenu.structure(structure), .addToFocus)?.title == "Add to Focus")
+        structure.focused = true
+        structure.canFilter = true
+        view = NativeMenu.view(NativeMenu.View(), structure: structure)
+        #expect(pick(view, .addToFocus)?.enabled == false && pick(view, .clearFocus)?.enabled == true)
+        #expect(pick(NativeMenu.structure(structure), .addToFocus)?.title == "Remove from Focus")
+    }
+
+    @Test func aTopLevelSessionFocusesTheTopLevelSessions() {
+        var structure = NativeMenu.Structure(workspace: false, flagged: false)
+        structure.rootFocus = false
+        let titles = { (entries: [NativeMenu.Entry]) in entries.filter { [.command(.focusWorkspace), .command(.addToFocus)].contains($0.pick) }.map(\.title) }
+        #expect(titles(NativeMenu.view(NativeMenu.View(), structure: structure)) == ["Focus Top-Level Sessions", "Add Top-Level Sessions to Focus"])
+        var row = structure
+        row.workspace = nil
+        #expect(titles(NativeMenu.structure(row)) == ["Focus Top-Level Sessions", "Add Top-Level Sessions to Focus"])
+        row.rootFocus = true
+        #expect(titles(NativeMenu.structure(row)) == ["Focus Top-Level Sessions", "Remove Top-Level Sessions from Focus"])
+        structure.rootFocus = true
+        #expect(NativeMenu.view(NativeMenu.View(), structure: structure).first { $0.pick == .command(.addToFocus) }?.enabled == false)
     }
 
     @Test func viewEditsAndClearsTheFlaggedSetAndAWorkspaceFlagsAll() {
